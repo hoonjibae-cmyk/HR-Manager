@@ -6,18 +6,32 @@ import { fontFaceCss } from "./fonts";
 function resolveChromium(): string | undefined {
   const env = process.env.CHROMIUM_PATH;
   if (env && existsSync(env)) return env;
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  const pf = process.env["ProgramFiles"] || "C:/Program Files";
+  const pf86 = process.env["ProgramFiles(x86)"] || "C:/Program Files (x86)";
+  const local = process.env.LOCALAPPDATA || (home ? `${home}/AppData/Local` : "");
   const candidates = [
     // 이 환경(사전 설치)
     ...expandGlob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"),
     ...expandGlob("/opt/pw-browsers/chromium-*/chrome-linux/headless_shell"),
+    // npx playwright install chromium 로 설치된 로컬 캐시 (mac/linux/windows)
+    ...expandGlob(`${home}/.cache/ms-playwright/chromium-*/chrome-linux/chrome`),
+    ...expandGlob(`${home}/Library/Caches/ms-playwright/chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium`),
+    ...expandGlob(`${local}/ms-playwright/chromium-*/chrome-win/chrome.exe`),
     // 일반적인 리눅스 경로
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
     "/usr/bin/google-chrome",
     "/usr/bin/google-chrome-stable",
-    // macOS
+    // macOS (설치된 Chrome / Edge)
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    // Windows (설치된 Chrome / Edge)
+    `${pf}/Google/Chrome/Application/chrome.exe`,
+    `${pf86}/Google/Chrome/Application/chrome.exe`,
+    `${pf86}/Microsoft/Edge/Application/msedge.exe`,
+    `${pf}/Microsoft/Edge/Application/msedge.exe`,
   ];
   for (const c of candidates) if (c && existsSync(c)) return c;
   return undefined; // playwright 기본값 사용 시도
@@ -58,15 +72,25 @@ let browserPromise: Promise<Browser> | null = null;
 async function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
     const executablePath = resolveChromium();
-    browserPromise = chromium.launch({
-      executablePath,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--font-render-hinting=none",
-      ],
-    });
+    browserPromise = chromium
+      .launch({
+        executablePath,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--font-render-hinting=none",
+        ],
+      })
+      .catch((e) => {
+        browserPromise = null; // 다음 요청에서 재시도 가능
+        throw new Error(
+          "PDF 생성을 위한 Chromium 브라우저를 찾을 수 없습니다. " +
+            "터미널에서 `npx playwright install chromium` 를 실행하거나, " +
+            "PC에 설치된 Chrome/Edge 경로를 .env 의 CHROMIUM_PATH 에 지정하세요. " +
+            `(원인: ${e.message})`
+        );
+      });
   }
   return browserPromise;
 }
