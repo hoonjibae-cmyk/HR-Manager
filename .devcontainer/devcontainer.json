@@ -3,6 +3,7 @@
   "image": "mcr.microsoft.com/devcontainers/javascript-node:20-bookworm",
   "features": {},
   "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postStartCommand": "sudo service postgresql start || true",
   "forwardPorts": [3000],
   "portsAttributes": {
     "3000": { "label": "유쌤에듀 HR", "onAutoForward": "openPreview" }

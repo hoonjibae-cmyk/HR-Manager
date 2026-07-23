@@ -1,8 +1,14 @@
-import { chromium, type Browser } from "playwright-core";
-import { existsSync } from "fs";
+import puppeteer, { type Browser } from "puppeteer-core";
+import { existsSync, readdirSync } from "fs";
 import { fontFaceCss } from "./fonts";
 
-// Chromium 실행 파일 자동 탐색
+// 서버리스(Vercel/AWS Lambda) 환경 여부
+const onServerless =
+  !!process.env.VERCEL ||
+  !!process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  !!process.env.AWS_EXECUTION_ENV;
+
+// 설치된 Chrome/Chromium/Edge 실행 파일 자동 탐색 (로컬/자체서버용)
 function resolveChromium(): string | undefined {
   const env = process.env.CHROMIUM_PATH;
   if (env && existsSync(env)) return env;
@@ -11,34 +17,33 @@ function resolveChromium(): string | undefined {
   const pf86 = process.env["ProgramFiles(x86)"] || "C:/Program Files (x86)";
   const local = process.env.LOCALAPPDATA || (home ? `${home}/AppData/Local` : "");
   const candidates = [
-    // 이 환경(사전 설치)
+    // 사전 설치(개발 컨테이너) / playwright 캐시
     ...expandGlob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"),
-    ...expandGlob("/opt/pw-browsers/chromium-*/chrome-linux/headless_shell"),
-    // npx playwright install chromium 로 설치된 로컬 캐시 (mac/linux/windows)
     ...expandGlob(`${home}/.cache/ms-playwright/chromium-*/chrome-linux/chrome`),
-    ...expandGlob(`${home}/Library/Caches/ms-playwright/chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium`),
+    ...expandGlob(
+      `${home}/Library/Caches/ms-playwright/chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium`
+    ),
     ...expandGlob(`${local}/ms-playwright/chromium-*/chrome-win/chrome.exe`),
-    // 일반적인 리눅스 경로
+    // 리눅스 패키지
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
     "/usr/bin/google-chrome",
     "/usr/bin/google-chrome-stable",
-    // macOS (설치된 Chrome / Edge)
+    // macOS
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-    // Windows (설치된 Chrome / Edge)
+    // Windows
     `${pf}/Google/Chrome/Application/chrome.exe`,
     `${pf86}/Google/Chrome/Application/chrome.exe`,
     `${pf86}/Microsoft/Edge/Application/msedge.exe`,
     `${pf}/Microsoft/Edge/Application/msedge.exe`,
   ];
   for (const c of candidates) if (c && existsSync(c)) return c;
-  return undefined; // playwright 기본값 사용 시도
+  return undefined;
 }
 
 function expandGlob(pattern: string): string[] {
-  // 간단한 * 글롭 (동기)
   try {
     const parts = pattern.split("/");
     const starIdx = parts.findIndex((p) => p.includes("*"));
@@ -47,7 +52,6 @@ function expandGlob(pattern: string): string[] {
     const seg = parts[starIdx];
     const rest = parts.slice(starIdx + 1).join("/");
     const re = new RegExp("^" + seg.replace(/[.]/g, "\\.").replace(/\*/g, ".*") + "$");
-    const { readdirSync } = require("fs") as typeof import("fs");
     let entries: string[] = [];
     try {
       entries = readdirSync(base);
@@ -61,9 +65,56 @@ function expandGlob(pattern: string): string[] {
         if (existsSync(full)) out.push(full);
       }
     }
-    return out.sort().reverse(); // 최신 버전 우선
+    return out.sort().reverse();
   } catch {
     return [];
+  }
+}
+
+interface LaunchOpts {
+  executablePath: string;
+  args: string[];
+  headless: boolean | "shell";
+  defaultViewport?: any;
+}
+
+async function launchOptions(): Promise<LaunchOpts> {
+  const baseArgs = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--font-render-hinting=none",
+  ];
+  // 1) 서버리스: @sparticuz/chromium 경량 바이너리
+  if (onServerless) {
+    const chromium = (await import("@sparticuz/chromium")).default;
+    return {
+      executablePath: await chromium.executablePath(),
+      args: [...chromium.args, "--font-render-hinting=none"],
+      headless: chromium.headless,
+      defaultViewport: chromium.defaultViewport,
+    };
+  }
+  // 2) 로컬/자체서버: 설치된 Chrome/Edge/Chromium
+  const local = resolveChromium();
+  if (local) {
+    return { executablePath: local, args: baseArgs, headless: true };
+  }
+  // 3) 최후 폴백: 크롬이 없는 리눅스에서도 @sparticuz/chromium 사용
+  try {
+    const chromium = (await import("@sparticuz/chromium")).default;
+    return {
+      executablePath: await chromium.executablePath(),
+      args: [...chromium.args, "--font-render-hinting=none"],
+      headless: chromium.headless,
+      defaultViewport: chromium.defaultViewport,
+    };
+  } catch {
+    throw new Error(
+      "PDF 생성을 위한 Chromium 브라우저를 찾을 수 없습니다. " +
+        "PC에 Chrome/Edge를 설치하거나, 리눅스는 `sudo apt-get install -y chromium` 후 다시 시도하세요. " +
+        "(또는 .env 의 CHROMIUM_PATH 로 실행파일 경로 지정)"
+    );
   }
 }
 
@@ -71,25 +122,18 @@ let browserPromise: Promise<Browser> | null = null;
 
 async function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
-    const executablePath = resolveChromium();
-    browserPromise = chromium
-      .launch({
-        executablePath,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--font-render-hinting=none",
-        ],
-      })
+    browserPromise = launchOptions()
+      .then((opts) =>
+        puppeteer.launch({
+          executablePath: opts.executablePath,
+          args: opts.args,
+          headless: opts.headless as any,
+          defaultViewport: opts.defaultViewport ?? { width: 1200, height: 1600 },
+        })
+      )
       .catch((e) => {
-        browserPromise = null; // 다음 요청에서 재시도 가능
-        throw new Error(
-          "PDF 생성을 위한 Chromium 브라우저를 찾을 수 없습니다. " +
-            "터미널에서 `npx playwright install chromium` 를 실행하거나, " +
-            "PC에 설치된 Chrome/Edge 경로를 .env 의 CHROMIUM_PATH 에 지정하세요. " +
-            `(원인: ${e.message})`
-        );
+        browserPromise = null;
+        throw e;
       });
   }
   return browserPromise;
@@ -98,26 +142,20 @@ async function getBrowser(): Promise<Browser> {
 export interface PdfOptions {
   landscape?: boolean;
   marginMm?: number;
-  headerFooter?: boolean;
 }
 
-/**
- * 완성된 HTML(본문)을 A4 PDF(Buffer)로 렌더링.
- * 한글 폰트는 자동 임베드된다.
- */
-export async function htmlToPdf(
-  bodyHtml: string,
-  opts: PdfOptions = {}
-): Promise<Buffer> {
+/** 완성된 HTML(본문)을 A4 PDF(Buffer)로 렌더링. 한글 폰트 자동 임베드. */
+export async function htmlToPdf(bodyHtml: string, opts: PdfOptions = {}): Promise<Buffer> {
   const margin = opts.marginMm ?? 14;
   const html = wrapHtml(bodyHtml);
   const browser = await getBrowser();
-  const context = await browser.newContext();
-  const page = await context.newPage();
+  const page = await browser.newPage();
   try {
-    await page.setContent(html, { waitUntil: "networkidle" });
-    // 폰트 로드 보장
-    await page.evaluate(() => (document as any).fonts?.ready);
+    await page.setContent(html, { waitUntil: "load", timeout: 60000 });
+    await page.evaluate(async () => {
+      // @ts-ignore
+      if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    });
     const pdf = await page.pdf({
       format: "A4",
       landscape: !!opts.landscape,
@@ -129,10 +167,9 @@ export async function htmlToPdf(
         right: `${margin}mm`,
       },
     });
-    return pdf;
+    return Buffer.from(pdf);
   } finally {
     await page.close();
-    await context.close();
   }
 }
 

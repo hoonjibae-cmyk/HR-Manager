@@ -5,7 +5,8 @@
 **연차 관리 · 각종 증명서 발급 · 급여명세서 자동 이메일 발송 · 슬랙 연차 신청/승인**
 기능을 새로 제공합니다.
 
-> 기술스택: **Next.js 14 (App Router) · TypeScript · Prisma · SQLite · Playwright(PDF) · nodemailer · Slack API**
+> 기술스택: **Next.js 14 (App Router) · TypeScript · Prisma · PostgreSQL(Supabase) · puppeteer-core + @sparticuz/chromium(PDF) · nodemailer · Slack API**
+> 배포: **Vercel + Supabase** (서버리스, 상시 운영) — [docs/DEPLOY.md](docs/DEPLOY.md)
 
 ---
 
@@ -28,28 +29,34 @@
 
 ## 빠른 시작
 
+**상시 운영(권장)** 은 Supabase + Vercel 배포입니다 → **[docs/DEPLOY.md](docs/DEPLOY.md)** (20~30분).
+
+로컬 개발/체험:
+
 ```bash
 # 1) 의존성 설치
 npm install
 
 # 2) 환경변수 설정
 cp .env.example .env
-#   → .env 파일에서 ADMIN_PASSWORD, SESSION_SECRET 등을 변경하세요.
+#   → .env 에 PostgreSQL 접속정보(DATABASE_URL, DIRECT_URL)를 입력.
+#     Supabase 무료 DB를 쓰거나, 로컬 Postgres를 사용하세요(.env.example 예시 참고).
+#     ADMIN_PASSWORD, SESSION_SECRET 등도 변경 권장.
 
-# 3) 데이터베이스 생성 + 기초 데이터 시딩
-npm run db:push      # SQLite 스키마 생성
+# 3) 데이터베이스 스키마 생성 + 기초 데이터 시딩
+npm run db:push      # Postgres 스키마 생성
 npm run seed         # 회사정보·4대보험요율·간이세액표·공휴일·직원(데모) 시딩
 
 # 4) 개발 서버 실행
 npm run dev
 #   → http://localhost:3000  (기본 비밀번호: .env 의 ADMIN_PASSWORD)
-
-# 프로덕션 실행
-npm run build && npm start
 ```
 
-> **한국 시간대**: 예약 자동발송이 정확히 동작하려면 서버 시간대를 KST로 설정하세요.
-> `TZ=Asia/Seoul npm start`
+> **가장 쉬운 체험**: GitHub 저장소 → `Code ▸ Codespaces ▸ Create` 하면
+> PostgreSQL·Chromium·시딩까지 자동 준비됩니다(설치 불필요). 이후 `npm run dev`.
+
+> **자체 서버(VPS) 운영 시**: `TZ=Asia/Seoul ENABLE_SCHEDULER=true npm run build && npm start`
+> (내부 스케줄러가 예약 발송을 처리. Vercel 배포 시에는 Vercel Cron 사용 — DEPLOY.md 참고)
 
 ### 주요 스크립트
 

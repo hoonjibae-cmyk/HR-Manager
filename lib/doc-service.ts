@@ -19,19 +19,28 @@ import { join } from "path";
 import { existsSync } from "fs";
 
 const STORAGE = join(process.cwd(), "storage");
+const onServerless =
+  !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
 
-async function save(buf: Buffer, name: string): Promise<string> {
-  if (!existsSync(STORAGE)) await mkdir(STORAGE, { recursive: true });
-  const rel = `${Date.now()}_${name}`.replace(/[^\w.\-가-힣]/g, "_");
-  await writeFile(join(STORAGE, rel), buf);
-  return rel;
+// PDF 디스크 저장 (best-effort). 서버리스(읽기전용 FS)에서는 생략 — PDF는
+// 메모리 버퍼로 다운로드/이메일 첨부되므로 영구 저장이 필수는 아니다.
+async function save(buf: Buffer, name: string): Promise<string | null> {
+  if (onServerless) return null;
+  try {
+    if (!existsSync(STORAGE)) await mkdir(STORAGE, { recursive: true });
+    const rel = `${Date.now()}_${name}`.replace(/[^\w.\-가-힣]/g, "_");
+    await writeFile(join(STORAGE, rel), buf);
+    return rel;
+  } catch {
+    return null;
+  }
 }
 
 async function record(
   employeeId: number | null,
   type: string,
   title: string,
-  filePath: string,
+  filePath: string | null,
   meta: any = {}
 ) {
   await prisma.document.create({

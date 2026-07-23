@@ -3,7 +3,12 @@ const nextConfig = {
   reactStrictMode: true,
   // Prisma + playwright-core should stay external to the server bundle
   experimental: {
-    serverComponentsExternalPackages: ["@prisma/client", "prisma", "playwright-core"],
+    serverComponentsExternalPackages: [
+      "@prisma/client",
+      "prisma",
+      "puppeteer-core",
+      "@sparticuz/chromium",
+    ],
     instrumentationHook: true,
   },
 };

@@ -17,7 +17,8 @@ async function handle(req: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const force = searchParams.get("force") === "1";
-  const result = await runDueSchedules(new Date(), force);
+  // Vercel Cron 이 '시각'을 정하므로 인앱 시:분 검사는 건너뛴다.
+  const result = await runDueSchedules(new Date(), { force, ignoreClock: true });
   return NextResponse.json(result);
 }
 

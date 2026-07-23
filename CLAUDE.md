@@ -1,6 +1,7 @@
 # CLAUDE.md — 유쌤에듀 HR 프로그램 개발 가이드
 
-Next.js 14 (App Router) + TypeScript + Prisma(SQLite) HR 관리 웹앱.
+Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹앱.
+배포: Vercel + Supabase (서버리스). 로컬/Codespaces는 로컬 Postgres. 자세히는 docs/DEPLOY.md.
 
 ## 명령어
 - `npm run dev` — 개발 서버 (http://localhost:3000)
@@ -14,7 +15,8 @@ Next.js 14 (App Router) + TypeScript + Prisma(SQLite) HR 관리 웹앱.
 - **엔진(순수 함수, DB 무관, 테스트 있음)**: `lib/payroll.ts`(급여), `lib/leave.ts`(연차, 근로기준법 §60).
   UI/API 는 이 엔진을 호출만 한다. 계산 로직 변경은 여기서.
 - **문서→PDF**: `lib/documents.ts`(계약서/서약서/동의서), `lib/documents-pay.ts`(명세서/증명서) 가
-  HTML 을 만들고 `lib/pdf.ts` 가 Playwright/Chromium 으로 PDF 렌더. 한글폰트는 `assets/fonts/` 를 base64 임베드(`lib/fonts.ts`).
+  HTML 을 만들고 `lib/pdf.ts` 가 puppeteer-core 로 PDF 렌더(Vercel=@sparticuz/chromium, 로컬=설치된 Chrome/Edge).
+  한글폰트는 `assets/fonts/` 를 base64 임베드(`lib/fonts.ts`).
 - **DB 어댑터**: `lib/repo.ts` 가 Prisma 레코드 ↔ 엔진 입력/문서 입력 변환. 회사정보·요율·세액표 로딩.
 - **서비스**: `lib/payroll-service.ts`(월 급여 upsert), `lib/leave-service.ts`(승인/조정),
   `lib/doc-service.ts`(PDF 생성+저장+기록), `lib/email.ts`, `lib/scheduler.ts`, `lib/slack.ts`.
@@ -22,7 +24,9 @@ Next.js 14 (App Router) + TypeScript + Prisma(SQLite) HR 관리 웹앱.
 - **화면**: `app/(app)/**` — 서버컴포넌트가 데이터 로드, `components/*Client.tsx` 가 상호작용.
 
 ## 규칙/주의
-- SQLite 라 Prisma **enum 미지원** → 문자열 + `lib/constants.ts` 의 상수/라벨 사용.
+- 이식성을 위해 Prisma **enum 대신 문자열** + `lib/constants.ts` 의 상수/라벨 사용.
+- DB는 Postgres. 스키마 변경 시 `npx prisma db push`(DIRECT_URL 사용). 서버리스 런타임은 pgbouncer(DATABASE_URL).
+- 서버리스(Vercel)에서는 파일 저장 대신 PDF를 버퍼로 스트리밍/첨부. 예약발송은 Vercel Cron → `/api/cron`.
 - 금액은 정수(원). 공제는 10원 절사(`floor10`). 통상시급은 `(주소정+주휴)*4.345` 환산시간 기준.
 - 4대보험/세율은 하드코딩 금지 — `InsuranceRate`(설정 화면에서 수정). 세액표는 `TaxBracket`.
 - 계산식 변경 시 `lib/*.test.ts` 를 먼저 갱신하고 `npm test` 로 검증.

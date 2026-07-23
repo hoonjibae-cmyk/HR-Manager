@@ -2,12 +2,17 @@
 // SQLite + Prisma. (SQLite는 Prisma enum 미지원 → 문자열 + 주석으로 허용값 표기)
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // Vercel(서버리스, Amazon Linux/Node20) 런타임 바이너리 포함
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // 앱 런타임: Supabase 풀링(pgbouncer, 6543) 연결
+  url       = env("DATABASE_URL")
+  // 마이그레이션(db push): 다이렉트(5432) 연결
+  directUrl = env("DIRECT_URL")
 }
 
 /// 회사 기본정보 + 급여 기본설정 (단일 레코드, id=1)
