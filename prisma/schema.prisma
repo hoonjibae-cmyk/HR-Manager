@@ -1,0 +1,320 @@
+// 유쌤에듀 HR 관리 프로그램 — 데이터 모델
+// SQLite + Prisma. (SQLite는 Prisma enum 미지원 → 문자열 + 주석으로 허용값 표기)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// 회사 기본정보 + 급여 기본설정 (단일 레코드, id=1)
+model Company {
+  id           Int      @id @default(1)
+  name         String   @default("㈜유쌤에듀")
+  ceo          String   @default("유은정")
+  bizNo        String   @default("418-86-02289")
+  phone        String   @default("031-794-3306")
+  address      String   @default("경기도 하남시 미사강변대로 216 한강트윈프라자2 3층")
+  // 급여 기본설정
+  payday       Int      @default(7) // 익월 지급일 (매월 n일)
+  standardMonthlyHours Int  @default(209) // 월 소정근로 환산시간 (주40h 기준)
+  weeksPerMonth Float   @default(4.345)
+  minWage      Int      @default(10030) // 최저시급(2025) — 통상시급 하한 참고
+  mealAllowanceNonTax Int @default(200000) // 식대 비과세 한도(월)
+  updatedAt    DateTime @updatedAt
+}
+
+/// 4대보험 및 세율 (연도별 관리 가능, 기본 2025 요율)
+model InsuranceRate {
+  id                 Int    @id @default(autoincrement())
+  year               Int    @unique
+  // 근로자 부담분 요율 (소수, 예: 0.045 = 4.5%)
+  nationalPension    Float  @default(0.045)   // 국민연금 4.5%
+  employment         Float  @default(0.009)   // 고용보험 0.9%
+  health             Float  @default(0.03545) // 건강보험 3.545%
+  longTermCare       Float  @default(0.1295)  // 장기요양 (건강보험료의 12.95%)
+  localIncomeTaxRate Float  @default(0.1)      // 지방소득세 (소득세의 10%)
+  businessIncomeTax  Float  @default(0.03)     // 사업소득 원천징수 3% (+지방세 0.3%)
+  // 상한/하한 (국민연금 기준소득월액 상하한)
+  pensionBaseMin     Int    @default(390000)
+  pensionBaseMax     Int    @default(6170000)
+  isActive           Boolean @default(true)
+}
+
+/// 근로소득 간이세액표 (제189조) — 월급여(천원) 구간별, 부양가족수(1~11)별 세액
+model TaxBracket {
+  id       Int    @id @default(autoincrement())
+  loThousand Int  // 이상 (천원)
+  hiThousand Int? // 미만 (천원). null이면 최고구간
+  // 부양가족수 1~11명 세액 (원). JSON 배열 [d1..d11]
+  taxByDependents String
+  @@index([loThousand])
+}
+
+/// 공휴일 (주휴/연차 계산 참고)
+model Holiday {
+  id   Int      @id @default(autoincrement())
+  date DateTime @unique
+  name String
+}
+
+/// 직원 (근로자/강사/단기근로자 공통)
+model Employee {
+  id          Int      @id @default(autoincrement())
+  empNo       String   @unique // 사번
+  name        String
+  rrn         String?  // 주민등록번호 (암호화 저장 권장 — 데모는 평문)
+  birth       String?  // 생년월일 YYYY-MM-DD
+  department  String?  // 부서 (교수부/학습지원팀/조교팀 등)
+  position    String?  // 직책 (강사/조교/팀장/실장/부장 등)
+  duty        String?  // 업무 (강의(학급관리) 등)
+  address     String?
+  phone       String?
+  email       String?
+  slackUserId String?  // 슬랙 연차신청 연동용
+  bankName    String?
+  bankAccount String?
+
+  hireDate    DateTime
+  resignDate  DateTime?
+  active      Boolean  @default(true)
+
+  // 세무/보험 형태: EMPLOYEE(4대보험/정규 근로자) | FREELANCE(사업소득 3.3%)
+  incomeType  String   @default("EMPLOYEE")
+  // 급여형태: MONTHLY(월급제) | HOURLY(시급제) | INCENTIVE(월급+인센티브) | RATIO(완전비율제/위탁)
+  payScheme   String   @default("MONTHLY")
+
+  // 보수 기준값
+  baseWage        Int    @default(0) // 월급제=월기본급, 시급제=시급, 비율제=미사용
+  positionAllow   Int    @default(0) // 직책수당(월)
+  mealAllow       Int    @default(0) // 식대(월, 비과세)
+  carAllow        Int    @default(0) // 차량유지비(월, 비과세)
+  dependents      Int    @default(1) // 부양가족수(본인포함) — 간이세액표용
+  nonTaxTotal     Int    @default(0) // 기타 비과세 총액(월)
+
+  // 인센티브(INCENTIVE) 설정
+  incThreshold    Int?   // 학생수 기준 (초과 시 인센 발생)
+  incPerStudent   Int?   // 초과 1명당 금액
+
+  // 비율제(RATIO) 설정
+  ratioPercent    Float? // 담당 반 매출액의 % (예: 0.5 = 50%)
+
+  // 주간 근로시간표: JSON [{day:"mon",work:true,start:"15:00",end:"22:00",breakH:0.5}, ...]
+  schedule    String   @default("[]")
+
+  contracts   Contract[]
+  payrolls    PayrollRecord[]
+  leaveGrants LeaveGrant[]
+  leaveTxns   LeaveTransaction[]
+  leaveReqs   LeaveRequest[]
+  documents   Document[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// 근로/위탁 계약 (신규→추가→정규 단계 및 재계약 이력)
+model Contract {
+  id          Int      @id @default(autoincrement())
+  employeeId  Int
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  // 계약단계: SHORT_TERM_1(1년 단기) | RENEWAL_1(1년 추가) | REGULAR(정규) | FIXED_TERM(촉탁) | PART(파트/단기근로)
+  stage       String   @default("SHORT_TERM_1")
+  // 계약서 종류: MONTHLY | HOURLY | INCENTIVE | RATIO | REGULAR | SUMMER 등
+  templateKey String   @default("MONTHLY")
+
+  startDate   DateTime
+  endDate     DateTime?      // 정규직은 null 가능
+  isProbation Boolean  @default(true)
+  probationMonths Int   @default(2) // 수습 2개월
+  probationEndDate DateTime?
+
+  // 계약 시점 보수 스냅샷
+  baseWage      Int    @default(0)
+  positionAllow Int    @default(0)
+  mealAllow     Int    @default(0)
+  carAllow      Int    @default(0)
+  incThreshold  Int?
+  incPerStudent Int?
+  ratioPercent  Float?
+
+  status      String   @default("ACTIVE") // ACTIVE | EXPIRED | TERMINATED | DRAFT
+  pdfPath     String?
+  note        String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([employeeId])
+}
+
+/// 월별 급여/사업소득 명세 기록
+model PayrollRecord {
+  id          Int      @id @default(autoincrement())
+  employeeId  Int
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  year        Int
+  month       Int
+
+  incomeType  String   // EMPLOYEE | FREELANCE (계산 시점 스냅샷)
+  payScheme   String
+
+  // 월별 입력값
+  workedHours     Float?  // 시급제 실근로시간
+  overtimeHours   Float   @default(0) // 연장근로시간(월)
+  nightHours      Float   @default(0) // 야간근로시간(월)
+  holidayHours    Float   @default(0) // 휴일근로시간(월)
+  studentCount    Int?    // 인센티브용 학생수
+  classRevenue    Int?    // 비율제용 반 매출액
+  bonus           Int     @default(0) // 특별상여
+  incentiveManual Int     @default(0) // 수동 인센티브 조정
+  unusedLeaveDays Float   @default(0) // 연차미사용수당 일수
+
+  // 계산 결과 (원)
+  baseP        Int   @default(0)  // 기본급
+  overtimeP    Int   @default(0)  // 연장근로수당
+  nightP       Int   @default(0)  // 야간근로수당
+  holidayP     Int   @default(0)  // 휴일근로수당
+  weeklyHolidayP Int @default(0)  // 주휴수당(시급제)
+  positionP    Int   @default(0)  // 직책수당
+  mealP        Int   @default(0)  // 식대
+  carP         Int   @default(0)  // 차량유지비
+  incentiveP   Int   @default(0)  // 인센티브
+  bonusP       Int   @default(0)  // 상여
+  unusedLeaveP Int   @default(0)  // 연차미사용수당
+  gross        Int   @default(0)  // 지급액 계
+
+  // 공제
+  pensionD     Int   @default(0)  // 국민연금
+  employmentD  Int   @default(0)  // 고용보험
+  healthD      Int   @default(0)  // 건강보험
+  longTermD    Int   @default(0)  // 장기요양
+  incomeTaxD   Int   @default(0)  // 소득세 (근로 or 사업 3%)
+  localTaxD    Int   @default(0)  // 지방소득세
+  otherD       Int   @default(0)  // 기타공제/정산
+  totalDeduct  Int   @default(0)  // 공제액 계
+  net          Int   @default(0)  // 실수령액
+
+  hourlyWage   Float @default(0)  // 통상시급(스냅샷)
+  breakdown    String @default("{}") // 상세 계산근거 JSON
+
+  status       String @default("DRAFT") // DRAFT | CONFIRMED | SENT
+  emailedAt    DateTime?
+  pdfPath      String?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@unique([employeeId, year, month])
+  @@index([year, month])
+}
+
+/// 연차 부여 이력 (근속연수/입사1년미만 월단위 부여)
+model LeaveGrant {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  grantDate  DateTime // 부여일
+  expiryDate DateTime // 소멸일 (통상 부여일+1년, 회계연도/입사일 기준)
+  days       Float    // 부여일수
+  // 사유: MONTHLY(1년미만 개근 1일) | ANNUAL(연차 15~25일) | ADJUST(수동조정)
+  source     String   @default("ANNUAL")
+  serviceYear Int     @default(0) // 근속연차 (0=1년미만)
+  note       String?
+  createdAt  DateTime @default(now())
+  @@index([employeeId])
+}
+
+/// 연차 사용/조정 트랜잭션 (+부여 / -사용)
+model LeaveTransaction {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date       DateTime // 발생일 (사용일 또는 부여일)
+  days       Float    // +부여, -사용
+  type       String   // GRANT | USE | ADJUST | EXPIRE | PAYOUT
+  note       String?
+  requestId  Int?     // 연결된 연차신청
+  createdAt  DateTime @default(now())
+  @@index([employeeId])
+}
+
+/// 연차 신청 (슬랙 → 관리자 승인)
+model LeaveRequest {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  startDate  DateTime
+  endDate    DateTime
+  days       Float    // 신청 일수 (0.5 반차 지원)
+  leaveType  String   @default("ANNUAL") // ANNUAL(연차) | HALF_AM | HALF_PM | SICK 등
+  reason     String?
+  status     String   @default("PENDING") // PENDING | APPROVED | REJECTED | CANCELED
+  source     String   @default("WEB") // WEB | SLACK
+  slackChannel String?
+  slackTs    String?  // 슬랙 메시지 timestamp (승인버튼 갱신용)
+  approverId String?  // 승인자 (slack user or admin)
+  decidedAt  DateTime?
+  decidedNote String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  @@index([employeeId])
+  @@index([status])
+}
+
+/// 생성된 문서 (계약서 PKG, 증명서, 명세서 등)
+model Document {
+  id         Int      @id @default(autoincrement())
+  employeeId Int?
+  employee   Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  // 종류: NEWHIRE_PKG | CONTRACT | PLEDGE | CONSENT | PAYSLIP | CERT_EMPLOYMENT | CERT_CAREER | CERT_INCOME 등
+  type       String
+  title      String
+  filePath   String?  // 저장된 PDF 경로
+  meta       String   @default("{}")
+  createdAt  DateTime @default(now())
+  @@index([employeeId])
+}
+
+/// 급여명세서 자동발송 스케줄
+model EmailSchedule {
+  id         Int      @id @default(autoincrement())
+  name       String   @default("급여명세서 자동발송")
+  enabled    Boolean  @default(false)
+  // 주기: MONTHLY(매월 특정일) | WEEKLY(매주 특정요일)
+  frequency  String   @default("MONTHLY")
+  dayOfMonth Int      @default(7)  // MONTHLY: 지급일
+  dayOfWeek  Int      @default(1)  // WEEKLY: 0=일 .. 6=토
+  hour       Int      @default(9)
+  minute     Int      @default(0)
+  // 발송 대상 월 오프셋: 0=당월, -1=전월분
+  targetMonthOffset Int @default(0)
+  lastRunAt  DateTime?
+  nextRunAt  DateTime?
+  updatedAt  DateTime @updatedAt
+}
+
+/// 이메일 발송 로그
+model EmailLog {
+  id         Int      @id @default(autoincrement())
+  to         String
+  subject    String
+  status     String   @default("PENDING") // PENDING | SENT | FAILED
+  error      String?
+  payrollId  Int?
+  sentAt     DateTime?
+  createdAt  DateTime @default(now())
+  @@index([payrollId])
+}
+
+/// 감사 로그 (승인/발송/발급 등 주요 이벤트)
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  actor     String   @default("system")
+  action    String
+  target    String?
+  detail    String   @default("{}")
+  createdAt DateTime @default(now())
+}

@@ -1,0 +1,1388 @@
+[
+ {
+  "row": 9,
+  "department": "교수부",
+  "duty": "강의(학급관리)",
+  "position": "선임강사",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "월급제",
+  "baseWage": 5000000,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 5,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "13:30",
+    "end": "21:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:30",
+    "end": "21:30",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 10,
+  "department": "교수부",
+  "duty": "강의(학급관리)",
+  "position": "선임강사",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "월급제",
+  "baseWage": 4500000,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 5,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "14:30",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "13:30",
+    "end": "19:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:30",
+    "end": "19:30",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 11,
+  "department": "교수부",
+  "duty": "강의(학급관리)",
+  "position": "전임강사",
+  "incomeTypeRaw": "정규(근로자)",
+  "paySchemeRaw": "월급제",
+  "baseWage": 5000000,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 5,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "14:30",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "08:30",
+    "end": "16:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "08:30",
+    "end": "16:30",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 12,
+  "department": "교수부",
+  "duty": "강의(학급관리)",
+  "position": "팀장",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "월급제",
+  "baseWage": 4800000,
+  "positionAllow": 300000,
+  "carAllow": 0,
+  "workDays": 5,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "13:00",
+    "end": "20:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:00",
+    "end": "20:00",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 13,
+  "department": "교수부",
+  "duty": "강의(학급관리)",
+  "position": "선임강사",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "월급제",
+  "baseWage": 4000000,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 5,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "14:30",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "13:30",
+    "end": "21:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:30",
+    "end": "21:00",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 14,
+  "department": "교수부",
+  "duty": "강의(학급관리)",
+  "position": "전임강사",
+  "incomeTypeRaw": "정규(근로자)",
+  "paySchemeRaw": "월급제",
+  "baseWage": 4300000,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 4,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": false,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "13:30",
+    "end": "21:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:30",
+    "end": "21:30",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 15,
+  "department": "교수부",
+  "duty": "강의(학급관리)",
+  "position": "전임강사",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "월급제",
+  "baseWage": 4500000,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 5,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "09:00",
+    "end": "17:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "09:00",
+    "end": "17:00",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 16,
+  "department": "교수부",
+  "duty": "강의(학급관리)",
+  "position": "전임강사",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "월급제",
+  "baseWage": 4000000,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 4,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": false,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "15:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "13:30",
+    "end": "20:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:30",
+    "end": "20:30",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 17,
+  "department": "교수부",
+  "duty": "강의(학급관리)",
+  "position": "교수부장",
+  "incomeTypeRaw": "정규(근로자)",
+  "paySchemeRaw": "월급제",
+  "baseWage": 7000000,
+  "positionAllow": 1000000,
+  "carAllow": 0,
+  "workDays": 5,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "14:30",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "14:30",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "14:30",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "14:30",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "09:00",
+    "end": "18:00",
+    "breakH": 1.0
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "09:00",
+    "end": "18:00",
+    "breakH": 1.0
+   }
+  ]
+ },
+ {
+  "row": 18,
+  "department": "학습지원팀",
+  "duty": "안내 및 행정지원",
+  "position": "지원팀장",
+  "incomeTypeRaw": "정규(근로자)",
+  "paySchemeRaw": "월급제",
+  "baseWage": 4000000,
+  "positionAllow": 300000,
+  "carAllow": 0,
+  "workDays": 5,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "10:00",
+    "end": "15:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:00",
+    "end": "20:00",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 19,
+  "department": "학습지원팀",
+  "duty": "안내 및 행정지원",
+  "position": "실장",
+  "incomeTypeRaw": "정규(근로자)",
+  "paySchemeRaw": "월급제",
+  "baseWage": 3500000,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 5,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "14:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "10:00",
+    "end": "15:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:00",
+    "end": "21:00",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 20,
+  "department": "학습지원팀",
+  "duty": "안내 및 행정지원",
+  "position": "주임",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "시급제",
+  "baseWage": 12000,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 5,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "16:00",
+    "end": "20:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "16:00",
+    "end": "20:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "16:00",
+    "end": "20:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "16:00",
+    "end": "20:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "16:00",
+    "end": "20:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "13:30",
+    "end": "19:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:30",
+    "end": "19:30",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 21,
+  "department": "조교팀",
+  "duty": "학생관리",
+  "position": "조교",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "시급제",
+  "baseWage": 12410,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 3,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "13:30",
+    "end": "19:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:30",
+    "end": "19:30",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 22,
+  "department": "조교팀",
+  "duty": "학생관리",
+  "position": "조교",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "시급제",
+  "baseWage": 10341,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 3,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": true,
+    "start": "10:00",
+    "end": "15:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:30",
+    "end": "20:30",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 23,
+  "department": "조교팀",
+  "duty": "학생관리",
+  "position": "조교",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "시급제",
+  "baseWage": 11375,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 3,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "13:00",
+    "end": "21:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:00",
+    "end": "21:00",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 24,
+  "department": "조교팀",
+  "duty": "학생관리",
+  "position": "조교",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "시급제",
+  "baseWage": 11375,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 2,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "09:00",
+    "end": "16:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "09:00",
+    "end": "16:30",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 25,
+  "department": "조교팀",
+  "duty": "학생관리",
+  "position": "조교",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "시급제",
+  "baseWage": 12410,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 2,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": true,
+    "start": "10:00",
+    "end": "16:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:30",
+    "end": "20:30",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 26,
+  "department": "조교팀",
+  "duty": "학생관리",
+  "position": "조교",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "시급제",
+  "baseWage": 11375,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 2,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "13:00",
+    "end": "21:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:00",
+    "end": "21:00",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 27,
+  "department": "조교팀",
+  "duty": "학생관리",
+  "position": "조교",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "시급제",
+  "baseWage": 11892,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 3,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "09:00",
+    "end": "16:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "09:00",
+    "end": "16:30",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 28,
+  "department": "조교팀",
+  "duty": "학생관리",
+  "position": "조교장",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "시급제",
+  "baseWage": 13444,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 2,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "16:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": true,
+    "start": "16:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "10:00",
+    "end": "15:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:30",
+    "end": "21:30",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 29,
+  "department": "조교팀",
+  "duty": "학생관리",
+  "position": "조교장",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "시급제",
+  "baseWage": 13444,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 2,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "16:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": true,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "13:30",
+    "end": "20:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:30",
+    "end": "20:30",
+    "breakH": 0.5
+   }
+  ]
+ },
+ {
+  "row": 30,
+  "department": "조교팀",
+  "duty": "학생관리",
+  "position": "조교장",
+  "incomeTypeRaw": "사업소득(프리랜서)",
+  "paySchemeRaw": "시급제",
+  "baseWage": 13444,
+  "positionAllow": 0,
+  "carAllow": 0,
+  "workDays": 3,
+  "schedule": [
+   {
+    "day": "mon",
+    "work": true,
+    "start": "16:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "tue",
+    "work": true,
+    "start": "16:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "wed",
+    "work": false,
+    "start": "16:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "thu",
+    "work": true,
+    "start": "16:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "fri",
+    "work": false,
+    "start": "17:00",
+    "end": "22:00",
+    "breakH": 0.5
+   },
+   {
+    "day": "sat",
+    "work": false,
+    "start": "13:30",
+    "end": "21:30",
+    "breakH": 0.5
+   },
+   {
+    "day": "sun",
+    "work": false,
+    "start": "13:30",
+    "end": "21:30",
+    "breakH": 0.5
+   }
+  ]
+ }
+]

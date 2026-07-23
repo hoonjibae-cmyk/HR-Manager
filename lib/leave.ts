@@ -1,0 +1,252 @@
+// 유쌤에듀 연차(annual leave) 엔진 — 근로기준법 제60조 기준
+//
+// 규칙:
+//  - 입사 1년 미만: 1개월 개근 시 1일씩 발생 (최대 11일). 발생일로부터 사용, 입사일 기준 1년 내 소멸.
+//  - 1년(80% 이상 출근): 15일.
+//  - 3년 이상: 매 2년마다 1일 가산, 최대 25일.  → 15 + floor((근속연수-1)/2), 상한 25.
+//  - 회사 정책상 '입사일 기준(anniversary)'으로 산정 (근로계약서 제6조①).
+//  - 발생 연차는 발생일로부터 1년간 사용, 미사용분은 소멸(수당 정산 대상).
+
+import {
+  addMonths,
+  addYears,
+  differenceInCalendarDays,
+  isAfter,
+  isBefore,
+  isEqual,
+} from "date-fns";
+
+export interface LeaveTxn {
+  date: Date;
+  days: number; // +발생 / -사용 (여기서는 사용/조정만 입력)
+  type: "USE" | "ADJUST" | "PAYOUT" | "GRANT" | "EXPIRE";
+  note?: string;
+}
+
+export interface Lot {
+  grantDate: Date;
+  expiryDate: Date;
+  days: number; // 발생일수
+  source: "MONTHLY" | "ANNUAL" | "ADJUST";
+  serviceYear: number; // 0 = 1년 미만
+  remaining: number; // FIFO 차감 후 잔여
+  used: number;
+  expiredLost: number; // 소멸된 미사용분
+}
+
+export interface LeaveSummary {
+  asOf: Date;
+  hireDate: Date;
+  serviceYears: number; // 완성 근속연수
+  serviceLabel: string;
+  granted: number; // 발생 누계 (asOf까지)
+  used: number; // 사용 누계
+  expired: number; // 소멸 누계
+  remaining: number; // 현재 사용가능 잔여
+  lots: Lot[];
+  nextGrantDate: Date | null;
+  nextGrantDays: number | null;
+}
+
+/** 근속연수(>=1)에 대한 연차 발생일수 */
+export function annualLeaveDays(serviceYears: number): number {
+  if (serviceYears < 1) return 0;
+  return Math.min(15 + Math.floor((serviceYears - 1) / 2), 25);
+}
+
+/** 완성 근속연수 (몇 번째 입사기념일을 지났는지) */
+export function completedServiceYears(hireDate: Date, asOf: Date): number {
+  let y = 0;
+  while (!isBefore(asOf, addYears(hireDate, y + 1))) y++;
+  return y;
+}
+
+function serviceLabel(hireDate: Date, asOf: Date): string {
+  const total = differenceInCalendarDays(asOf, hireDate);
+  if (total < 0) return "입사 전";
+  const years = Math.floor(total / 365);
+  const months = Math.floor((total % 365) / 30);
+  if (years <= 0 && months <= 0) return "입사 " + total + "일";
+  return `${years}년 ${months}개월`;
+}
+
+/**
+ * 입사일과 기준일로부터 법정 연차 발생 lot 목록 생성.
+ * (실제 출근율 80%/개근은 true 가정 — 미출근 반영은 별도 조정으로 처리)
+ */
+export function generateGrants(hireDate: Date, asOf: Date): Lot[] {
+  const lots: Lot[] = [];
+  if (isBefore(asOf, hireDate)) return lots;
+
+  // 1) 입사 1년 미만: 매월 개근 1일 (최대 11일)
+  const firstYearEnd = addYears(hireDate, 1);
+  for (let m = 1; m <= 11; m++) {
+    const g = addMonths(hireDate, m);
+    if (isAfter(g, asOf)) break;
+    if (!isBefore(g, firstYearEnd)) break; // 1년 시점부터는 연차로 전환
+    lots.push({
+      grantDate: g,
+      expiryDate: firstYearEnd, // 입사일 기준 1년 내 사용
+      days: 1,
+      source: "MONTHLY",
+      serviceYear: 0,
+      remaining: 1,
+      used: 0,
+      expiredLost: 0,
+    });
+  }
+
+  // 2) 각 입사기념일마다 연차 발생 (1년차=15일, 이후 가산)
+  const years = completedServiceYears(hireDate, asOf);
+  for (let y = 1; y <= years; y++) {
+    const g = addYears(hireDate, y);
+    const days = annualLeaveDays(y);
+    lots.push({
+      grantDate: g,
+      expiryDate: addYears(g, 1),
+      days,
+      source: "ANNUAL",
+      serviceYear: y,
+      remaining: days,
+      used: 0,
+      expiredLost: 0,
+    });
+  }
+
+  lots.sort((a, b) => a.grantDate.getTime() - b.grantDate.getTime());
+  return lots;
+}
+
+/** 수동 조정(ADJUST +) 을 lot 으로 추가 */
+function adjustLots(txns: LeaveTxn[]): Lot[] {
+  return txns
+    .filter((t) => t.type === "ADJUST" && t.days > 0)
+    .map((t) => ({
+      grantDate: t.date,
+      expiryDate: addYears(t.date, 1),
+      days: t.days,
+      source: "ADJUST" as const,
+      serviceYear: -1,
+      remaining: t.days,
+      used: 0,
+      expiredLost: 0,
+    }));
+}
+
+/**
+ * FIFO 로 사용/소멸 반영하여 연차 현황 요약.
+ * txns: 사용(USE, days<0 또는 양수 일수) 및 조정(ADJUST).
+ *       USE 의 days 는 '사용일수(양수)'로 입력받는다.
+ */
+export function summarizeLeave(
+  hireDate: Date,
+  asOf: Date,
+  txns: LeaveTxn[]
+): LeaveSummary {
+  const lots = [...generateGrants(hireDate, asOf), ...adjustLots(txns)].sort(
+    (a, b) => a.grantDate.getTime() - b.grantDate.getTime()
+  );
+
+  // 사용 이벤트(날짜순)
+  const uses = txns
+    .filter((t) => t.type === "USE" || t.type === "PAYOUT")
+    .map((t) => ({ date: t.date, days: Math.abs(t.days) }))
+    .sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  // FIFO: 각 사용을 '사용시점에 유효한 가장 오래된 lot'에서 차감
+  for (const use of uses) {
+    let need = use.days;
+    for (const lot of lots) {
+      if (need <= 0) break;
+      // lot 발생 이전이거나 이미 소멸된 lot 은 사용 불가
+      if (isAfter(lot.grantDate, use.date)) continue;
+      if (!isAfter(lot.expiryDate, use.date)) continue; // 소멸됨
+      const take = Math.min(lot.remaining, need);
+      lot.remaining -= take;
+      lot.used += take;
+      need -= take;
+    }
+    // need>0 이면 초과사용(마이너스 잔여) — 마지막 lot 에서 차감 처리
+    if (need > 0 && lots.length > 0) {
+      const last = lots[lots.length - 1];
+      last.remaining -= need;
+      last.used += need;
+    }
+  }
+
+  // 소멸 처리 (asOf 기준 만료된 lot 의 잔여)
+  for (const lot of lots) {
+    if (!isAfter(lot.expiryDate, asOf) && lot.remaining > 0) {
+      lot.expiredLost = lot.remaining;
+      lot.remaining = 0;
+    }
+  }
+
+  const granted = lots.reduce((s, l) => s + l.days, 0);
+  const used = lots.reduce((s, l) => s + l.used, 0);
+  const expired = lots.reduce((s, l) => s + l.expiredLost, 0);
+  const remaining = lots
+    .filter((l) => isAfter(l.expiryDate, asOf))
+    .reduce((s, l) => s + l.remaining, 0);
+
+  // 다음 발생 예정
+  const years = completedServiceYears(hireDate, asOf);
+  let nextGrantDate: Date | null = null;
+  let nextGrantDays: number | null = null;
+  const firstYearEnd = addYears(hireDate, 1);
+  if (isBefore(asOf, firstYearEnd)) {
+    // 1년 미만: 다음 달 개근 1일
+    for (let m = 1; m <= 11; m++) {
+      const g = addMonths(hireDate, m);
+      if (isAfter(g, asOf) && isBefore(g, firstYearEnd)) {
+        nextGrantDate = g;
+        nextGrantDays = 1;
+        break;
+      }
+    }
+    if (!nextGrantDate) {
+      nextGrantDate = firstYearEnd;
+      nextGrantDays = annualLeaveDays(1);
+    }
+  } else {
+    nextGrantDate = addYears(hireDate, years + 1);
+    nextGrantDays = annualLeaveDays(years + 1);
+  }
+
+  return {
+    asOf,
+    hireDate,
+    serviceYears: years,
+    serviceLabel: serviceLabel(hireDate, asOf),
+    granted,
+    used,
+    expired,
+    remaining,
+    lots,
+    nextGrantDate,
+    nextGrantDays,
+  };
+}
+
+/** 두 날짜 사이 연차 사용일수 계산 (주말/공휴일 제외, 반차 0.5 지원) */
+export function countLeaveDays(
+  start: Date,
+  end: Date,
+  opts: { half?: boolean; holidays?: Date[] } = {}
+): number {
+  if (opts.half) return 0.5;
+  const holidaySet = new Set(
+    (opts.holidays ?? []).map((d) => d.toISOString().slice(0, 10))
+  );
+  let days = 0;
+  let cur = new Date(start);
+  while (!isAfter(cur, end)) {
+    const dow = cur.getDay();
+    const key = cur.toISOString().slice(0, 10);
+    if (dow !== 0 && dow !== 6 && !holidaySet.has(key)) days++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return days;
+}
+
+export { isEqual };

@@ -1,0 +1,84 @@
+import { NextResponse } from "next/server";
+import { isAuthed } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import { invalidateTaxCache } from "@/lib/repo";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const [company, rates, schedule] = await Promise.all([
+    prisma.company.findFirst({ where: { id: 1 } }),
+    prisma.insuranceRate.findFirst({ where: { isActive: true }, orderBy: { year: "desc" } }),
+    prisma.emailSchedule.findFirst(),
+  ]);
+  return NextResponse.json({
+    company,
+    rates,
+    schedule,
+    integrations: {
+      smtp: !!process.env.SMTP_HOST,
+      slack: !!process.env.SLACK_BOT_TOKEN,
+      scheduler: process.env.ENABLE_SCHEDULER === "true",
+    },
+  });
+}
+
+export async function PATCH(req: Request) {
+  if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const { section, data } = await req.json();
+
+  if (section === "company") {
+    const c = await prisma.company.upsert({
+      where: { id: 1 },
+      update: {
+        name: data.name,
+        ceo: data.ceo,
+        bizNo: data.bizNo,
+        phone: data.phone,
+        address: data.address,
+        payday: Number(data.payday) || 7,
+      },
+      create: { id: 1, ...data, payday: Number(data.payday) || 7 },
+    });
+    return NextResponse.json(c);
+  }
+
+  if (section === "rates") {
+    const existing = await prisma.insuranceRate.findFirst({ where: { isActive: true } });
+    const payload = {
+      nationalPension: Number(data.nationalPension),
+      employment: Number(data.employment),
+      health: Number(data.health),
+      longTermCare: Number(data.longTermCare),
+      localIncomeTaxRate: Number(data.localIncomeTaxRate),
+      businessIncomeTax: Number(data.businessIncomeTax),
+      pensionBaseMin: Number(data.pensionBaseMin),
+      pensionBaseMax: Number(data.pensionBaseMax),
+    };
+    const r = existing
+      ? await prisma.insuranceRate.update({ where: { id: existing.id }, data: payload })
+      : await prisma.insuranceRate.create({ data: { year: new Date().getFullYear(), ...payload } });
+    invalidateTaxCache();
+    return NextResponse.json(r);
+  }
+
+  if (section === "schedule") {
+    const existing = await prisma.emailSchedule.findFirst();
+    const payload = {
+      enabled: !!data.enabled,
+      frequency: data.frequency,
+      dayOfMonth: Number(data.dayOfMonth) || 7,
+      dayOfWeek: Number(data.dayOfWeek) || 1,
+      hour: Number(data.hour) || 9,
+      minute: Number(data.minute) || 0,
+      targetMonthOffset: Number(data.targetMonthOffset) || 0,
+    };
+    const s = existing
+      ? await prisma.emailSchedule.update({ where: { id: existing.id }, data: payload })
+      : await prisma.emailSchedule.create({ data: payload });
+    return NextResponse.json(s);
+  }
+
+  return NextResponse.json({ error: "unknown section" }, { status: 400 });
+}
