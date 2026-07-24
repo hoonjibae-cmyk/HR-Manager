@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // PDF/Chromium 런타임 진단용 (문제 해결 후 제거 예정). 민감정보 없음.
-export async function GET() {
+export async function GET(_req: Request) {
   const info: any = {
     node: process.version,
     platform: process.platform,
@@ -33,9 +33,11 @@ export async function GET() {
   };
 
   try {
+    const { searchParams } = new URL(_req.url);
     const packUrl =
+      searchParams.get("pack") ||
       process.env.CHROMIUM_PACK_URL ||
-      "https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar";
+      "https://github.com/Sparticuz/chromium/releases/download/v123.0.1/chromium-v123.0.1-pack.tar";
     info.packUrl = packUrl;
 
     const chromium = (await import("@sparticuz/chromium-min")).default;
