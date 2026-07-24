@@ -116,7 +116,7 @@ export default function PayrollClient() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ payrollId: id }),
     }).then(async (res) => {
-      if (!res.ok) return alert("생성 실패");
+      if (!res.ok) return alert("생성 실패: " + (await res.text()));
       const blob = await res.blob();
       window.open(URL.createObjectURL(blob), "_blank");
     });
