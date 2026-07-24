@@ -8,12 +8,9 @@ const onServerless =
   !!process.env.AWS_LAMBDA_FUNCTION_NAME ||
   !!process.env.AWS_EXECUTION_ENV;
 
-// 서버리스에서 사용할 원격 Chromium 팩(브라우저+공유라이브러리 포함).
-// v123 은 libnss3 등 NSS 라이브러리를 팩에 포함하고 LD_LIBRARY_PATH 를 설정하므로
-// Vercel(라이브러리 미제공 런타임)에서 안정적으로 동작한다. (v131 은 NSS 미포함)
-const CHROMIUM_PACK_URL =
-  process.env.CHROMIUM_PACK_URL ||
-  "https://github.com/Sparticuz/chromium/releases/download/v123.0.1/chromium-v123.0.1-pack.tar";
+// 서버리스에서는 @sparticuz/chromium(full) 이 NSS 라이브러리(libnss3 등)를 함께
+// 번들하고 LD_LIBRARY_PATH 를 설정한다. 패키지 bin 파일은 next.config 의
+// outputFileTracingIncludes 로 함수 번들에 포함시킨다.
 
 // 설치된 Chrome/Chromium/Edge 실행 파일 자동 탐색 (로컬/자체서버용)
 function resolveChromium(): string | undefined {
@@ -92,11 +89,11 @@ async function launchOptions(): Promise<LaunchOpts> {
     "--disable-dev-shm-usage",
     "--font-render-hinting=none",
   ];
-  // 1) 서버리스(Vercel): 원격 팩에서 Chromium+라이브러리 로드
+  // 1) 서버리스(Vercel): 번들된 @sparticuz/chromium 사용 (NSS 라이브러리 포함)
   if (onServerless) {
-    const chromium = (await import("@sparticuz/chromium-min")).default;
+    const chromium = (await import("@sparticuz/chromium")).default;
     return {
-      executablePath: await chromium.executablePath(CHROMIUM_PACK_URL),
+      executablePath: await chromium.executablePath(),
       args: [...chromium.args, "--font-render-hinting=none"],
       headless: chromium.headless,
       defaultViewport: chromium.defaultViewport,
@@ -107,11 +104,11 @@ async function launchOptions(): Promise<LaunchOpts> {
   if (local) {
     return { executablePath: local, args: baseArgs, headless: true };
   }
-  // 3) 최후 폴백: 크롬이 없는 리눅스에서도 원격 팩 사용
+  // 3) 최후 폴백: 크롬이 없는 리눅스에서도 @sparticuz/chromium 사용
   try {
-    const chromium = (await import("@sparticuz/chromium-min")).default;
+    const chromium = (await import("@sparticuz/chromium")).default;
     return {
-      executablePath: await chromium.executablePath(CHROMIUM_PACK_URL),
+      executablePath: await chromium.executablePath(),
       args: [...chromium.args, "--font-render-hinting=none"],
       headless: chromium.headless,
       defaultViewport: chromium.defaultViewport,

@@ -33,16 +33,10 @@ export async function GET(_req: Request) {
   };
 
   try {
-    const { searchParams } = new URL(_req.url);
-    const packUrl =
-      searchParams.get("pack") ||
-      process.env.CHROMIUM_PACK_URL ||
-      "https://github.com/Sparticuz/chromium/releases/download/v123.0.1/chromium-v123.0.1-pack.tar";
-    info.packUrl = packUrl;
-
-    const chromium = (await import("@sparticuz/chromium-min")).default;
+    const chromium = (await import("@sparticuz/chromium")).default;
+    info.pkg = "@sparticuz/chromium (full) v123";
     const t0 = Date.now();
-    const exe = await chromium.executablePath(packUrl);
+    const exe = await chromium.executablePath();
     info.executablePath = exe;
     info.executablePathMs = Date.now() - t0;
     info.exeExists = exe ? existsSync(exe) : false;
