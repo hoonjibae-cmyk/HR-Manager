@@ -19,6 +19,9 @@
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "@fontsource/nanum-gothic": "^5.3.0",
     "@fontsource/nanum-myeongjo": "^5.3.0",
