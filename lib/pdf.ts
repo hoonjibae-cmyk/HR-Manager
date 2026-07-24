@@ -8,6 +8,13 @@ const onServerless =
   !!process.env.AWS_LAMBDA_FUNCTION_NAME ||
   !!process.env.AWS_EXECUTION_ENV;
 
+// 서버리스에서 사용할 원격 Chromium 팩(브라우저+공유라이브러리 포함).
+// Next.js 번들이 라이브러리(libnss3 등)를 누락하는 문제를 우회한다.
+// 버전은 puppeteer-core / @sparticuz/chromium-min 과 맞춘다(131).
+const CHROMIUM_PACK_URL =
+  process.env.CHROMIUM_PACK_URL ||
+  "https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar";
+
 // 설치된 Chrome/Chromium/Edge 실행 파일 자동 탐색 (로컬/자체서버용)
 function resolveChromium(): string | undefined {
   const env = process.env.CHROMIUM_PATH;
@@ -85,11 +92,11 @@ async function launchOptions(): Promise<LaunchOpts> {
     "--disable-dev-shm-usage",
     "--font-render-hinting=none",
   ];
-  // 1) 서버리스: @sparticuz/chromium 경량 바이너리
+  // 1) 서버리스(Vercel): 원격 팩에서 Chromium+라이브러리 로드
   if (onServerless) {
-    const chromium = (await import("@sparticuz/chromium")).default;
+    const chromium = (await import("@sparticuz/chromium-min")).default;
     return {
-      executablePath: await chromium.executablePath(),
+      executablePath: await chromium.executablePath(CHROMIUM_PACK_URL),
       args: [...chromium.args, "--font-render-hinting=none"],
       headless: chromium.headless,
       defaultViewport: chromium.defaultViewport,
@@ -100,11 +107,11 @@ async function launchOptions(): Promise<LaunchOpts> {
   if (local) {
     return { executablePath: local, args: baseArgs, headless: true };
   }
-  // 3) 최후 폴백: 크롬이 없는 리눅스에서도 @sparticuz/chromium 사용
+  // 3) 최후 폴백: 크롬이 없는 리눅스에서도 원격 팩 사용
   try {
-    const chromium = (await import("@sparticuz/chromium")).default;
+    const chromium = (await import("@sparticuz/chromium-min")).default;
     return {
-      executablePath: await chromium.executablePath(),
+      executablePath: await chromium.executablePath(CHROMIUM_PACK_URL),
       args: [...chromium.args, "--font-render-hinting=none"],
       headless: chromium.headless,
       defaultViewport: chromium.defaultViewport,
