@@ -3,6 +3,15 @@ import { readdirSync, existsSync, statSync } from "fs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+// @sparticuz/chromium 이 Lambda 런타임을 감지해 NSS 라이브러리를 추출하도록 설정
+if (
+  (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) &&
+  !process.env.AWS_EXECUTION_ENV &&
+  !process.env.AWS_LAMBDA_JS_RUNTIME
+) {
+  process.env.AWS_LAMBDA_JS_RUNTIME = "nodejs20.x";
+}
+
 // PDF/Chromium 런타임 진단용 (문제 해결 후 제거 예정). 민감정보 없음.
 export async function GET(_req: Request) {
   const info: any = {

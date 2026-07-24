@@ -8,6 +8,18 @@ const onServerless =
   !!process.env.AWS_LAMBDA_FUNCTION_NAME ||
   !!process.env.AWS_EXECUTION_ENV;
 
+// @sparticuz/chromium 은 AWS_EXECUTION_ENV / AWS_LAMBDA_JS_RUNTIME 에 "20.x" 가
+// 있어야만 NSS 라이브러리(libnss3 등, al2023.tar.br)를 추출하고 LD_LIBRARY_PATH 를
+// /tmp/al2023/lib 로 설정한다. Vercel 은 이 변수를 설정하지 않아 chromium 이
+// libnss3 를 찾지 못하므로, @sparticuz/chromium import 이전에 직접 설정한다.
+if (
+  onServerless &&
+  !process.env.AWS_EXECUTION_ENV &&
+  !process.env.AWS_LAMBDA_JS_RUNTIME
+) {
+  process.env.AWS_LAMBDA_JS_RUNTIME = "nodejs20.x";
+}
+
 // 서버리스에서는 @sparticuz/chromium(full) 이 NSS 라이브러리(libnss3 등)를 함께
 // 번들하고 LD_LIBRARY_PATH 를 설정한다. 패키지 bin 파일은 next.config 의
 // outputFileTracingIncludes 로 함수 번들에 포함시킨다.
