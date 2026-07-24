@@ -18,6 +18,7 @@ interface Rec {
   incentiveP: number;
   bonusP: number;
   status: string;
+  extraHours: number;
   overtimeHours: number;
   holidayHours: number;
   nightHours: number;
@@ -47,6 +48,7 @@ export default function PayrollClient() {
     const map: Record<number, any> = {};
     data.forEach((r: Rec) => {
       map[r.employeeId] = {
+        extraHours: r.extraHours || "",
         overtimeHours: r.overtimeHours || "",
         holidayHours: r.holidayHours || "",
         nightHours: r.nightHours || "",
@@ -69,6 +71,7 @@ export default function PayrollClient() {
     const cleanInputs: Record<number, any> = {};
     for (const [id, v] of Object.entries(inputs)) {
       cleanInputs[Number(id)] = {
+        extraHours: v.extraHours ? Number(v.extraHours) : 0,
         overtimeHours: v.overtimeHours ? Number(v.overtimeHours) : 0,
         holidayHours: v.holidayHours ? Number(v.holidayHours) : 0,
         nightHours: v.nightHours ? Number(v.nightHours) : 0,
@@ -202,6 +205,7 @@ export default function PayrollClient() {
                       {r.payScheme === "RATIO" && (
                         <InlineInput label="매출" value={inputs[r.employeeId]?.classRevenue ?? ""} onChange={(v) => setInput(r.employeeId, "classRevenue", v)} wide />
                       )}
+                      <InlineInput label="추가h" value={inputs[r.employeeId]?.extraHours ?? ""} onChange={(v) => setInput(r.employeeId, "extraHours", v)} />
                       <InlineInput label="연장h" value={inputs[r.employeeId]?.overtimeHours ?? ""} onChange={(v) => setInput(r.employeeId, "overtimeHours", v)} />
                       <InlineInput label="휴일h" value={inputs[r.employeeId]?.holidayHours ?? ""} onChange={(v) => setInput(r.employeeId, "holidayHours", v)} />
                       <InlineInput label="야간h" value={inputs[r.employeeId]?.nightHours ?? ""} onChange={(v) => setInput(r.employeeId, "nightHours", v)} />
@@ -228,8 +232,11 @@ export default function PayrollClient() {
             ※ 변동입력을 수정한 뒤 <b>급여 일괄 산정</b>을 다시 누르면 반영됩니다. 확정(CONFIRMED)된 기록은 재계산되지 않습니다.
           </p>
           <p>
-            · <b>연장h</b>: 평일 소정근로 외 + 토요일 근무시간 → 연장근로수당(통상시급×1.5) &nbsp;
-            · <b>휴일h</b>: 일요일·공휴일 근무시간 → 휴일근로수당(×1.5) &nbsp;
+            · <b>추가h</b>: 평일 소정근로 외·토요일 근무 중 <b>1일 8h·주 40h 이내</b>(법내연장) → 가산 없음(통상시급×1.0) &nbsp;
+            · <b>연장h</b>: 1일 8시간·주 40시간 <b>초과분</b> → 연장근로수당(×1.5)
+          </p>
+          <p>
+            · <b>휴일h</b>: 일요일(주휴일)·공휴일 근무시간 → 휴일근로수당(×1.5) &nbsp;
             · <b>야간h</b>: 22시~06시 근무시간 → 야간가산(+0.5)
           </p>
           <p>

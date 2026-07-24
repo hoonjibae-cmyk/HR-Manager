@@ -230,6 +230,37 @@ describe("computePayroll — 완전비율제", () => {
   });
 });
 
+describe("computePayroll — 추가근로(법내연장) vs 법정연장 구분", () => {
+  const emp: EmployeePayInput = {
+    incomeType: "EMPLOYEE",
+    payScheme: "MONTHLY",
+    baseWage: 3_000_000,
+    positionAllow: 0,
+    mealAllow: 0,
+    carAllow: 0,
+    dependents: 1,
+    schedule: instructor, // 주 32.5h — 법정한도(40h) 미만
+  };
+
+  it("추가h(법내연장)는 가산 없이 ×1.0", () => {
+    const r = computePayroll(emp, { extraHours: 10 }, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.extraP).toBe(Math.round(10 * r.hourlyWage)); // 1.0배
+    expect(r.gross).toBe(3_000_000 + r.extraP);
+  });
+
+  it("연장h(법정초과)는 ×1.5, 추가h와 독립적으로 합산", () => {
+    const r = computePayroll(
+      emp,
+      { extraHours: 10, overtimeHours: 4 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.extraP).toBe(Math.round(10 * r.hourlyWage));
+    expect(r.overtimeP).toBe(Math.round(4 * r.hourlyWage * 1.5));
+    expect(r.gross).toBe(3_000_000 + r.extraP + r.overtimeP);
+  });
+});
+
 describe("computePayroll — 시급제 주휴수당", () => {
   it("주 15시간 이상이면 주휴수당 발생", () => {
     const emp: EmployeePayInput = {

@@ -55,9 +55,10 @@ export interface EmployeePayInput {
 
 export interface MonthlyInput {
   workedHours?: number | null; // 시급제 실근로시간(월). 없으면 스케줄로 추정
-  overtimeHours?: number; // 추가 연장근로(월, 계약 외)
-  nightHours?: number; // 야간근로(월)
-  holidayHours?: number; // 휴일근로(월)
+  extraHours?: number; // 법내연장(월): 소정 외이나 1일8h·주40h 이내 — 가산 없음(×1.0)
+  overtimeHours?: number; // 법정 연장근로(월): 1일8h·주40h 초과분 — ×1.5
+  nightHours?: number; // 야간근로(월, 22~06시) — +0.5 가산
+  holidayHours?: number; // 휴일근로(월, 주휴일·공휴일) — ×1.5
   studentCount?: number | null; // 인센티브용
   classRevenue?: number | null; // 비율제용
   bonus?: number; // 특별상여
@@ -73,6 +74,7 @@ export interface PayrollResult {
 
   // 지급
   baseP: number;
+  extraP: number; // 추가근로수당(법내연장, ×1.0)
   overtimeP: number;
   nightP: number;
   holidayP: number;
@@ -230,10 +232,12 @@ export function computePayroll(
   }
   incentiveP += month.incentiveManual ?? 0;
 
-  // --- 연장/야간/휴일 (추가 근로, 월 입력) ---
+  // --- 추가(법내연장)/연장/야간/휴일 (월 입력) ---
+  const exH = month.extraHours ?? 0;
   const otH = month.overtimeHours ?? 0;
   const nightH = month.nightHours ?? 0;
   const holH = month.holidayHours ?? 0;
+  const extraP = round0(exH * hourlyWage); // 법내연장 — 가산 없음
   const overtimeP = round0(otH * hourlyWage * 1.5);
   const nightP = round0(nightH * hourlyWage * 0.5);
   const holidayP = round0(holH * hourlyWage * 1.5);
@@ -249,6 +253,7 @@ export function computePayroll(
 
   const gross =
     baseP +
+    extraP +
     overtimeP +
     nightP +
     holidayP +
@@ -307,6 +312,7 @@ export function computePayroll(
     weeklyHoliday,
     monthlyStdHours: round0(monthlyStdHours),
     baseP,
+    extraP,
     overtimeP,
     nightP,
     holidayP,

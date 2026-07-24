@@ -9,6 +9,7 @@ export interface DocPayroll {
   month: number;
   incomeType: string;
   baseP: number;
+  extraP: number;
   overtimeP: number;
   nightP: number;
   holidayP: number;
@@ -60,6 +61,7 @@ export function payslipHtml(args: {
   const payRows = (
     [
       ["기본급", p.baseP],
+      ["추가근로수당", p.extraP],
       ["연장근로수당", p.overtimeP],
       ["야간근로수당", p.nightP],
       ["휴일근로수당", p.holidayP],
@@ -117,7 +119,8 @@ export function payslipHtml(args: {
     </tbody>
   </table>
   <div class="clause" style="margin-top:10px">
-    <div class="small">· 연장근로수당 = 연장근로시간 × 통상시급 × 1.5 &nbsp; · 야간근로수당 = 야간근로시간 × 통상시급 × 0.5</div>
+    <div class="small">· 추가근로수당(법내연장) = 추가근로시간 × 통상시급 &nbsp; · 연장근로수당(법정초과) = 연장근로시간 × 통상시급 × 1.5</div>
+    <div class="small">· 휴일근로수당 = 휴일근로시간 × 통상시급 × 1.5 &nbsp; · 야간근로수당 = 야간근로시간 × 통상시급 × 0.5</div>
     ${isFree
       ? `<div class="small">· 사업소득 원천징수: 지급총액의 3.3%(소득세 3% + 지방소득세 0.3%) 공제</div>`
       : `<div class="small">· 4대보험 및 근로소득세는 관계법령 및 간이세액표에 따라 산정되었습니다.</div>`}

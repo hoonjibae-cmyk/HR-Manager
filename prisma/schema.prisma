@@ -169,7 +169,8 @@ model PayrollRecord {
 
   // 월별 입력값
   workedHours     Float?  // 시급제 실근로시간
-  overtimeHours   Float   @default(0) // 연장근로시간(월)
+  extraHours      Float   @default(0) // 법내연장시간(월, 가산없음 ×1.0)
+  overtimeHours   Float   @default(0) // 연장근로시간(월, 법정초과 ×1.5)
   nightHours      Float   @default(0) // 야간근로시간(월)
   holidayHours    Float   @default(0) // 휴일근로시간(월)
   studentCount    Int?    // 인센티브용 학생수
@@ -180,6 +181,7 @@ model PayrollRecord {
 
   // 계산 결과 (원)
   baseP        Int   @default(0)  // 기본급
+  extraP       Int   @default(0)  // 추가근로수당(법내연장)
   overtimeP    Int   @default(0)  // 연장근로수당
   nightP       Int   @default(0)  // 야간근로수당
   holidayP     Int   @default(0)  // 휴일근로수당
