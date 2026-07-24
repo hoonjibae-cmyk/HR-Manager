@@ -108,7 +108,10 @@ npm run seed            # 회사정보·요율·간이세액표·공휴일·데�
 - **대량 이메일**: 서버리스 함수는 실행시간 제한(무료 60초)이 있습니다. 직원이 아주 많아 한 번에
   수십 명 발송 시 시간이 부족하면 Vercel **Pro** 플랜(최대 300초)을 권장합니다. (PDF는 한 번 뜬
   브라우저를 재사용하므로 수십 명까지는 대체로 무리 없습니다.)
-- **PDF**: Vercel에서는 경량 Chromium(`@sparticuz/chromium`)이 자동 사용됩니다(설정 불필요).
+- **PDF / Node 버전**: 문서 PDF는 서버리스 Chromium(`@sparticuz/chromium`)으로 생성됩니다.
+  이 라이브러리는 **Node 20 런타임(Amazon Linux 2023)** 에서 NSS 라이브러리(libnss3)를 올바르게
+  로드하므로, Vercel **Settings → Node.js Version 은 반드시 `20.x`** 로 두세요(저장소 `engines` 도 20.x 고정).
+  코드에서 `AWS_LAMBDA_JS_RUNTIME` 를 자동 설정하여 라이브러리 추출을 트리거합니다(별도 작업 불필요).
 - **DB 백업**: Supabase 대시보드에서 백업/스냅샷을 제공합니다.
 
 ## 문제 해결
