@@ -133,7 +133,8 @@ export function contractHtml(args: {
   } else {
     const incClause =
       ct.templateKey === "INCENTIVE" && ct.incThreshold != null
-        ? `<p class="sub">⑦ 담당 학생수가 ${ct.incThreshold}명을 초과하는 경우, 초과 1명당 ${wonUnit(ct.incPerStudent ?? 0)}의 인센티브를 지급한다. 인센티브는 호혜적 금품으로 근로기준법상 임금에 해당하지 아니한다.</p>`
+        ? `<p class="sub">⑦ 담당 학생수가 ${ct.incThreshold}명을 초과하는 경우, 초과 1명당 ${wonUnit(ct.incPerStudent ?? 0)}의 인센티브를 지급한다. 인센티브는 호혜적 금품으로 근로기준법상 임금에 해당하지 아니한다.</p>
+      <p class="sub">⑧ 인센티브 원천액의 8.3%는 퇴직유보금(인센티브분 퇴직금)으로 매월 별도 통장에 송금·적립하며, 인센티브는 법정 퇴직급여 산정의 기초임금에 포함하지 아니한다. 세부 사항은 별도 확인서에 따른다.</p>`
         : "";
     wageClause = `<div class="clause"><h3>제 4조 (임금)</h3>
       <p class="sub">① "${partyB}"의 급여는 <b>${wonUnit(ct.baseWage)}</b>을 기준급여로 하여 아래 임금 항목으로 포괄하여 지급한다.</p>
@@ -171,7 +172,18 @@ export function contractHtml(args: {
 
   ${wageClause}
 
-  <div class="clause"><h3>제 5조 (휴일)</h3>
+  ${isRatio
+    ? `<div class="clause"><h3>제 5조 (계약의 성격)</h3>
+    <p class="sub">① 본 계약은 위탁(도급) 계약으로서 근로기준법상 근로계약에 해당하지 아니한다.</p>
+    <p class="sub">② 따라서 퇴직급여, 연차유급휴가, 주휴수당 등 근로기준법상 제도는 본 계약에 적용되지 아니한다.</p>
+    <p class="sub">③ 수수료는 사업소득으로 처리하며, 지급 시 원천징수세액(3.3%)을 공제한다.</p></div>
+
+  <div class="clause"><h3>제 6조 (계약해지)</h3>
+    <p class="sub">① 계약을 해지하고자 할 경우 해지 예정일 30일 이전에 상대방에게 서면으로 통지한다.</p>
+    <p class="sub">② "을"은 담당 반의 해당 학기 수업 종료 시까지 위탁업무를 수행하여야 하며, "갑"이 서면 인정하는 불가피한 사유가 없는 한 학기 종료 이전에 해지할 수 없다.</p></div>
+
+  <div class="clause"><h3>제 7조 (기타사항)</h3>`
+    : `<div class="clause"><h3>제 5조 (휴일)</h3>
     <p class="sub">① 주휴일(해당 주 소정근로일 개근 및 주 15시간 이상 시 유급), 근로자의 날, 관공서 공휴일(일요일 제외)을 유급휴일로 한다.</p>
     <p class="sub">② 주휴일은 근로자의 해당 주 첫 번째 비번일로 하며, 업무사정에 따라 변경할 수 있다.</p></div>
 
@@ -184,7 +196,7 @@ export function contractHtml(args: {
     <p class="sub">① 사직하고자 할 경우 사직일 30일 이전에 사직서를 제출하고, 후임자 선임 시까지 인수인계 등 성실히 근로한다.</p>
     <p class="sub">② "을"은 담당 반의 해당 학기 수업 종료 시까지 근무하여야 하며, "갑"이 서면 인정하는 불가피한 사유가 없는 한 학기 종료 이전에 사직할 수 없다.</p></div>
 
-  <div class="clause"><h3>제 8조 (기타사항)</h3>
+  <div class="clause"><h3>제 8조 (기타사항)</h3>`}
     <p class="sub">① "을"은 근면·성실·친절·공정을 기하며, 근무 중은 물론 계약종료 후에도 업무상 취득한 "갑"의 기밀을 유지한다.</p>
     <p class="sub">② "을"은 급여액을 포함한 근로조건을 누설하지 아니한다.</p>
     <p class="sub">③ "을"이 계약기간 중 생산한 교재·수업자료·동영상 등의 지적재산권은 "갑"에게 귀속된다.</p>

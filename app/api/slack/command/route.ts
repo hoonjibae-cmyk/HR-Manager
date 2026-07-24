@@ -35,6 +35,11 @@ export async function POST(req: Request) {
       "등록된 직원 정보를 찾을 수 없습니다. 관리자에게 슬랙 ID 등록을 요청하세요."
     );
   }
+  if (emp.payScheme === "RATIO") {
+    return ephemeral(
+      "완전비율제(위탁) 계약은 연차휴가 적용 대상이 아닙니다. 문의는 관리자에게 부탁드립니다."
+    );
+  }
 
   // 잔여연차 조회 (직원 셀프 조회)
   if (!text || /^(조회|잔여|현황|내연차|status|balance)$/i.test(text)) {

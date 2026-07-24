@@ -11,7 +11,11 @@ export const dynamic = "force-dynamic";
 export default async function LeavePage() {
   const now = new Date();
   const [employees, txns, pending] = await Promise.all([
-    prisma.employee.findMany({ where: { active: true }, orderBy: { empNo: "asc" } }),
+    // 완전비율제(위탁)는 프리랜서 계약으로 연차 미적용 → 연차 관리 대상 제외
+    prisma.employee.findMany({
+      where: { active: true, payScheme: { not: "RATIO" } },
+      orderBy: { empNo: "asc" },
+    }),
     prisma.leaveTransaction.findMany(),
     prisma.leaveRequest.findMany({
       where: { status: "PENDING" },

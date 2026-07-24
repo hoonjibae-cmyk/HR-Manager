@@ -27,10 +27,14 @@ export interface DocPayroll {
   longTermD: number;
   incomeTaxD: number;
   localTaxD: number;
+  retentionD: number;
+  parkingD: number;
+  expenseD: number;
   otherD: number;
   totalDeduct: number;
   net: number;
   hourlyWage: number;
+  prorationRatio?: number;
 }
 
 function esc(s: any): string {
@@ -75,22 +79,29 @@ export function payslipHtml(args: {
     ] as [string, number][]
   ).filter(([, v]) => v && v !== 0);
 
-  const dedRows: [string, number][] = isFree
-    ? [
-        ["소득세(3%)", p.incomeTaxD],
-        ["지방소득세(0.3%)", p.localTaxD],
-      ]
-    : (
-        [
+  const commonDed: [string, number][] = [
+    ["퇴직유보금(별도통장)", p.retentionD],
+    ["주차비 공제", p.parkingD],
+    ["실비 정산", p.expenseD],
+    ["기타공제", p.otherD],
+  ];
+  const dedRows: [string, number][] = (
+    isFree
+      ? ([
+          ["소득세(3%)", p.incomeTaxD],
+          ["지방소득세(0.3%)", p.localTaxD],
+          ...commonDed,
+        ] as [string, number][])
+      : ([
           ["국민연금", p.pensionD],
           ["건강보험", p.healthD],
           ["장기요양보험", p.longTermD],
           ["고용보험", p.employmentD],
           ["근로소득세", p.incomeTaxD],
           ["지방소득세", p.localTaxD],
-          ["기타공제", p.otherD],
-        ] as [string, number][]
-      ).filter(([, v]) => v && v !== 0);
+          ...commonDed,
+        ] as [string, number][])
+  ).filter(([, v]) => v && v !== 0);
 
   const maxRows = Math.max(payRows.length, dedRows.length);
   let bodyRows = "";
@@ -123,7 +134,9 @@ export function payslipHtml(args: {
     <div class="small">· 휴일근로수당 = 휴일근로시간 × 통상시급 × 1.5 &nbsp; · 야간근로수당 = 야간근로시간 × 통상시급 × 0.5</div>
     ${isFree
       ? `<div class="small">· 사업소득 원천징수: 지급총액의 3.3%(소득세 3% + 지방소득세 0.3%) 공제</div>`
-      : `<div class="small">· 4대보험 및 근로소득세는 관계법령 및 간이세액표에 따라 산정되었습니다.</div>`}
+      : `<div class="small">· 4대보험 및 근로소득세는 관계법령·간이세액표(또는 세무대리인 산정액)에 따릅니다.</div>`}
+    ${p.retentionD ? `<div class="small">· 퇴직유보금: 인센티브 원천액의 8.3%로, 확인서에 따라 별도 통장으로 송금·적립됩니다.</div>` : ""}
+    ${p.prorationRatio != null && p.prorationRatio < 1 ? `<div class="small">· 월중 입·퇴사로 일할계산이 적용되었습니다 (재직비율 ${(p.prorationRatio * 100).toFixed(1)}%).</div>` : ""}
     <div class="small">· 본 명세서는 근로기준법 제48조에 따라 교부되며, 문의사항은 관리부서로 연락바랍니다.</div>
   </div>`;
 }

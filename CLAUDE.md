@@ -28,6 +28,9 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - DB는 Postgres. 스키마 변경 시 `npx prisma db push`(DIRECT_URL 사용). 서버리스 런타임은 pgbouncer(DATABASE_URL).
 - 서버리스(Vercel)에서는 파일 저장 대신 PDF를 버퍼로 스트리밍/첨부. 예약발송은 Vercel Cron → `/api/cron`.
 - 금액은 정수(원). 공제는 10원 절사(`floor10`). 통상시급은 `(주소정+주휴)*4.345` 환산시간 기준.
+- 공제 기본모드는 **MANUAL**(세무사 지정값 직접입력) — 배치 재실행 시 수동값·주차비·실비 보존.
+  AUTO 전환 시에만 엔진 산출. 퇴직유보금(인센티브×8.3%, 확인서)·일할계산은 모드 무관 자동.
+- 완전비율제(RATIO)는 연차·퇴직금 미적용 — 연차 화면/신청/슬랙에서 제외 유지.
 - 4대보험/세율은 하드코딩 금지 — `InsuranceRate`(설정 화면에서 수정). 세액표는 `TaxBracket`.
 - 계산식 변경 시 `lib/*.test.ts` 를 먼저 갱신하고 `npm test` 로 검증.
 - 개인정보(주민번호 등)는 데모상 평문. 실제 운영은 암호화 권장.

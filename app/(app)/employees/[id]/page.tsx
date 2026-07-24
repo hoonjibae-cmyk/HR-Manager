@@ -92,6 +92,14 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
 
         {/* 중앙: 연차 + 계약 */}
         <div className="space-y-6">
+          {emp.payScheme === "RATIO" ? (
+            <div className="card p-5">
+              <h2 className="font-bold text-slate-800 mb-2">연차 현황</h2>
+              <p className="text-sm text-slate-400">
+                완전비율제(위탁) 계약 — 프리랜서 계약으로 <b>연차휴가·퇴직금이 적용되지 않습니다.</b>
+              </p>
+            </div>
+          ) : (
           <div className="card p-5">
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-bold text-slate-800">연차 현황</h2>
@@ -110,6 +118,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
               )}
             </div>
           </div>
+          )}
 
           <div className="card p-5">
             <h2 className="font-bold text-slate-800 mb-3">계약 이력</h2>

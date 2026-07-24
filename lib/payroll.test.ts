@@ -261,6 +261,97 @@ describe("computePayroll — 추가근로(법내연장) vs 법정연장 구분",
   });
 });
 
+describe("computePayroll — 퇴직유보금 (인센티브 × 8.3%)", () => {
+  const emp: EmployeePayInput = {
+    incomeType: "FREELANCE",
+    payScheme: "INCENTIVE",
+    baseWage: 3_000_000,
+    positionAllow: 0,
+    mealAllow: 0,
+    carAllow: 0,
+    dependents: 1,
+    schedule: instructor,
+    incThreshold: 40,
+    incPerStudent: 50_000,
+  };
+
+  it("인센티브 발생 시 원천액의 8.3%를 공제(10원 절사)", () => {
+    const r = computePayroll(emp, { studentCount: 52 }, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.incentiveP).toBe(600_000);
+    expect(r.retentionD).toBe(floor10(600_000 * 0.083)); // 49,800
+    expect(r.totalDeduct).toBe(r.incomeTaxD + r.localTaxD + r.retentionD);
+  });
+
+  it("인센티브 없으면 유보금 0", () => {
+    const r = computePayroll(emp, { studentCount: 30 }, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.retentionD).toBe(0);
+  });
+
+  it("월급제(비인센티브)는 유보금 없음", () => {
+    const m: EmployeePayInput = { ...emp, payScheme: "MONTHLY" };
+    const r = computePayroll(m, {}, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.retentionD).toBe(0);
+  });
+});
+
+describe("computePayroll — 일할계산 (월중 입·퇴사)", () => {
+  it("월급제: 기본급·정액수당에 재직비율 적용", () => {
+    const emp: EmployeePayInput = {
+      incomeType: "EMPLOYEE",
+      payScheme: "MONTHLY",
+      baseWage: 3_000_000,
+      positionAllow: 300_000,
+      mealAllow: 200_000,
+      carAllow: 0,
+      dependents: 1,
+      schedule: fullTime,
+    };
+    const r = computePayroll(emp, { prorationRatio: 0.5 }, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.baseP).toBe(1_500_000);
+    expect(r.positionP).toBe(150_000);
+    expect(r.mealP).toBe(100_000);
+  });
+
+  it("시급제: 추정근로시간·주휴수당에 재직비율 적용", () => {
+    const emp: EmployeePayInput = {
+      incomeType: "FREELANCE",
+      payScheme: "HOURLY",
+      baseWage: 12_000,
+      positionAllow: 0,
+      mealAllow: 0,
+      carAllow: 0,
+      dependents: 1,
+      schedule: instructor, // 주 32.5h, 주휴 6.5h
+    };
+    const full = computePayroll(emp, {}, DEFAULT_RATES_2025, smallTaxTable);
+    const half = computePayroll(emp, { prorationRatio: 0.5 }, DEFAULT_RATES_2025, smallTaxTable);
+    expect(half.baseP).toBe(Math.round(12_000 * 32.5 * 4.345 * 0.5));
+    expect(half.weeklyHolidayP).toBe(Math.round(12_000 * 6.5 * 4.345 * 0.5));
+    expect(half.gross).toBeLessThan(full.gross);
+  });
+
+  it("비율제는 일할 미적용 (매출 기반)", () => {
+    const emp: EmployeePayInput = {
+      incomeType: "FREELANCE",
+      payScheme: "RATIO",
+      baseWage: 0,
+      positionAllow: 0,
+      mealAllow: 0,
+      carAllow: 0,
+      dependents: 1,
+      schedule: instructor,
+      ratioPercent: 0.5,
+    };
+    const r = computePayroll(
+      emp,
+      { classRevenue: 10_000_000, prorationRatio: 0.5 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.baseP).toBe(5_000_000); // 비율제는 그대로
+  });
+});
+
 describe("computePayroll — 시급제 주휴수당", () => {
   it("주 15시간 이상이면 주휴수당 발생", () => {
     const emp: EmployeePayInput = {

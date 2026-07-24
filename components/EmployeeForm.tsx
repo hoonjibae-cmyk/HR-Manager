@@ -48,7 +48,8 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     payScheme: initial?.payScheme ?? "MONTHLY",
     baseWage: initial?.baseWage ?? 0,
     positionAllow: initial?.positionAllow ?? 0,
-    mealAllow: initial?.mealAllow ?? 0,
+    // 신규 등록 기본값: 4대보험 직원은 식대 20만원 포함
+    mealAllow: initial ? initial.mealAllow ?? 0 : 200000,
     carAllow: initial?.carAllow ?? 0,
     dependents: initial?.dependents ?? 1,
     nonTaxTotal: initial?.nonTaxTotal ?? 0,
@@ -133,7 +134,15 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
             </select>
           </Field>
           <Field label="세무/보험 구분">
-            <select className="input" value={f.incomeType} onChange={(e) => set("incomeType", e.target.value)}>
+            <select
+              className="input"
+              value={f.incomeType}
+              onChange={(e) => {
+                const v = e.target.value;
+                // 4대보험 직원은 식대 20만원 포함이 기본 (전환 시 자동 설정)
+                setF((p: any) => ({ ...p, incomeType: v, mealAllow: v === "EMPLOYEE" ? 200000 : 0 }));
+              }}
+            >
               {Object.entries(INCOME_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </Field>

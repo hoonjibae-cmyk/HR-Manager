@@ -53,8 +53,12 @@ export interface EmployeePayInput {
   ratioPercent?: number | null;
 }
 
+/** 인센티브 퇴직유보금 요율 — 확인서 기준 '인센티브 원천액의 8.3%' */
+export const RETENTION_RATE = 0.083;
+
 export interface MonthlyInput {
   workedHours?: number | null; // 시급제 실근로시간(월). 없으면 스케줄로 추정
+  prorationRatio?: number; // 일할계산 비율(월중 입/퇴사). 1=만근월. 월급·수당·추정근로시간에 적용
   extraHours?: number; // 법내연장(월): 소정 외이나 1일8h·주40h 이내 — 가산 없음(×1.0)
   overtimeHours?: number; // 법정 연장근로(월): 1일8h·주40h 초과분 — ×1.5
   nightHours?: number; // 야간근로(월, 22~06시) — +0.5 가산
@@ -94,6 +98,7 @@ export interface PayrollResult {
   longTermD: number;
   incomeTaxD: number;
   localTaxD: number;
+  retentionD: number; // 퇴직유보금 (인센티브×8.3%)
   otherD: number;
   totalDeduct: number;
 
@@ -192,17 +197,23 @@ export function computePayroll(
   }
   hourlyWage = round0(hourlyWage);
 
+  // --- 일할계산 비율 (월중 입/퇴사). 비율제는 매출 기반이라 미적용 ---
+  const rawRatio = month.prorationRatio ?? 1;
+  const prorate =
+    emp.payScheme === "RATIO" ? 1 : Math.min(Math.max(rawRatio, 0), 1);
+  if (prorate < 1) notes.push(`일할계산 적용 (재직비율 ${(prorate * 100).toFixed(1)}%)`);
+
   // --- 기본급 ---
   let baseP = 0;
   let weeklyHolidayP = 0;
   if (emp.payScheme === "HOURLY") {
     const monthHours =
       month.workedHours != null && month.workedHours > 0
-        ? month.workedHours
-        : weeklyContractual * WEEKS_PER_MONTH; // 스케줄 기반 추정
+        ? month.workedHours // 실제 근로시간 입력 시 그대로 사용(일할 이미 반영됨)
+        : weeklyContractual * WEEKS_PER_MONTH * prorate; // 스케줄 기반 추정
     baseP = round0(emp.baseWage * monthHours);
     // 시급제 주휴수당
-    weeklyHolidayP = round0(emp.baseWage * weeklyHoliday * WEEKS_PER_MONTH);
+    weeklyHolidayP = round0(emp.baseWage * weeklyHoliday * WEEKS_PER_MONTH * prorate);
     if (weeklyHoliday === 0)
       notes.push("주 15시간 미만으로 주휴수당 미발생");
   } else if (emp.payScheme === "RATIO") {
@@ -213,8 +224,8 @@ export function computePayroll(
       `비율제: 매출 ${rev.toLocaleString()}원 × ${(pct * 100).toFixed(1)}%`
     );
   } else {
-    // MONTHLY / INCENTIVE — 포괄임금(월 기본급 고정)
-    baseP = round0(emp.baseWage);
+    // MONTHLY / INCENTIVE — 포괄임금(월 기본급 고정, 월중 입/퇴사 시 일할)
+    baseP = round0(emp.baseWage * prorate);
   }
 
   // --- 인센티브 ---
@@ -242,10 +253,10 @@ export function computePayroll(
   const nightP = round0(nightH * hourlyWage * 0.5);
   const holidayP = round0(holH * hourlyWage * 1.5);
 
-  // --- 수당 ---
-  const positionP = emp.positionAllow || 0;
-  const mealP = emp.mealAllow || 0;
-  const carP = emp.carAllow || 0;
+  // --- 수당 (월 정액 수당은 일할 적용) ---
+  const positionP = round0((emp.positionAllow || 0) * prorate);
+  const mealP = round0((emp.mealAllow || 0) * prorate);
+  const carP = round0((emp.carAllow || 0) * prorate);
   const bonusP = month.bonus ?? 0;
 
   // --- 연차미사용수당 = 1일 통상임금(통상시급×8) × 미사용일수 ---
@@ -295,6 +306,15 @@ export function computePayroll(
     localTaxD = floor10(incomeTaxD * rates.localIncomeTaxRate);
   }
 
+  // --- 퇴직유보금: 인센티브 계약은 인센티브 원천액의 8.3%를 별도통장 송금(공제) ---
+  let retentionD = 0;
+  if (emp.payScheme === "INCENTIVE" && incentiveP > 0) {
+    retentionD = floor10(incentiveP * RETENTION_RATE);
+    notes.push(
+      `퇴직유보금: 인센티브 ${incentiveP.toLocaleString()}원 × 8.3% (별도통장 송금)`
+    );
+  }
+
   const otherD = 0;
   const totalDeduct =
     pensionD +
@@ -303,6 +323,7 @@ export function computePayroll(
     longTermD +
     incomeTaxD +
     localTaxD +
+    retentionD +
     otherD;
   const net = gross - totalDeduct;
 
@@ -330,6 +351,7 @@ export function computePayroll(
     longTermD,
     incomeTaxD,
     localTaxD,
+    retentionD,
     otherD,
     totalDeduct,
     net,

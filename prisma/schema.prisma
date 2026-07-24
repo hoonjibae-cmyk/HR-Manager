@@ -178,6 +178,7 @@ model PayrollRecord {
   bonus           Int     @default(0) // 특별상여
   incentiveManual Int     @default(0) // 수동 인센티브 조정
   unusedLeaveDays Float   @default(0) // 연차미사용수당 일수
+  prorationRatio  Float   @default(1) // 일할계산 비율 (월중 입/퇴사)
 
   // 계산 결과 (원)
   baseP        Int   @default(0)  // 기본급
@@ -195,12 +196,17 @@ model PayrollRecord {
   gross        Int   @default(0)  // 지급액 계
 
   // 공제
+  // 공제모드: MANUAL(세무사 지정값 직접입력, 기본) | AUTO(엔진 자동산출)
+  deductMode   String @default("MANUAL")
   pensionD     Int   @default(0)  // 국민연금
   employmentD  Int   @default(0)  // 고용보험
   healthD      Int   @default(0)  // 건강보험
   longTermD    Int   @default(0)  // 장기요양
   incomeTaxD   Int   @default(0)  // 소득세 (근로 or 사업 3%)
   localTaxD    Int   @default(0)  // 지방소득세
+  retentionD   Int   @default(0)  // 퇴직유보금 (인센티브 원천액의 8.3%, 별도통장 송금)
+  parkingD     Int   @default(0)  // 월 정기주차비 공제 (본인부담분)
+  expenseD     Int   @default(0)  // 실비 정산 (+공제 / -환급)
   otherD       Int   @default(0)  // 기타공제/정산
   totalDeduct  Int   @default(0)  // 공제액 계
   net          Int   @default(0)  // 실수령액

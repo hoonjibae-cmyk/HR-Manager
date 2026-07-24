@@ -22,6 +22,13 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const b = await req.json();
+  const target = await prisma.employee.findUnique({ where: { id: Number(b.employeeId) } });
+  if (target?.payScheme === "RATIO") {
+    return NextResponse.json(
+      { error: "완전비율제(위탁) 계약은 연차휴가 대상이 아닙니다." },
+      { status: 400 }
+    );
+  }
   const start = new Date(b.startDate);
   const end = new Date(b.endDate || b.startDate);
   const half = b.leaveType === "HALF_AM" || b.leaveType === "HALF_PM";
