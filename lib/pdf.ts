@@ -134,24 +134,33 @@ async function launchOptions(): Promise<LaunchOpts> {
   }
 }
 
+async function launchBrowser(): Promise<Browser> {
+  const opts = await launchOptions();
+  return puppeteer.launch({
+    executablePath: opts.executablePath,
+    args: opts.args,
+    headless: opts.headless as any,
+    defaultViewport: opts.defaultViewport ?? { width: 1200, height: 1600 },
+  });
+}
+
+// 비서버리스(로컬/VPS, 상시 프로세스)에서만 브라우저를 캐시·재사용한다.
+// 서버리스(Vercel)에서는 컨테이너 freeze/thaw 로 캐시된 브라우저가 죽어 hang 이
+// 발생하므로 매 호출마다 새로 띄우고 닫는다.
 let browserPromise: Promise<Browser> | null = null;
 
-async function getBrowser(): Promise<Browser> {
-  if (!browserPromise) {
-    browserPromise = launchOptions()
-      .then((opts) =>
-        puppeteer.launch({
-          executablePath: opts.executablePath,
-          args: opts.args,
-          headless: opts.headless as any,
-          defaultViewport: opts.defaultViewport ?? { width: 1200, height: 1600 },
-        })
-      )
-      .catch((e) => {
-        browserPromise = null;
-        throw e;
-      });
+async function getCachedBrowser(): Promise<Browser> {
+  if (browserPromise) {
+    try {
+      const b = await browserPromise;
+      if (b.connected) return b;
+    } catch {}
+    browserPromise = null;
   }
+  browserPromise = launchBrowser().catch((e) => {
+    browserPromise = null;
+    throw e;
+  });
   return browserPromise;
 }
 
@@ -164,18 +173,24 @@ export interface PdfOptions {
 export async function htmlToPdf(bodyHtml: string, opts: PdfOptions = {}): Promise<Buffer> {
   const margin = opts.marginMm ?? 14;
   const html = wrapHtml(bodyHtml);
-  const browser = await getBrowser();
+  const browser = onServerless ? await launchBrowser() : await getCachedBrowser();
   const page = await browser.newPage();
   try {
-    await page.setContent(html, { waitUntil: "load", timeout: 60000 });
-    await page.evaluate(async () => {
-      // @ts-ignore
-      if (document.fonts && document.fonts.ready) await document.fonts.ready;
-    });
+    page.setDefaultTimeout(45000);
+    await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 45000 });
+    // 폰트 로드 대기(최대 8초). 소프트웨어 렌더링에서 무한 대기 방지.
+    await Promise.race([
+      page.evaluate(async () => {
+        // @ts-ignore
+        if (document.fonts && document.fonts.ready) await document.fonts.ready;
+      }),
+      new Promise((r) => setTimeout(r, 8000)),
+    ]);
     const pdf = await page.pdf({
       format: "A4",
       landscape: !!opts.landscape,
       printBackground: true,
+      timeout: 45000,
       margin: {
         top: `${margin}mm`,
         bottom: `${margin}mm`,
@@ -185,7 +200,8 @@ export async function htmlToPdf(bodyHtml: string, opts: PdfOptions = {}): Promis
     });
     return Buffer.from(pdf);
   } finally {
-    await page.close();
+    await page.close().catch(() => {});
+    if (onServerless) await browser.close().catch(() => {});
   }
 }
 
@@ -224,7 +240,7 @@ export async function closeBrowser() {
 
 // 문서 공통 스타일
 export const DOC_CSS = `
-.doc-title{font-family:'NanumMyeongjo',serif;font-weight:700;font-size:22pt;text-align:center;letter-spacing:0.4em;margin:6px 0 18px;}
+.doc-title{font-family:'NanumGothic',sans-serif;font-weight:700;font-size:22pt;text-align:center;letter-spacing:0.4em;margin:6px 0 18px;}
 .doc-sub{text-align:center;color:#444;margin-bottom:16px;}
 .company-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1f45f5;padding-bottom:8px;margin-bottom:14px;}
 .company-head .cname{font-size:14pt;font-weight:800;}

@@ -12,12 +12,10 @@ function b64(file: string): string {
 /** 문서용 @font-face CSS (base64 임베드). 최초 1회 로드 후 캐시. */
 export function fontFaceCss(): string {
   if (cachedCss) return cachedCss;
+  // 서버리스 렌더링 속도를 위해 최소 폰트만 임베드 (본문/제목 모두 NanumGothic)
   const faces = [
     ["NanumGothic", 400, "NanumGothic-Regular.woff2"],
     ["NanumGothic", 700, "NanumGothic-Bold.woff2"],
-    ["NanumGothic", 800, "NanumGothic-ExtraBold.woff2"],
-    ["NanumMyeongjo", 400, "NanumMyeongjo-Regular.woff2"],
-    ["NanumMyeongjo", 700, "NanumMyeongjo-Bold.woff2"],
   ] as const;
   cachedCss = faces
     .map(
