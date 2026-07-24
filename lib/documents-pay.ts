@@ -40,8 +40,7 @@ function esc(s: any): string {
 function head(c: DocCompany, extra = ""): string {
   return `<div class="company-head">
     <div><div class="cname">${esc(c.name)}</div>
-      <div class="small">대표 ${esc(c.ceo)} · 사업자등록번호 ${esc(c.bizNo)}</div>
-      <div class="small">${esc(c.address)} · ${esc(c.phone)}</div></div>
+      <div class="cmeta">대표 ${esc(c.ceo)} · 사업자등록번호 ${esc(c.bizNo)}<br/>${esc(c.address)} · ${esc(c.phone)}</div></div>
     <div style="text-align:right">${extra}</div>
   </div>`;
 }
@@ -146,12 +145,14 @@ export function certEmploymentHtml(args: {
     <tr><th>주소</th><td colspan="3">${esc(e.address ?? "-")}</td></tr>
     <tr><th>용도</th><td colspan="3">${esc(args.purpose ?? "제출용")}</td></tr>
   </table>
-  <p style="text-align:center;margin:26px 0;font-size:12pt">위 사람은 상기와 같이 <b>${esc(c.name)}</b>에 재직하고 있음을 증명합니다.</p>
-  <div class="date-center">${ymdKo(issue)}</div>
-  <div style="text-align:center;margin-top:16px;font-size:13pt">
-    <div style="font-weight:800;font-size:15pt">${esc(c.name)}</div>
-    <div style="margin-top:4px">대표이사 ${esc(c.ceo)} <span class="seal">(직인)</span></div>
-    <div class="small" style="margin-top:2px">${esc(c.address)} · ${esc(c.phone)}</div>
+  <p style="text-align:center;margin:30px 0;font-size:12pt">위 사람은 상기와 같이 <b>${esc(c.name)}</b>에 재직하고 있음을 증명합니다.</p>
+  <div class="doc-foot" style="align-items:center;text-align:center">
+    <div class="date-center">${ymdKo(issue)}</div>
+    <div style="margin-top:18px;font-size:13pt">
+      <div style="font-weight:800;font-size:16pt;letter-spacing:0.02em">${esc(c.name)}</div>
+      <div style="margin-top:6px">대표이사 ${esc(c.ceo)} <span class="seal">(직인)</span></div>
+      <div class="small" style="margin-top:3px">${esc(c.address)} · ${esc(c.phone)}</div>
+    </div>
   </div>`;
 }
 
@@ -191,11 +192,13 @@ export function certCareerHtml(args: {
       )
       .join("")}</tbody>
   </table>
-  <p style="text-align:center;margin:22px 0;font-size:12pt">위 사람은 상기와 같이 근무하였음을 증명합니다.</p>
+  <p style="text-align:center;margin:26px 0 6px;font-size:12pt">위 사람은 상기와 같이 근무하였음을 증명합니다.</p>
   <p class="small" style="text-align:center">용도: ${esc(args.purpose ?? "제출용")}</p>
-  <div class="date-center">${ymdKo(issue)}</div>
-  <div style="text-align:center;margin-top:16px;font-size:13pt">
-    <div style="font-weight:800;font-size:15pt">${esc(c.name)}</div>
-    <div style="margin-top:4px">대표이사 ${esc(c.ceo)} <span class="seal">(직인)</span></div>
+  <div class="doc-foot" style="align-items:center;text-align:center">
+    <div class="date-center">${ymdKo(issue)}</div>
+    <div style="margin-top:18px;font-size:13pt">
+      <div style="font-weight:800;font-size:16pt;letter-spacing:0.02em">${esc(c.name)}</div>
+      <div style="margin-top:6px">대표이사 ${esc(c.ceo)} <span class="seal">(직인)</span></div>
+    </div>
   </div>`;
 }

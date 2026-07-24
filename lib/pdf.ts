@@ -169,10 +169,10 @@ export interface PdfOptions {
   marginMm?: number;
 }
 
-/** 완성된 HTML(본문)을 A4 PDF(Buffer)로 렌더링. 한글 폰트 자동 임베드. */
-export async function htmlToPdf(bodyHtml: string, opts: PdfOptions = {}): Promise<Buffer> {
-  const margin = opts.marginMm ?? 14;
-  const html = wrapHtml(bodyHtml);
+/** 내부 렌더러: 완성된 본문 HTML 을 A4 PDF(Buffer)로 렌더링. */
+async function renderPdf(innerBody: string, opts: PdfOptions = {}): Promise<Buffer> {
+  const margin = opts.marginMm ?? 15;
+  const html = wrapHtml(innerBody);
   const browser = onServerless ? await launchBrowser() : await getCachedBrowser();
   const page = await browser.newPage();
   try {
@@ -205,6 +205,11 @@ export async function htmlToPdf(bodyHtml: string, opts: PdfOptions = {}): Promis
   }
 }
 
+/** 단일 문서(본문)를 A4 PDF 로 렌더링. 서명란은 페이지 하단에 자동 정렬. */
+export async function htmlToPdf(bodyHtml: string, opts: PdfOptions = {}): Promise<Buffer> {
+  return renderPdf(`<section class="doc-page">${bodyHtml}</section>`, opts);
+}
+
 /** 여러 문서(HTML 본문)를 페이지 구분하여 하나의 PDF 로 병합 */
 export async function htmlPagesToPdf(bodies: string[]): Promise<Buffer> {
   const joined = bodies
@@ -215,7 +220,7 @@ export async function htmlPagesToPdf(bodies: string[]): Promise<Buffer> {
         }>${b}</section>`
     )
     .join("\n");
-  return htmlToPdf(joined);
+  return renderPdf(joined);
 }
 
 function wrapHtml(body: string): string {
@@ -223,8 +228,10 @@ function wrapHtml(body: string): string {
 <style>
 ${fontFaceCss()}
 *{box-sizing:border-box;}
-html,body{margin:0;padding:0;font-family:'NanumGothic',sans-serif;color:#111;font-size:10.5pt;line-height:1.5;}
-.doc-page{padding:0;}
+html,body{margin:0;padding:0;font-family:'NanumGothic',sans-serif;color:#1a1a1a;font-size:10pt;line-height:1.55;}
+/* 각 문서를 한 페이지 높이의 세로 flex 로 만들어 서명란을 하단에 정렬 */
+.doc-page{display:flex;flex-direction:column;min-height:262mm;}
+.doc-body{flex:0 0 auto;}
 h1,h2,h3{font-family:'NanumGothic',sans-serif;}
 ${DOC_CSS}
 </style></head><body>${body}</body></html>`;
@@ -240,29 +247,41 @@ export async function closeBrowser() {
 
 // 문서 공통 스타일
 export const DOC_CSS = `
-.doc-title{font-family:'NanumGothic',sans-serif;font-weight:700;font-size:22pt;text-align:center;letter-spacing:0.4em;margin:6px 0 18px;}
-.doc-sub{text-align:center;color:#444;margin-bottom:16px;}
-.company-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1f45f5;padding-bottom:8px;margin-bottom:14px;}
-.company-head .cname{font-size:14pt;font-weight:800;}
-.muted{color:#666;}
-table.kv{width:100%;border-collapse:collapse;margin:8px 0;}
-table.kv th,table.kv td{border:1px solid #999;padding:6px 8px;font-size:10pt;vertical-align:middle;}
-table.kv th{background:#f1f5ff;text-align:center;white-space:nowrap;width:120px;font-weight:700;}
-.clause{margin:10px 0;}
-.clause h3{font-size:11pt;margin:12px 0 4px;font-weight:700;}
+.doc-title{font-weight:800;font-size:19pt;text-align:center;letter-spacing:0.5em;margin:2px 0 4px;padding-right:0.5em;}
+.doc-sub{text-align:center;color:#64748b;font-size:9.5pt;margin-bottom:14px;}
+.company-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1f45f5;padding-bottom:6px;margin-bottom:14px;}
+.company-head .cname{font-size:15pt;font-weight:800;letter-spacing:-0.01em;}
+.company-head .cmeta{font-size:8.5pt;color:#64748b;line-height:1.55;margin-top:2px;}
+.company-head .doc-tag{font-size:8.5pt;color:#94a3b8;text-align:right;}
+.muted{color:#64748b;}
+table.kv{width:100%;border-collapse:collapse;margin:7px 0;}
+table.kv th,table.kv td{border:1px solid #cbd5e1;padding:5px 8px;font-size:9.8pt;vertical-align:middle;}
+table.kv th{background:#f5f8ff;text-align:center;white-space:nowrap;width:118px;font-weight:700;color:#334155;}
+.clause{margin:8px 0;}
+.clause h3{font-size:11pt;margin:11px 0 3px;font-weight:800;color:#1f2d5a;}
 .clause p{margin:3px 0;}
-.clause .sub{margin-left:14px;text-indent:-14px;}
-.sign-area{margin-top:26px;}
+.clause .sub{margin-left:15px;text-indent:-15px;}
+.agree-line{margin-top:14px;}
+.doc-foot{margin-top:auto;padding-top:12px;}
+.sign-area{padding-top:2px;page-break-inside:avoid;}
+.sign-duo{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.sign-box{border:1px solid #cbd5e1;border-radius:8px;padding:9px 13px;margin-top:5px;page-break-inside:avoid;}
+.sign-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;}
+.sign-grid.one{grid-template-columns:1fr;}
+.sign-grid .full{grid-column:1 / -1;}
+.sign-grid .f{font-size:9.6pt;}
+.sign-grid .lbl{color:#64748b;margin-right:6px;}
+.sign-grid .fill{border-bottom:1px solid #94a3b8;padding:0 6px;}
+.sign-party{font-weight:800;color:#1f2d5a;margin:8px 0 2px;font-size:10pt;}
 .sign-row{display:flex;justify-content:space-between;margin:8px 0;}
-.sign-line{border-bottom:1px solid #333;min-width:160px;display:inline-block;}
 .seal{color:#c0392b;font-weight:700;}
-.date-center{text-align:center;margin:22px 0;font-size:11pt;}
+.date-center{text-align:center;margin:14px 0 6px;font-size:11pt;letter-spacing:0.05em;}
 table.pay{width:100%;border-collapse:collapse;margin-top:8px;}
-table.pay th,table.pay td{border:1px solid #999;padding:5px 8px;font-size:9.5pt;}
-table.pay th{background:#f1f5ff;font-weight:700;}
+table.pay th,table.pay td{border:1px solid #cbd5e1;padding:6px 9px;font-size:9.6pt;}
+table.pay th{background:#f5f8ff;font-weight:700;color:#334155;}
 table.pay td.num{text-align:right;font-variant-numeric:tabular-nums;}
 table.pay tr.total td{background:#eef4ff;font-weight:800;}
-.list-num{margin:4px 0;padding-left:20px;text-indent:-20px;}
-.small{font-size:9pt;color:#555;}
+.list-num{margin:5px 0;padding-left:20px;text-indent:-20px;}
+.small{font-size:8.8pt;color:#64748b;}
 .badge{display:inline-block;padding:1px 8px;border:1px solid #1f45f5;border-radius:10px;color:#1f45f5;font-size:9pt;}
 `;

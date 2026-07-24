@@ -55,14 +55,21 @@ function esc(s: any): string {
     .replace(/>/g, "&gt;");
 }
 
-function companyHead(c: DocCompany): string {
+function companyHead(c: DocCompany, tag?: string): string {
   return `<div class="company-head">
     <div><div class="cname">${esc(c.name)}</div>
-      <div class="small">대표 ${esc(c.ceo)} · 사업자등록번호 ${esc(c.bizNo)}</div>
-      <div class="small">${esc(c.address)} · ${esc(c.phone)}</div>
+      <div class="cmeta">대표 ${esc(c.ceo)} · 사업자등록번호 ${esc(c.bizNo)}<br/>${esc(c.address)} · ${esc(c.phone)}</div>
     </div>
-    <div class="badge">HR DOCUMENT</div>
+    ${tag ? `<div class="doc-tag">${esc(tag)}</div>` : ""}
   </div>`;
+}
+
+/** 서명 필드 (라벨 + 값/밑줄) */
+function sigField(label: string, value?: string | null, seal = false): string {
+  if (value) {
+    return `<div class="f"><span class="lbl">${esc(label)}</span><b>${esc(value)}</b>${seal ? ' <span class="seal">(인)</span>' : ""}</div>`;
+  }
+  return `<div class="f"><span class="lbl">${esc(label)}</span><span class="fill">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>${seal ? ' <span class="seal">(인)</span>' : ""}</div>`;
 }
 
 function scheduleTable(schedule: ScheduleDay[]): string {
@@ -183,15 +190,29 @@ export function contractHtml(args: {
     <p class="sub">③ "을"이 계약기간 중 생산한 교재·수업자료·동영상 등의 지적재산권은 "갑"에게 귀속된다.</p>
     <p class="sub">④ 급여명세서를 이메일(${esc(e.email ?? "")})로 교부받는 것에 동의한다. ( 동의 : ______ )</p></div>
 
-  <p style="margin-top:14px">"갑"과 "을"은 상기와 같이 계약을 체결하고, 계약서 2부를 작성하여 각 1부씩 보관한다.</p>
-  <div class="date-center">${ymdKo(ct.startDate)}</div>
-
-  <div class="sign-area">
-    <div class="sign-row"><span>"갑" (사용자) 회사명: <b>${esc(c.name)}</b></span><span>대표자: ${esc(c.ceo)} <span class="seal">(인)</span></span></div>
-    <div class="sign-row"><span>주소: ${esc(c.address)}</span><span>전화: ${esc(c.phone)}</span></div>
-    <div style="height:8px"></div>
-    <div class="sign-row"><span>"을" (${partyB}) 성명: <b>${esc(e.name)}</b> <span class="seal">(인)</span></span><span>생년월일: ${esc(e.birth ?? "__________")}</span></div>
-    <div class="sign-row"><span>주소: ${esc(e.address ?? "____________________________")}</span><span>연락처: ${esc(e.phone ?? "____________")}</span></div>
+  <div class="doc-foot">
+    <p style="text-align:center">"갑"과 "을"은 상기와 같이 계약을 체결하고, 계약서 2부를 작성하여 각 1부씩 보관한다.</p>
+    <div class="date-center">${ymdKo(ct.startDate)}</div>
+    <div class="sign-area"><div class="sign-duo">
+      <div>
+        <div class="sign-party">"갑" (사용자)</div>
+        <div class="sign-box"><div class="sign-grid one">
+          ${sigField("회사명", c.name)}
+          ${sigField("대표자", c.ceo, true)}
+          ${sigField("주소", c.address)}
+          ${sigField("전화", c.phone)}
+        </div></div>
+      </div>
+      <div>
+        <div class="sign-party">"을" (${partyB})</div>
+        <div class="sign-box"><div class="sign-grid one">
+          ${sigField("성명", e.name, true)}
+          ${sigField("생년월일", e.birth)}
+          ${sigField("주소", e.address)}
+          ${sigField("연락처", e.phone)}
+        </div></div>
+      </div>
+    </div></div>
   </div>`;
 }
 
@@ -224,11 +245,16 @@ export function pledgeServiceHtml(args: { employee: DocEmployee; company: DocCom
   <div class="clause">
     ${items.map((t, i) => `<p class="list-num">${i + 1}. ${esc(t)}</p>`).join("")}
   </div>
-  <div class="date-center">${ymdKo(date)}</div>
-  <div class="sign-area">
-    <div class="sign-row"><span>서약자 성명: <b>${esc(e.name)}</b> <span class="seal">(인)</span></span><span>생년월일: ${esc(e.birth ?? "__________")}</span></div>
-    <div class="sign-row"><span>주소: ${esc(e.address ?? "____________________________")}</span><span>연락처: ${esc(e.phone ?? "____________")}</span></div>
-    <div class="sign-row" style="margin-top:14px"><span><b>${esc(c.name)}</b> 대표 ${esc(c.ceo)} 귀하</span></div>
+  <div class="doc-foot">
+    <div class="date-center">${ymdKo(date)}</div>
+    <div class="sign-area">
+      <div class="sign-box"><div class="sign-grid">
+        ${sigField("서약자", e.name, true)}${sigField("생년월일", e.birth)}
+        <div class="full">${sigField("주소", e.address)}</div>
+        ${sigField("연락처", e.phone)}
+      </div></div>
+      <div style="text-align:right;margin-top:12px;font-weight:700"><b>${esc(c.name)}</b> 대표 ${esc(c.ceo)} 귀하</div>
+    </div>
   </div>`;
 }
 
@@ -258,10 +284,15 @@ export function consentPrivacyHtml(args: { employee: DocEmployee; company: DocCo
     <div style="font-weight:700;margin-bottom:4px">□ 고유식별정보의 처리에 관한 동의</div>
     <div class="small">회사가 본인의 고유식별정보(주민등록번호, 운전면허번호, 외국인등록번호, 여권번호)를 「개인정보보호법」 제24조에 따라 수집·이용·제공 등 처리하는 데 동의합니다. ( 동의 : ______ )</div>
   </div>
-  <div class="date-center">${ymdKo(date)}</div>
-  <div class="sign-area">
-    <div class="sign-row"><span>동의자 성명: <b>${esc(e.name)}</b> <span class="seal">(인)</span></span><span>주민등록번호: ${esc(maskRRN(e.rrn) || "______-_______")}</span></div>
-    <div class="sign-row"><span>주소: ${esc(e.address ?? "____________________________")}</span><span>연락처: ${esc(e.phone ?? "____________")}</span></div>
+  <div class="doc-foot">
+    <div class="date-center">${ymdKo(date)}</div>
+    <div class="sign-area">
+      <div class="sign-box"><div class="sign-grid">
+        ${sigField("동의자", e.name, true)}${sigField("주민등록번호", maskRRN(e.rrn) || null)}
+        <div class="full">${sigField("주소", e.address)}</div>
+        ${sigField("연락처", e.phone)}
+      </div></div>
+    </div>
   </div>`;
 }
 
@@ -278,10 +309,14 @@ export function consentDeductionHtml(args: { employee: DocEmployee; company: Doc
     <tr><th>정산</th><td>과·오납 발생 시 익월 임금에서 정산함에 동의</td></tr>
   </table>
   <p class="small">※ 본 동의는 근로기준법 제43조(임금 전액지급의 원칙)의 예외로서, 법령에 근거하지 않은 임의공제에는 적용되지 아니합니다.</p>
-  <div class="date-center">${ymdKo(date)}</div>
-  <div class="sign-area">
-    <div class="sign-row"><span>동의자 성명: <b>${esc(e.name)}</b> <span class="seal">(인)</span></span><span>생년월일: ${esc(e.birth ?? "__________")}</span></div>
-    <div class="sign-row" style="margin-top:12px"><span><b>${esc(c.name)}</b> 대표 ${esc(c.ceo)} 귀하</span></div>
+  <div class="doc-foot">
+    <div class="date-center">${ymdKo(date)}</div>
+    <div class="sign-area">
+      <div class="sign-box"><div class="sign-grid">
+        ${sigField("동의자", e.name, true)}${sigField("생년월일", e.birth)}
+      </div></div>
+      <div style="text-align:right;margin-top:12px;font-weight:700"><b>${esc(c.name)}</b> 대표 ${esc(c.ceo)} 귀하</div>
+    </div>
   </div>`;
 }
 
