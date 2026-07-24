@@ -19,6 +19,8 @@ interface Rec {
   bonusP: number;
   status: string;
   overtimeHours: number;
+  holidayHours: number;
+  nightHours: number;
   studentCount: number | null;
   classRevenue: number | null;
   bonus: number;
@@ -46,6 +48,8 @@ export default function PayrollClient() {
     data.forEach((r: Rec) => {
       map[r.employeeId] = {
         overtimeHours: r.overtimeHours || "",
+        holidayHours: r.holidayHours || "",
+        nightHours: r.nightHours || "",
         studentCount: r.studentCount ?? "",
         classRevenue: r.classRevenue ?? "",
         bonus: r.bonus || "",
@@ -66,6 +70,8 @@ export default function PayrollClient() {
     for (const [id, v] of Object.entries(inputs)) {
       cleanInputs[Number(id)] = {
         overtimeHours: v.overtimeHours ? Number(v.overtimeHours) : 0,
+        holidayHours: v.holidayHours ? Number(v.holidayHours) : 0,
+        nightHours: v.nightHours ? Number(v.nightHours) : 0,
         studentCount: v.studentCount !== "" ? Number(v.studentCount) : null,
         classRevenue: v.classRevenue !== "" ? Number(v.classRevenue) : null,
         bonus: v.bonus ? Number(v.bonus) : 0,
@@ -197,8 +203,10 @@ export default function PayrollClient() {
                         <InlineInput label="매출" value={inputs[r.employeeId]?.classRevenue ?? ""} onChange={(v) => setInput(r.employeeId, "classRevenue", v)} wide />
                       )}
                       <InlineInput label="연장h" value={inputs[r.employeeId]?.overtimeHours ?? ""} onChange={(v) => setInput(r.employeeId, "overtimeHours", v)} />
+                      <InlineInput label="휴일h" value={inputs[r.employeeId]?.holidayHours ?? ""} onChange={(v) => setInput(r.employeeId, "holidayHours", v)} />
+                      <InlineInput label="야간h" value={inputs[r.employeeId]?.nightHours ?? ""} onChange={(v) => setInput(r.employeeId, "nightHours", v)} />
                       <InlineInput label="상여" value={inputs[r.employeeId]?.bonus ?? ""} onChange={(v) => setInput(r.employeeId, "bonus", v)} wide />
-                      <InlineInput label="연차정산일" value={inputs[r.employeeId]?.unusedLeaveDays ?? ""} onChange={(v) => setInput(r.employeeId, "unusedLeaveDays", v)} />
+                      <InlineInput label="미사용연차(일)" value={inputs[r.employeeId]?.unusedLeaveDays ?? ""} onChange={(v) => setInput(r.employeeId, "unusedLeaveDays", v)} />
                     </div>
                   </td>
                   <td className="td text-right tnum">{won(r.gross)}</td>
@@ -215,9 +223,20 @@ export default function PayrollClient() {
         )}
       </div>
       {recs.length > 0 && (
-        <p className="text-xs text-slate-400 mt-3">
-          ※ 변동입력(학생수·매출·연장·상여·연차정산)을 수정한 뒤 <b>급여 일괄 산정</b>을 다시 누르면 반영됩니다. 확정(CONFIRMED)된 기록은 재계산되지 않습니다.
-        </p>
+        <div className="text-xs text-slate-400 mt-3 space-y-1">
+          <p>
+            ※ 변동입력을 수정한 뒤 <b>급여 일괄 산정</b>을 다시 누르면 반영됩니다. 확정(CONFIRMED)된 기록은 재계산되지 않습니다.
+          </p>
+          <p>
+            · <b>연장h</b>: 평일 소정근로 외 + 토요일 근무시간 → 연장근로수당(통상시급×1.5) &nbsp;
+            · <b>휴일h</b>: 일요일·공휴일 근무시간 → 휴일근로수당(×1.5) &nbsp;
+            · <b>야간h</b>: 22시~06시 근무시간 → 야간가산(+0.5)
+          </p>
+          <p>
+            · <b>상여</b>: 특별상여 금액(원) &nbsp;
+            · <b>미사용연차(일)</b>: 소멸 예정 연차를 수당으로 정산할 일수 — 연차미사용수당 = 일수 × 통상시급 × 8시간
+          </p>
+        </div>
       )}
     </div>
   );
