@@ -292,11 +292,16 @@ export default function PayrollClient() {
                   <td className="td">
                     <div className="font-semibold">{r.employee.name}</div>
                     <div className="text-xs text-slate-400">{r.employee.department} {r.employee.position}</div>
-                    {r.prorationRatio < 1 && (
+                    {r.prorationRatio < 1 && (r.payScheme === "MONTHLY" || r.payScheme === "INCENTIVE") && (
                       <div className="text-[10px] text-amber-600 mt-0.5">일할 {(r.prorationRatio * 100).toFixed(0)}%</div>
                     )}
                   </td>
-                  <td className="td"><Pill kind={r.payScheme}>{PAY_SCHEME_LABEL[r.payScheme]}</Pill></td>
+                  <td className="td">
+                    <div className="flex flex-col items-start gap-1">
+                      <Pill kind={r.payScheme}>{PAY_SCHEME_LABEL[r.payScheme]}</Pill>
+                      <Pill kind={r.incomeType}>{r.incomeType === "FREELANCE" ? "사업소득" : "근로소득"}</Pill>
+                    </div>
+                  </td>
                   <td className="td">
                     <div className="flex flex-wrap gap-1">
                       {r.payScheme === "INCENTIVE" && (
