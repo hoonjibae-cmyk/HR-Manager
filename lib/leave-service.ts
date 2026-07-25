@@ -7,6 +7,7 @@ export async function approveLeaveRequest(requestId: number, approver = "admin")
   if (!reqRow) throw new Error("신청 없음");
   if (reqRow.status !== "PENDING") throw new Error("이미 처리된 신청입니다");
 
+  const isComp = reqRow.leaveType === "COMP";
   await prisma.$transaction([
     prisma.leaveTransaction.create({
       data: {
@@ -14,7 +15,8 @@ export async function approveLeaveRequest(requestId: number, approver = "admin")
         date: reqRow.startDate,
         days: -Math.abs(reqRow.days),
         type: "USE",
-        note: `연차사용 (${reqRow.reason ?? ""})`,
+        category: isComp ? "COMP" : "STATUTORY",
+        note: `${isComp ? "대휴사용" : "연차사용"} (${reqRow.reason ?? ""})`,
         requestId: reqRow.id,
       },
     }),
@@ -46,16 +48,17 @@ export async function rejectLeaveRequest(
   });
 }
 
-/** 수동 연차 조정 (부여+ / 사용-) */
+/** 수동 연차 조정 (부여+ / 사용-). category: STATUTORY(본래연차) | COMP(대휴보상연차) */
 export async function adjustLeave(
   employeeId: number,
   days: number,
-  type: "ADJUST" | "USE" | "PAYOUT",
+  type: "ADJUST" | "USE" | "PAYOUT" | "GRANT",
   date: Date,
-  note?: string
+  note?: string,
+  category: "STATUTORY" | "COMP" = "STATUTORY"
 ) {
   await prisma.leaveTransaction.create({
-    data: { employeeId, days, type, date, note },
+    data: { employeeId, days, type, date, note, category },
   });
   return leaveSummaryFor(employeeId);
 }

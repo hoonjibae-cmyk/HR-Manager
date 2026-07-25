@@ -20,7 +20,13 @@ export interface LeaveTxn {
   date: Date;
   days: number; // +발생 / -사용 (여기서는 사용/조정만 입력)
   type: "USE" | "ADJUST" | "PAYOUT" | "GRANT" | "EXPIRE";
+  /** STATUTORY(본래 연차, 기본) | COMP(대체휴일 보상연차) */
+  category?: string;
   note?: string;
+}
+
+function isComp(t: LeaveTxn): boolean {
+  return (t.category ?? "STATUTORY") === "COMP";
 }
 
 export interface Lot {
@@ -143,12 +149,14 @@ export function summarizeLeave(
   asOf: Date,
   txns: LeaveTxn[]
 ): LeaveSummary {
-  const lots = [...generateGrants(hireDate, asOf), ...adjustLots(txns)].sort(
+  // 대휴(COMP)는 별도 풀(summarizeComp)로 집계 — 본래 연차 계산에서 제외
+  const statTxns = txns.filter((t) => !isComp(t));
+  const lots = [...generateGrants(hireDate, asOf), ...adjustLots(statTxns)].sort(
     (a, b) => a.grantDate.getTime() - b.grantDate.getTime()
   );
 
   // 사용 이벤트(날짜순)
-  const uses = txns
+  const uses = statTxns
     .filter((t) => t.type === "USE" || t.type === "PAYOUT")
     .map((t) => ({ date: t.date, days: Math.abs(t.days) }))
     .sort((a, b) => a.date.getTime() - b.date.getTime());
@@ -226,6 +234,42 @@ export function summarizeLeave(
     nextGrantDate,
     nextGrantDays,
   };
+}
+
+/** 대체휴일 보상연차(대휴) 요약 — 운영자 수동 부여(GRANT/ADJUST±), 사용(USE) */
+export interface CompSummary {
+  granted: number;
+  used: number;
+  remaining: number;
+}
+
+export function summarizeComp(txns: LeaveTxn[], asOf?: Date): CompSummary {
+  let granted = 0;
+  let used = 0;
+  for (const t of txns) {
+    if (!isComp(t)) continue;
+    if (asOf && isAfter(t.date, asOf)) continue;
+    if (t.type === "USE" || t.type === "PAYOUT") used += Math.abs(t.days);
+    else granted += t.days; // GRANT/ADJUST — 음수 조정 허용
+  }
+  return { granted, used, remaining: granted - used };
+}
+
+/** 기간 내 사용일수 (본래 연차 / 대휴 구분) */
+export function usedInPeriod(
+  txns: LeaveTxn[],
+  from: Date,
+  to: Date
+): { statutory: number; comp: number } {
+  let statutory = 0;
+  let comp = 0;
+  for (const t of txns) {
+    if (t.type !== "USE" && t.type !== "PAYOUT") continue;
+    if (isBefore(t.date, from) || isAfter(t.date, to)) continue;
+    if (isComp(t)) comp += Math.abs(t.days);
+    else statutory += Math.abs(t.days);
+  }
+  return { statutory, comp };
 }
 
 /** 두 날짜 사이 연차 사용일수 계산 (주말/공휴일 제외, 반차 0.5 지원) */

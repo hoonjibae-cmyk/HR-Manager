@@ -4,6 +4,8 @@ import {
   completedServiceYears,
   generateGrants,
   summarizeLeave,
+  summarizeComp,
+  usedInPeriod,
   countLeaveDays,
   type LeaveTxn,
 } from "./leave";
@@ -101,6 +103,46 @@ describe("summarizeLeave — 발생/사용/잔여/소멸", () => {
     const s = summarizeLeave(d("2022-03-01"), d("2025-06-01"), []);
     expect(s.nextGrantDate?.toISOString().slice(0, 10)).toBe("2026-03-01");
     expect(s.nextGrantDays).toBe(annualLeaveDays(4)); // 16
+  });
+});
+
+describe("대휴보상연차 (COMP) — 본래 연차와 분리 집계", () => {
+  it("summarizeComp: 부여/사용/음수조정 집계", () => {
+    const txns: LeaveTxn[] = [
+      { date: d("2026-05-06"), days: 1, type: "GRANT", category: "COMP", note: "5/5 근무" },
+      { date: d("2026-06-07"), days: 1, type: "GRANT", category: "COMP", note: "6/6 근무" },
+      { date: d("2026-06-20"), days: -1, type: "USE", category: "COMP" },
+      { date: d("2026-07-01"), days: -0.5, type: "ADJUST", category: "COMP", note: "정정" },
+    ];
+    const c = summarizeComp(txns);
+    expect(c.granted).toBe(1.5); // 1 + 1 - 0.5(조정)
+    expect(c.used).toBe(1);
+    expect(c.remaining).toBe(0.5);
+  });
+
+  it("summarizeLeave 는 COMP 트랜잭션을 무시한다 (본래 연차 오염 방지)", () => {
+    const txns: LeaveTxn[] = [
+      { date: d("2026-05-06"), days: 2, type: "GRANT", category: "COMP" },
+      { date: d("2026-06-20"), days: -2, type: "USE", category: "COMP" },
+      { date: d("2026-04-10"), days: -1, type: "USE" }, // 본래 연차 사용
+    ];
+    // 2024-03-01 입사, 2026-06-30 기준: 월차11 + 1년차15 + 2년차15 = 41 발생
+    const s = summarizeLeave(d("2024-03-01"), d("2026-06-30"), txns);
+    expect(s.used).toBe(1); // COMP 사용 2일은 제외
+    expect(s.granted).toBe(41);
+  });
+
+  it("usedInPeriod: 기간 내 사용을 연차/대휴로 구분", () => {
+    const txns: LeaveTxn[] = [
+      { date: d("2026-03-10"), days: -1, type: "USE" },
+      { date: d("2026-05-10"), days: -2, type: "USE" },
+      { date: d("2026-05-15"), days: -1, type: "USE", category: "COMP" },
+      { date: d("2026-09-01"), days: -1, type: "USE" }, // 기간 밖
+      { date: d("2026-05-01"), days: 3, type: "GRANT", category: "COMP" }, // 부여는 미집계
+    ];
+    const p = usedInPeriod(txns, d("2026-04-01"), d("2026-06-30"));
+    expect(p.statutory).toBe(2);
+    expect(p.comp).toBe(1);
   });
 });
 

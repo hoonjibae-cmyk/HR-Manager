@@ -248,6 +248,8 @@ model LeaveTransaction {
   date       DateTime // 발생일 (사용일 또는 부여일)
   days       Float    // +부여, -사용
   type       String   // GRANT | USE | ADJUST | EXPIRE | PAYOUT
+  // 연차 종류: STATUTORY(본래 연차, 근로기준법) | COMP(대체휴일 보상연차 — 운영자 수동 부여)
+  category   String   @default("STATUTORY")
   note       String?
   requestId  Int?     // 연결된 연차신청
   createdAt  DateTime @default(now())

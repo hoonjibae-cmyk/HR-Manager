@@ -27,7 +27,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
   });
   if (!emp) notFound();
 
-  const { summary } = await leaveSummaryFor(id);
+  const { summary, comp } = await leaveSummaryFor(id);
   const sched = parseSchedule(emp.schedule);
 
   return (
@@ -117,6 +117,15 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                 <div>다음 발생: {ymd(summary.nextGrantDate)} ({summary.nextGrantDays}일)</div>
               )}
             </div>
+            {comp.granted > 0 && (
+              <div className="mt-3 pt-3 border-t border-slate-100 text-sm flex items-center justify-between">
+                <span className="text-slate-500">대휴보상연차</span>
+                <span className="tnum">
+                  발생 {comp.granted} · 사용 {comp.used} ·{" "}
+                  <b className="text-emerald-600">잔여 {comp.remaining}</b>
+                </span>
+              </div>
+            )}
           </div>
           )}
 

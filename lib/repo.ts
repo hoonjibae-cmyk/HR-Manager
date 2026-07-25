@@ -7,7 +7,7 @@ import {
   type TaxBracketRow,
   type MonthlyInput,
 } from "./payroll";
-import { summarizeLeave, type LeaveTxn } from "./leave";
+import { summarizeLeave, summarizeComp, type LeaveTxn } from "./leave";
 import { parseSchedule } from "./constants";
 import type { DocCompany, DocEmployee, DocContract } from "./documents";
 
@@ -141,7 +141,7 @@ export async function previewPayroll(employeeId: number, month: MonthlyInput) {
   return { emp, result };
 }
 
-/** 연차 현황 요약 (DB 트랜잭션 기반) */
+/** 연차 현황 요약 (본래 연차 + 대휴보상연차, DB 트랜잭션 기반) */
 export async function leaveSummaryFor(employeeId: number, asOf: Date = new Date()) {
   const emp = await prisma.employee.findUnique({ where: { id: employeeId } });
   if (!emp) throw new Error("직원을 찾을 수 없습니다");
@@ -150,9 +150,14 @@ export async function leaveSummaryFor(employeeId: number, asOf: Date = new Date(
     date: t.date,
     days: t.days,
     type: t.type as any,
+    category: (t as any).category ?? "STATUTORY",
     note: t.note ?? undefined,
   }));
-  return { emp, summary: summarizeLeave(emp.hireDate, asOf, leaveTxns) };
+  return {
+    emp,
+    summary: summarizeLeave(emp.hireDate, asOf, leaveTxns),
+    comp: summarizeComp(leaveTxns, asOf),
+  };
 }
 
 export function invalidateTaxCache() {

@@ -42,10 +42,11 @@ export default function AddLeaveRequest({ employees }: { employees: Emp[] }) {
       <div><label className="label">종료일</label><input type="date" className="input" value={f.endDate} onChange={(e) => setF({ ...f, endDate: e.target.value })} /></div>
       <div>
         <label className="label">종류</label>
-        <select className="input w-28" value={f.leaveType} onChange={(e) => setF({ ...f, leaveType: e.target.value })}>
+        <select className="input w-32" value={f.leaveType} onChange={(e) => setF({ ...f, leaveType: e.target.value })}>
           <option value="ANNUAL">연차</option>
           <option value="HALF_AM">오전반차</option>
           <option value="HALF_PM">오후반차</option>
+          <option value="COMP">대휴(보상)</option>
           <option value="SICK">병가</option>
         </select>
       </div>

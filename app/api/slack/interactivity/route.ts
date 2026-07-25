@@ -58,20 +58,23 @@ export async function POST(req: Request) {
 
   try {
     if (action.action_id === "approve_leave") {
-      const { summary } = await approveLeaveRequest(requestId, userId);
+      const { summary, comp } = await approveLeaveRequest(requestId, userId);
+      const isComp = reqRow.leaveType === "COMP";
+      const remaining = isComp ? comp.remaining : summary.remaining;
+      const poolLabel = isComp ? "대휴보상연차" : "연차";
       if (channel && msgTs) {
         await updateMessage(
           channel,
           msgTs,
           `승인됨: ${reqRow.employee.name}`,
-          decidedBlocks({ name: reqRow.employee.name, range, days: reqRow.days, approved: true, by: userId, remaining: summary.remaining })
+          decidedBlocks({ name: reqRow.employee.name, range, days: reqRow.days, approved: true, by: userId, remaining })
         );
       }
       // 신청자에게 DM
       if (reqRow.employee.slackUserId) {
         await slackCall("chat.postMessage", {
           channel: reqRow.employee.slackUserId,
-          text: `✅ 연차 신청(${range}, ${reqRow.days}일)이 승인되었습니다. 잔여연차 ${summary.remaining}일.`,
+          text: `✅ ${poolLabel} 신청(${range}, ${reqRow.days}일)이 승인되었습니다. ${poolLabel} 잔여 ${remaining}일.`,
         });
       }
     } else if (action.action_id === "reject_leave") {

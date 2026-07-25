@@ -1,15 +1,34 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { summarizeLeave, type LeaveTxn } from "@/lib/leave";
+import {
+  summarizeLeave,
+  summarizeComp,
+  usedInPeriod,
+  type LeaveTxn,
+} from "@/lib/leave";
 import { PageHeader } from "@/components/ui";
 import LeaveApprovals from "@/components/LeaveApprovals";
 import AddLeaveRequest from "@/components/AddLeaveRequest";
+import CompGrantButton from "@/components/CompGrantButton";
 import { ymd } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default async function LeavePage() {
+export default async function LeavePage({
+  searchParams,
+}: {
+  searchParams: { from?: string; to?: string };
+}) {
   const now = new Date();
+  // 기간 필터 (기본: 올해 1/1 ~ 12/31)
+  const year = now.getFullYear();
+  const from = searchParams.from
+    ? new Date(searchParams.from + "T00:00:00Z")
+    : new Date(Date.UTC(year, 0, 1));
+  const to = searchParams.to
+    ? new Date(searchParams.to + "T23:59:59Z")
+    : new Date(Date.UTC(year, 11, 31, 23, 59, 59));
+
   const [employees, txns, pending] = await Promise.all([
     // 완전비율제(위탁)는 프리랜서 계약으로 연차 미적용 → 연차 관리 대상 제외
     prisma.employee.findMany({
@@ -30,14 +49,20 @@ export default async function LeavePage() {
       date: t.date,
       days: t.days,
       type: t.type as any,
+      category: (t as any).category ?? "STATUTORY",
       note: t.note ?? undefined,
     });
   });
 
-  const rows = employees.map((e) => ({
-    e,
-    s: summarizeLeave(e.hireDate, now, txnByEmp[e.id] ?? []),
-  }));
+  const rows = employees.map((e) => {
+    const list = txnByEmp[e.id] ?? [];
+    return {
+      e,
+      s: summarizeLeave(e.hireDate, now, list),
+      c: summarizeComp(list, now),
+      p: usedInPeriod(list, from, to),
+    };
+  });
 
   const serializedReqs = pending.map((r) => ({
     id: r.id,
@@ -50,11 +75,13 @@ export default async function LeavePage() {
     employee: { name: r.employee.name, department: r.employee.department },
   }));
 
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
   return (
     <div>
       <PageHeader
         title="연차 관리"
-        desc="근로기준법 제60조 기준 자동 산정 · 슬랙 신청 → 관리자 승인 → 현황 반영"
+        desc="본래 연차(근로기준법 자동 산정) + 대휴보상연차(운영자 수동 부여) · 슬랙 신청 → 승인 → 반영"
         action={<AddLeaveRequest employees={employees.map((e) => ({ id: e.id, name: e.name, department: e.department }))} />}
       />
 
@@ -68,42 +95,65 @@ export default async function LeavePage() {
       </div>
 
       <div className="card overflow-x-auto">
-        <div className="px-5 py-3 border-b border-slate-100 font-bold text-slate-800">직원별 연차 현황</div>
+        <div className="px-5 py-3 border-b border-slate-100 flex flex-wrap items-center gap-3">
+          <span className="font-bold text-slate-800">직원별 연차 현황</span>
+          <form method="get" className="flex items-center gap-2 text-xs">
+            <span className="text-slate-400">사용 조회 기간</span>
+            <input type="date" name="from" defaultValue={fmt(from)} className="input py-1 w-36 text-xs" />
+            <span className="text-slate-400">~</span>
+            <input type="date" name="to" defaultValue={fmt(to)} className="input py-1 w-36 text-xs" />
+            <button className="btn-outline py-1 px-2.5 text-xs">조회</button>
+          </form>
+        </div>
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
             <tr>
-              <th className="th">직원</th>
-              <th className="th">근속</th>
-              <th className="th text-right">발생</th>
+              <th className="th" rowSpan={2}>직원</th>
+              <th className="th" rowSpan={2}>근속</th>
+              <th className="th text-center border-l border-slate-200" colSpan={3}>본래 연차</th>
+              <th className="th text-center border-l border-slate-200" colSpan={3}>대휴보상연차</th>
+              <th className="th text-center border-l border-slate-200" colSpan={2}>기간 내 사용</th>
+              <th className="th" rowSpan={2}></th>
+            </tr>
+            <tr>
+              <th className="th text-right border-l border-slate-200">발생</th>
               <th className="th text-right">사용</th>
-              <th className="th text-right">소멸</th>
               <th className="th text-right">잔여</th>
-              <th className="th">다음 발생</th>
-              <th className="th"></th>
+              <th className="th text-right border-l border-slate-200">발생</th>
+              <th className="th text-right">사용</th>
+              <th className="th text-right">잔여</th>
+              <th className="th text-right border-l border-slate-200">연차</th>
+              <th className="th text-right">대휴</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ e, s }) => (
+            {rows.map(({ e, s, c, p }) => (
               <tr key={e.id} className="hover:bg-slate-50">
                 <td className="td">
-                  <div className="font-semibold">{e.name}</div>
+                  <Link href={`/employees/${e.id}`} className="font-semibold text-brand-700 hover:underline">{e.name}</Link>
                   <div className="text-xs text-slate-400">{e.department} {e.position}</div>
                 </td>
-                <td className="td text-slate-500">{s.serviceLabel}</td>
-                <td className="td text-right tnum">{s.granted}</td>
+                <td className="td text-slate-500 text-xs">{s.serviceLabel}</td>
+                <td className="td text-right tnum border-l border-slate-100">{s.granted}</td>
                 <td className="td text-right tnum text-slate-500">{s.used}</td>
-                <td className="td text-right tnum text-slate-400">{s.expired || "-"}</td>
                 <td className="td text-right tnum font-bold text-brand-600">{s.remaining}</td>
-                <td className="td text-xs text-slate-400">
-                  {s.nextGrantDate ? `${ymd(s.nextGrantDate)} (${s.nextGrantDays}일)` : "-"}
-                </td>
+                <td className="td text-right tnum border-l border-slate-100">{c.granted}</td>
+                <td className="td text-right tnum text-slate-500">{c.used}</td>
+                <td className="td text-right tnum font-bold text-emerald-600">{c.remaining}</td>
+                <td className="td text-right tnum border-l border-slate-100">{p.statutory || "-"}</td>
+                <td className="td text-right tnum">{p.comp || "-"}</td>
                 <td className="td text-right">
-                  <Link href={`/employees/${e.id}`} className="text-xs text-brand-600 font-semibold">상세 →</Link>
+                  <CompGrantButton employeeId={e.id} employeeName={e.name} />
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        <p className="text-xs text-slate-400 px-5 py-3 border-t border-slate-100">
+          · <b>본래 연차</b>: 근로기준법 §60 자동 산정(소멸 반영) &nbsp;
+          · <b>대휴보상연차</b>: 지정 휴일 근무 보상 등 — <b>"+대휴"</b> 버튼으로 운영자가 직접 부여/차감 &nbsp;
+          · <b>기간 내 사용</b>: 위에서 지정한 기간에 사용한 일수 (연차/대휴 구분)
+        </p>
       </div>
     </div>
   );

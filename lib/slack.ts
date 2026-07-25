@@ -82,9 +82,15 @@ export function parseLeaveText(text: string): {
   let half = false;
   let t = text.trim();
 
+  // 대휴(대체휴일 보상연차) 사용 신청
+  if (/대휴|보상휴가|보상연차/i.test(t)) {
+    leaveType = "COMP";
+    t = t.replace(/대휴보상연차|보상휴가|보상연차|대휴/gi, " ");
+  }
+
   if (/반차|반가|half/i.test(t)) {
     half = true;
-    leaveType = /오전|am/i.test(t) ? "HALF_AM" : "HALF_PM";
+    if (leaveType !== "COMP") leaveType = /오전|am/i.test(t) ? "HALF_AM" : "HALF_PM";
     t = t.replace(/오전반차|오후반차|반차|반가|half\s*(am|pm)?/gi, " ");
   }
 
