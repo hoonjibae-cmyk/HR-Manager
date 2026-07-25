@@ -34,21 +34,22 @@ export async function sendTestEmail(to: string) {
   });
 }
 
-/** 특정 월의 급여명세서를 대상 직원 이메일로 발송 */
-export async function sendPayslipsForMonth(
-  year: number,
-  month: number,
-  opts: { onlyConfirmed?: boolean } = {}
-) {
+/**
+ * 특정 월의 급여명세서를 대상 직원 이메일로 발송.
+ * 이미 발송(SENT)된 기록은 제외 — 재클릭 시 중복 발송을 막고,
+ * 발송 성공한 기록은 SENT 로 전환되어 자동 잠금(재계산·공제수정 불가)된다.
+ */
+export async function sendPayslipsForMonth(year: number, month: number) {
   const t = getTransporter();
   if (!t) throw new Error("SMTP가 설정되지 않았습니다 (.env SMTP_HOST)");
 
-  const where: any = { year, month };
-  if (opts.onlyConfirmed) where.status = { in: ["CONFIRMED", "SENT"] };
-  const recs = await prisma.payrollRecord.findMany({
-    where,
-    include: { employee: true },
-  });
+  const [recs, skippedSent] = await Promise.all([
+    prisma.payrollRecord.findMany({
+      where: { year, month, status: { not: "SENT" } },
+      include: { employee: true },
+    }),
+    prisma.payrollRecord.count({ where: { year, month, status: "SENT" } }),
+  ]);
 
   let sent = 0;
   let failed = 0;
@@ -93,5 +94,5 @@ export async function sendPayslipsForMonth(
     }
   }
 
-  return { sent, failed, total: recs.length, results };
+  return { sent, failed, total: recs.length, skippedSent, results };
 }

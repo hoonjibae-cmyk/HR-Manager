@@ -235,8 +235,8 @@ export async function runPayrollMonth(
     const existing = await prisma.payrollRecord.findUnique({
       where: { employeeId_year_month: { employeeId: emp.id, year, month } },
     });
-    // 이미 확정/발송된 기록은 덮어쓰지 않음
-    if (existing && existing.status !== "DRAFT") {
+    // 발송(SENT)된 기록만 잠금 — 명세서 발송 전까지는 자유롭게 재계산 가능
+    if (existing && existing.status === "SENT") {
       results.push(existing);
       continue;
     }

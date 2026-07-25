@@ -9,6 +9,7 @@ import {
   INCOME_TYPE_LABEL,
   PAY_SCHEME_LABEL,
   CONTRACT_STAGE_LABEL,
+  PAYROLL_STATUS_LABEL,
   parseSchedule,
   DAY_KO,
 } from "@/lib/constants";
@@ -201,7 +202,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                   <li key={p.id} className="flex items-center justify-between text-sm">
                     <span>{p.year}.{String(p.month).padStart(2, "0")}</span>
                     <span className="tnum font-semibold">{won(p.net)}원</span>
-                    <Pill kind={p.status}>{p.status}</Pill>
+                    <Pill kind={p.status}>{PAYROLL_STATUS_LABEL[p.status] ?? p.status}</Pill>
                   </li>
                 ))}
               </ul>

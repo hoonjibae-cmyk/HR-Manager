@@ -98,6 +98,13 @@ export const DOCUMENT_TYPE_LABEL: Record<string, string> = {
   CERT_INCOME: "소득금액증명",
 };
 
+/** 급여 기록 상태 — 발송(SENT) 시 자동 잠금(재계산·공제수정 불가) */
+export const PAYROLL_STATUS_LABEL: Record<string, string> = {
+  DRAFT: "작성중",
+  CONFIRMED: "확정(이전)", // 과거 '전체 확정' 기능의 잔여 상태 — 작성중과 동일하게 수정 가능
+  SENT: "발송완료",
+};
+
 /** 연차 신청 상태 */
 export const LEAVE_STATUS = {
   PENDING: "PENDING",

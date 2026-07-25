@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { won } from "@/lib/format";
-import { PAY_SCHEME_LABEL, INCOME_TYPE_LABEL } from "@/lib/constants";
+import { PAY_SCHEME_LABEL, INCOME_TYPE_LABEL, PAYROLL_STATUS_LABEL } from "@/lib/constants";
 import { Pill } from "@/components/ui";
 
 interface Rec {
@@ -142,23 +142,8 @@ export default function PayrollClient() {
     setBusy("");
   }
 
-  async function confirmAll() {
-    setBusy("confirm");
-    await Promise.all(
-      recs.filter((r) => r.status === "DRAFT").map((r) =>
-        fetch(`/api/payroll/${r.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "CONFIRMED" }),
-        })
-      )
-    );
-    await load();
-    setBusy("");
-  }
-
   async function sendEmails() {
-    if (!confirm(`${year}년 ${month}월 급여명세서를 전 직원 이메일로 발송하시겠습니까?`)) return;
+    if (!confirm(`${year}년 ${month}월 급여명세서를 이메일로 발송하시겠습니까?\n발송된 기록은 자동으로 잠기며(발송완료), 이후 재계산·공제 수정이 불가합니다.`)) return;
     setBusy("email");
     const res = await fetch("/api/email/send", {
       method: "POST",
@@ -166,7 +151,12 @@ export default function PayrollClient() {
       body: JSON.stringify({ year, month }),
     });
     const j = await res.json().catch(() => ({}));
-    alert(res.ok ? `발송 완료: 성공 ${j.sent ?? 0}건 / 실패 ${j.failed ?? 0}건` : `발송 실패: ${j.error || "SMTP 설정을 확인하세요"}`);
+    alert(
+      res.ok
+        ? `발송 완료: 성공 ${j.sent ?? 0}건 / 실패 ${j.failed ?? 0}건` +
+          (j.skippedSent ? `\n(이미 발송되어 제외: ${j.skippedSent}건)` : "")
+        : `발송 실패: ${j.error || "SMTP 설정을 확인하세요"}`
+    );
     setBusy("");
     await load();
   }
@@ -236,12 +226,9 @@ export default function PayrollClient() {
         </label>
         <div className="flex-1" />
         {recs.length > 0 && (
-          <>
-            <button className="btn-outline" onClick={confirmAll} disabled={!!busy}>전체 확정</button>
-            <button className="btn-outline" onClick={sendEmails} disabled={!!busy}>
-              {busy === "email" ? "발송 중…" : "명세서 이메일 발송"}
-            </button>
-          </>
+          <button className="btn-outline" onClick={sendEmails} disabled={!!busy}>
+            {busy === "email" ? "발송 중…" : "명세서 이메일 발송"}
+          </button>
         )}
       </div>
 
@@ -356,8 +343,8 @@ export default function PayrollClient() {
                       <InlineInput label="미사용연차(일)" value={inputs[r.employeeId]?.unusedLeaveDays ?? ""} onChange={(v) => setInput(r.employeeId, "unusedLeaveDays", v)} />
                       <button
                         className="btn-primary py-1 px-2.5 text-xs self-end disabled:opacity-40"
-                        disabled={!!busy || r.status !== "DRAFT"}
-                        title={r.status !== "DRAFT" ? "확정/발송된 기록은 재계산되지 않습니다 (상태를 DRAFT로 되돌린 후 수정)" : "이 직원만 저장하고 재산정"}
+                        disabled={!!busy || r.status === "SENT"}
+                        title={r.status === "SENT" ? "명세서가 발송된 기록은 잠겨 있어 재계산되지 않습니다" : "이 직원만 저장하고 재산정"}
                         onClick={() => saveRow(r.employeeId)}
                       >
                         {busy === `row-${r.employeeId}` ? "저장 중…" : "저장"}
@@ -378,7 +365,7 @@ export default function PayrollClient() {
                     </div>
                   </td>
                   <td className="td text-right tnum font-bold">{won(r.net)}</td>
-                  <td className="td"><Pill kind={r.status}>{r.status}</Pill></td>
+                  <td className="td"><Pill kind={r.status}>{PAYROLL_STATUS_LABEL[r.status] ?? r.status}</Pill></td>
                   <td className="td">
                     <button className="text-xs text-brand-600 font-semibold" onClick={() => openPayslip(r.id)}>PDF</button>
                   </td>
@@ -400,7 +387,7 @@ export default function PayrollClient() {
         <div className="text-xs text-slate-400 mt-3 space-y-1">
           <p>
             ※ 변동입력은 각 행의 <b>저장</b> 버튼(해당 직원만 즉시 반영) 또는 상단 <b>급여 일괄 산정</b>(전체 반영)으로 저장·재계산됩니다.
-            확정(CONFIRMED)·발송(SENT)된 기록은 재계산되지 않습니다.
+            명세서 <b>이메일 발송이 완료된 기록은 자동으로 잠겨</b>(발송완료) 재계산·공제 수정이 되지 않으며, 재발송 시에도 제외됩니다.
           </p>
           <p>
             · <b>추가h</b>: 평일 소정근로 외·토요일 근무 중 <b>1일 8h·주 40h 이내</b>(법내연장) → 가산 없음(통상시급×1.0) &nbsp;
