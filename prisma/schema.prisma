@@ -212,7 +212,8 @@ model PayrollRecord {
   retentionD   Int   @default(0)  // 퇴직유보금 (인센티브 원천액의 8.3%, 별도통장 송금)
   parkingD     Int   @default(0)  // 월 정기주차비 공제 (본인부담분)
   expenseD     Int   @default(0)  // 실비 정산 (+공제 / -환급)
-  otherD       Int   @default(0)  // 기타공제/정산
+  otherD       Int   @default(0)  // 기타공제/정산 (항목 합계)
+  otherItems   String?            // 기타공제 세부 항목 JSON [{name, amount}]
   totalDeduct  Int   @default(0)  // 공제액 계
   net          Int   @default(0)  // 실수령액
 

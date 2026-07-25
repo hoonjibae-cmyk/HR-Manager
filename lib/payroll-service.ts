@@ -330,6 +330,8 @@ export async function runPayrollMonth(
       deductMode,
       ...fin,
       hourlyWage: r.hourlyWage,
+      // 배치 재실행 시 기타공제 세부 항목 보존 (합계 otherD 는 fin 에서 보존됨)
+      otherItems: existing?.otherItems ?? null,
       breakdown: JSON.stringify({
         notes: blendNote ? [blendNote, ...r.notes] : r.notes,
         taxableGross: r.taxableGross,
@@ -347,6 +349,11 @@ export async function runPayrollMonth(
   return results;
 }
 
+export interface OtherDeductItem {
+  name: string;
+  amount: number;
+}
+
 export interface DeductionPatch {
   deductMode?: "MANUAL" | "AUTO";
   pensionD?: number;
@@ -359,6 +366,8 @@ export interface DeductionPatch {
   parkingD?: number;
   expenseD?: number;
   otherD?: number;
+  /** 기타공제 세부 항목 — 전달 시 otherD 는 항목 합계로 자동 산출 */
+  otherItems?: OtherDeductItem[];
 }
 
 /** 공제 편집 저장: 모드 전환/수동값/자체공제 반영 후 합계·실수령 재계산 */
@@ -407,6 +416,20 @@ export async function updateDeductions(payrollId: number, patch: DeductionPatch)
   const num = (v: number | undefined, fallback: number) =>
     v == null || isNaN(v) ? fallback : Math.round(v);
 
+  // 기타공제 세부 항목: 전달되면 정제 후 합계를 otherD 로 사용
+  let otherItemsJson: string | null | undefined = undefined; // undefined = 변경 없음
+  let otherDVal = num(patch.otherD, rec.otherD);
+  if (patch.otherItems !== undefined) {
+    const items = (patch.otherItems ?? [])
+      .map((it) => ({
+        name: String(it?.name ?? "").trim(),
+        amount: Math.round(Number(it?.amount) || 0),
+      }))
+      .filter((it) => it.name !== "" || it.amount !== 0);
+    otherItemsJson = items.length ? JSON.stringify(items) : null;
+    otherDVal = items.reduce((a, it) => a + it.amount, 0);
+  }
+
   const fin = assembleDeductions({
     deductMode,
     auto,
@@ -421,12 +444,16 @@ export async function updateDeductions(payrollId: number, patch: DeductionPatch)
     retentionD: num(patch.retentionD, retentionAuto),
     parkingD: num(patch.parkingD, rec.parkingD),
     expenseD: num(patch.expenseD, rec.expenseD),
-    otherD: num(patch.otherD, rec.otherD),
+    otherD: otherDVal,
     gross: rec.gross,
   });
 
   return prisma.payrollRecord.update({
     where: { id: payrollId },
-    data: { deductMode, ...fin },
+    data: {
+      deductMode,
+      ...fin,
+      ...(otherItemsJson !== undefined ? { otherItems: otherItemsJson } : {}),
+    },
   });
 }

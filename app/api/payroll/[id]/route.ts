@@ -14,12 +14,17 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const dedKeys = [
       "deductMode", "pensionD", "employmentD", "healthD", "longTermD",
       "incomeTaxD", "localTaxD", "retentionD", "parkingD", "expenseD", "otherD",
+      "otherItems",
     ];
     if (dedKeys.some((k) => k in body)) {
       const patch: any = {};
       if (body.deductMode) patch.deductMode = body.deductMode;
       for (const k of dedKeys.slice(1)) {
+        if (k === "otherItems") continue; // 숫자 필드 아님 — 아래에서 별도 처리
         if (k in body && body[k] !== "" && body[k] != null) patch[k] = Number(body[k]);
+      }
+      if ("otherItems" in body && Array.isArray(body.otherItems)) {
+        patch.otherItems = body.otherItems;
       }
       const rec = await updateDeductions(Number(params.id), patch);
       return NextResponse.json(rec);

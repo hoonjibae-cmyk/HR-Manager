@@ -37,6 +37,7 @@ export interface DocPayroll {
   parkingD: number;
   expenseD: number;
   otherD: number;
+  otherItems?: string | null; // 기타공제 세부 항목 JSON [{name, amount}]
   totalDeduct: number;
   net: number;
   hourlyWage: number;
@@ -86,11 +87,23 @@ export function payslipHtml(args: {
     ] as [string, number][]
   ).filter(([, v]) => v && v !== 0);
 
+  // 기타공제: 세부 항목이 있으면 이름별로, 없으면 합계 한 줄로 표시
+  let otherDedRows: [string, number][] = p.otherD ? [["기타공제", p.otherD]] : [];
+  try {
+    const arr = p.otherItems ? JSON.parse(p.otherItems) : null;
+    if (Array.isArray(arr) && arr.length) {
+      otherDedRows = arr.map(
+        (it: any) =>
+          [String(it?.name || "기타공제"), Math.round(Number(it?.amount) || 0)] as [string, number]
+      );
+    }
+  } catch {}
+
   const commonDed: [string, number][] = [
     ["퇴직유보금(별도통장)", p.retentionD],
     ["주차비 공제", p.parkingD],
     ["실비 정산", p.expenseD],
-    ["기타공제", p.otherD],
+    ...otherDedRows,
   ];
   const dedRows: [string, number][] = (
     isFree

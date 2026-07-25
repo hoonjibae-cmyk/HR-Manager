@@ -148,6 +148,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
               <NewContractForm
                 emp={{
                   id: emp.id,
+                  incomeType: emp.incomeType,
                   payScheme: emp.payScheme,
                   baseWage: emp.baseWage,
                   positionAllow: emp.positionAllow,

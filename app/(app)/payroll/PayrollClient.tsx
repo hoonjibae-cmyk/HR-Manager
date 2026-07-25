@@ -38,6 +38,7 @@ interface Rec {
   parkingD: number;
   expenseD: number;
   otherD: number;
+  otherItems: string | null;
   prorationRatio: number;
   employee: { name: string; empNo: string; department: string | null; position: string | null };
 }
@@ -379,6 +380,22 @@ export default function PayrollClient() {
   );
 }
 
+interface OtherItem {
+  name: string;
+  amount: string; // 입력 중 문자열 유지
+}
+
+function parseOtherItems(rec: Rec): OtherItem[] {
+  try {
+    const arr = rec.otherItems ? JSON.parse(rec.otherItems) : null;
+    if (Array.isArray(arr) && arr.length) {
+      return arr.map((it: any) => ({ name: String(it.name ?? ""), amount: String(it.amount ?? 0) }));
+    }
+  } catch {}
+  // 과거 데이터: 합계만 있으면 단일 항목으로 노출
+  return rec.otherD ? [{ name: "기타공제", amount: String(rec.otherD) }] : [];
+}
+
 function DeductionEditor({ rec, onSaved, onClose }: { rec: Rec; onSaved: () => Promise<void>; onClose: () => void }) {
   const [mode, setMode] = useState<string>(rec.deductMode || "MANUAL");
   const [f, setF] = useState({
@@ -391,15 +408,21 @@ function DeductionEditor({ rec, onSaved, onClose }: { rec: Rec; onSaved: () => P
     retentionD: rec.retentionD || "",
     parkingD: rec.parkingD || "",
     expenseD: rec.expenseD || "",
-    otherD: rec.otherD || "",
   });
+  const [items, setItems] = useState<OtherItem[]>(() => parseOtherItems(rec));
   const [saving, setSaving] = useState(false);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
+  const setItem = (i: number, k: keyof OtherItem, v: string) =>
+    setItems((arr) => arr.map((it, idx) => (idx === i ? { ...it, [k]: v } : it)));
+  const otherSum = items.reduce((a, it) => a + (Number(it.amount) || 0), 0);
 
   async function save(nextMode: string) {
     setSaving(true);
     const body: any = { deductMode: nextMode };
     for (const [k, v] of Object.entries(f)) body[k] = v === "" ? 0 : Number(v);
+    body.otherItems = items
+      .map((it) => ({ name: it.name.trim(), amount: Number(it.amount) || 0 }))
+      .filter((it) => it.name !== "" || it.amount !== 0);
     const res = await fetch(`/api/payroll/${rec.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -445,7 +468,52 @@ function DeductionEditor({ rec, onSaved, onClose }: { rec: Rec; onSaved: () => P
         )}
         <DedField label="주차비 공제" v={f.parkingD} onChange={(v) => set("parkingD", v)} />
         <DedField label="실비 정산(±)" v={f.expenseD} onChange={(v) => set("expenseD", v)} allowNegative />
-        <DedField label="기타공제" v={f.otherD} onChange={(v) => set("otherD", v)} />
+      </div>
+      {/* 기타공제 — 이름을 직접 기입하는 항목 리스트 */}
+      <div className="mt-2 border border-slate-200 rounded-lg p-2.5">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-[11px] font-semibold text-slate-500">기타공제 항목</span>
+          {items.length > 0 && (
+            <span className="text-[11px] text-slate-500 tnum">
+              합계 <b>{otherSum.toLocaleString()}원</b>
+            </span>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          {items.map((it, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input
+                className="input py-1 text-xs flex-1"
+                placeholder="공제 이름 (예: 가불 상환, 동호회비)"
+                value={it.name}
+                onChange={(e) => setItem(i, "name", e.target.value)}
+              />
+              <input
+                type="number"
+                step={10}
+                className="input py-1 text-xs w-36"
+                placeholder="금액(원)"
+                value={it.amount}
+                onChange={(e) => setItem(i, "amount", e.target.value)}
+              />
+              <button
+                type="button"
+                className="text-slate-400 hover:text-red-500 text-sm px-1"
+                title="항목 삭제"
+                onClick={() => setItems((arr) => arr.filter((_, idx) => idx !== i))}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="text-xs text-brand-600 font-semibold"
+            onClick={() => setItems((arr) => [...arr, { name: "", amount: "" }])}
+          >
+            + 항목 추가
+          </button>
+        </div>
       </div>
       <p className="text-[11px] text-slate-400 mt-2">
         {manual

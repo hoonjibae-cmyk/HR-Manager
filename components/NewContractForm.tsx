@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CONTRACT_STAGE_LABEL, PAY_SCHEME_LABEL } from "@/lib/constants";
+import { CONTRACT_STAGE_LABEL, PAY_SCHEME_LABEL, INCOME_TYPE_LABEL } from "@/lib/constants";
 
 /** 계약 단계별 수습 기본값 — 신규(단기/파트)만 수습 포함, 갱신·정규는 제외 */
 function defaultProbation(stage: string): boolean {
@@ -11,6 +11,7 @@ function defaultProbation(stage: string): boolean {
 
 interface EmpSnapshot {
   id: number;
+  incomeType: string;
   payScheme: string;
   baseWage: number;
   positionAllow: number;
@@ -35,6 +36,7 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
     startDate: today,
     endDate: "",
     isProbation: defaultProbation("RENEWAL_1"),
+    incomeType: emp.incomeType,
     payScheme: emp.payScheme,
     baseWage: emp.baseWage,
     positionAllow: emp.positionAllow,
@@ -62,6 +64,7 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
         startDate: f.startDate,
         endDate: f.endDate || null,
         isProbation: f.isProbation,
+        incomeType: f.incomeType,
         payScheme: f.payScheme,
         baseWage: f.baseWage,
         positionAllow: f.positionAllow,
@@ -124,6 +127,21 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
         <L label="급여형태 (변경 가능)">
           <select className="input" value={f.payScheme} onChange={(e) => set("payScheme", e.target.value)}>
             {Object.entries(PAY_SCHEME_LABEL).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+        </L>
+        <L label="세무/보험 구분 (4대보험 · 3.3%)">
+          <select
+            className="input"
+            value={f.incomeType}
+            onChange={(e) => {
+              const v = e.target.value;
+              // 4대보험 직원은 식대 20만원 포함이 기본 규칙 (전환 시 자동 반영, 수정 가능)
+              setF((p) => ({ ...p, incomeType: v, mealAllow: v === "EMPLOYEE" ? 200000 : 0 }));
+            }}
+          >
+            {Object.entries(INCOME_TYPE_LABEL).map(([k, v]) => (
               <option key={k} value={k}>{v}</option>
             ))}
           </select>

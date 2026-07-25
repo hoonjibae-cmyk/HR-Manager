@@ -34,6 +34,10 @@ export async function POST(req: Request) {
   if (!emp) return NextResponse.json({ error: "직원을 찾을 수 없습니다" }, { status: 404 });
 
   const payScheme = body.payScheme || emp.payScheme;
+  const incomeType =
+    body.incomeType === "EMPLOYEE" || body.incomeType === "FREELANCE"
+      ? body.incomeType
+      : emp.incomeType;
   const num = (v: any, fallback: number) =>
     v != null && v !== "" && !Number.isNaN(Number(v)) ? Number(v) : fallback;
   const numOrNull = (v: any, fallback: number | null) =>
@@ -80,6 +84,7 @@ export async function POST(req: Request) {
       prisma.employee.update({
         where: { id: employeeId },
         data: {
+          incomeType,
           payScheme,
           baseWage,
           positionAllow,
