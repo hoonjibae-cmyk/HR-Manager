@@ -262,7 +262,7 @@ describe("computePayroll — 추가근로(법내연장) vs 법정연장 구분",
   });
 });
 
-describe("computePayroll — 퇴직유보금 (인센티브 × 8.3%)", () => {
+describe("computePayroll — 퇴직유보금 (인센티브 × 1/12)", () => {
   const emp: EmployeePayInput = {
     incomeType: "FREELANCE",
     payScheme: "INCENTIVE",
@@ -276,10 +276,10 @@ describe("computePayroll — 퇴직유보금 (인센티브 × 8.3%)", () => {
     incPerStudent: 50_000,
   };
 
-  it("인센티브 발생 시 원천액의 8.3%를 공제(10원 절사)", () => {
+  it("인센티브 발생 시 원천액의 1/12(8.3%)를 공제(10원 절사)", () => {
     const r = computePayroll(emp, { studentCount: 52 }, DEFAULT_RATES_2025, smallTaxTable);
     expect(r.incentiveP).toBe(600_000);
-    expect(r.retentionD).toBe(floor10(600_000 * 0.083)); // 49,800
+    expect(r.retentionD).toBe(floor10(600_000 / 12)); // 50,000
     expect(r.totalDeduct).toBe(r.incomeTaxD + r.localTaxD + r.retentionD);
   });
 
@@ -440,5 +440,43 @@ describe("blendWageTerms — 월중 계약 갱신 일할가중", () => {
     const r = computePayroll(emp, {}, DEFAULT_RATES_2025, smallTaxTable);
     expect(r.baseP).toBe(3_500_000);
     expect(r.gross).toBe(3_500_000 + 200_000);
+  });
+});
+
+describe("computePayroll — 인센티브 가중 인원(명단 기반)", () => {
+  const emp: EmployeePayInput = {
+    incomeType: "FREELANCE",
+    payScheme: "INCENTIVE",
+    baseWage: 4_400_000,
+    positionAllow: 0,
+    mealAllow: 0,
+    carAllow: 0,
+    dependents: 1,
+    schedule: instructor,
+    incThreshold: 40,
+    incPerStudent: 100_000,
+  };
+
+  it("23년 7월 김지연 실제 사례: 가중 61.625명 → 인센티브 2,162,500원", () => {
+    const r = computePayroll(
+      emp,
+      { studentUnits: 61.625 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.incentiveP).toBe(2_162_500);
+    expect(r.gross).toBe(4_400_000 + 2_162_500); // 6,562,500
+    // 사업소득 3.3% = 216,550원
+    expect(r.incomeTaxD + r.localTaxD).toBe(216_550);
+  });
+
+  it("가중 인원이 있으면 studentCount 대신 사용", () => {
+    const r = computePayroll(
+      emp,
+      { studentCount: 45, studentUnits: 41.5 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.incentiveP).toBe(150_000); // (41.5-40) × 100,000
   });
 });

@@ -23,6 +23,7 @@ interface Rec {
   holidayHours: number;
   nightHours: number;
   studentCount: number | null;
+  studentUnits: number | null;
   classRevenue: number | null;
   bonus: number;
   unusedLeaveDays: number;
@@ -82,6 +83,7 @@ export default function PayrollClient() {
   const [busy, setBusy] = useState("");
   const [openDedId, setOpenDedId] = useState<number | null>(null);
   const [tsResult, setTsResult] = useState<any>(null);
+  const [incResult, setIncResult] = useState<any>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -190,6 +192,30 @@ export default function PayrollClient() {
     }
   }
 
+  async function uploadIncentive(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy("inc");
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("year", String(year));
+    fd.append("month", String(month));
+    const res = await fetch("/api/payroll/incentive", { method: "POST", body: fd });
+    const j = await res.json().catch(() => ({}));
+    setBusy("");
+    if (res.ok) {
+      setIncResult(j);
+      if (j.year === year && j.month === month) await load();
+      else {
+        setYear(j.year);
+        setMonth(j.month);
+      }
+    } else {
+      alert("업로드 실패: " + (j.error || ""));
+    }
+  }
+
   function openPayslip(id: number) {
     fetch("/api/documents/payslip", {
       method: "POST",
@@ -223,6 +249,10 @@ export default function PayrollClient() {
         <label className={`btn-outline cursor-pointer ${busy ? "opacity-50 pointer-events-none" : ""}`}>
           {busy === "ts" ? "처리 중…" : "📤 시간기록표 업로드"}
           <input type="file" accept=".xlsx,.xls" className="hidden" onChange={uploadTimesheet} />
+        </label>
+        <label className={`btn-outline cursor-pointer ${busy ? "opacity-50 pointer-events-none" : ""}`}>
+          {busy === "inc" ? "처리 중…" : "📤 인센티브 명단 업로드"}
+          <input type="file" accept=".xlsx,.xls" className="hidden" onChange={uploadIncentive} />
         </label>
         <div className="flex-1" />
         {recs.length > 0 && (
@@ -281,6 +311,51 @@ export default function PayrollClient() {
         </div>
       )}
 
+      {incResult && (
+        <div className="card p-4 mb-5 border-indigo-200 bg-indigo-50/40">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-bold text-indigo-900 text-sm">
+              ✅ 인센티브 명단 반영 — {incResult.year}년 {incResult.month}월 · {incResult.name} 선생님
+            </span>
+            <button className="text-xs text-slate-400" onClick={() => setIncResult(null)}>닫기 ✕</button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-2">
+            <Stat k="학생 인원" v={`총 ${incResult.totalCount}명 (만근 ${incResult.fullCount} · 중도 ${incResult.partialCount})`} />
+            <Stat k="가중 인원" v={`${Number(incResult.units).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}명`} />
+            <Stat k="기준 초과" v={`${Number(incResult.over).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}명 (기준 ${incResult.threshold}명)`} />
+            <Stat k="인센티브" v={`${won(incResult.amount)}원`} accent />
+          </div>
+          <p className="text-[11px] text-slate-500 mb-2">
+            1인당 기준금액 {won(incResult.perStudent)}원 · 1회당 {won(incResult.perSession)}원 (÷8회 만근 기준)
+            {incResult.monthlyPayInFile && incResult.monthlyPayInFile !== incResult.baseWage && (
+              <span className="text-amber-700 font-semibold">
+                {" "}· ⚠️ 파일의 월급여({won(incResult.monthlyPayInFile)}원)와 직원 카드 기본급({won(incResult.baseWage)}원)이 다릅니다
+              </span>
+            )}
+          </p>
+          {incResult.partials?.length > 0 && (
+            <div className="text-xs text-slate-600 max-h-40 overflow-y-auto">
+              <table className="w-full">
+                <thead className="text-slate-400">
+                  <tr><th className="text-left py-0.5">학생</th><th className="text-left">상태</th><th className="text-right">회차</th><th className="text-right">계수</th><th className="text-right">인센티브</th></tr>
+                </thead>
+                <tbody>
+                  {incResult.partials.map((p: any, i: number) => (
+                    <tr key={i} className="border-t border-indigo-100">
+                      <td className="py-0.5">{p.name}</td>
+                      <td>{p.status === "WITHDRAWN" ? "퇴원" : p.status === "TRANSFERRED" ? "전출" : "재원"}</td>
+                      <td className="text-right tnum">{p.sessions == null ? "만근" : `${p.sessions}회`}</td>
+                      <td className="text-right tnum">{p.weight}</td>
+                      <td className="text-right tnum font-semibold">{won(p.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {recs.length > 0 && (
         <div className="grid grid-cols-3 gap-4 mb-5">
           <div className="card p-4"><div className="text-xs text-slate-500">지급 인원</div><div className="stat-num">{recs.length}명</div></div>
@@ -329,9 +404,17 @@ export default function PayrollClient() {
                   </td>
                   <td className="td">
                     <div className="flex flex-wrap gap-1">
-                      {r.payScheme === "INCENTIVE" && (
-                        <InlineInput label="학생수" value={inputs[r.employeeId]?.studentCount ?? ""} onChange={(v) => setInput(r.employeeId, "studentCount", v)} />
-                      )}
+                      {r.payScheme === "INCENTIVE" &&
+                        (r.studentUnits != null ? (
+                          <span
+                            className="text-[11px] bg-indigo-50 text-indigo-700 rounded px-2 py-1 self-end"
+                            title="인센티브 명단(회차 비례) 기준 가중 인원 — 명단 업로드로 자동 산정됩니다"
+                          >
+                            명단 {Number(r.studentUnits).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}명
+                          </span>
+                        ) : (
+                          <InlineInput label="학생수" value={inputs[r.employeeId]?.studentCount ?? ""} onChange={(v) => setInput(r.employeeId, "studentCount", v)} />
+                        ))}
                       {r.payScheme === "RATIO" && (
                         <InlineInput label="매출" value={inputs[r.employeeId]?.classRevenue ?? ""} onChange={(v) => setInput(r.employeeId, "classRevenue", v)} wide />
                       )}
@@ -573,6 +656,15 @@ function DedField({ label, v, onChange, disabled, allowNegative }: { label: stri
         onChange={(e) => onChange(e.target.value)}
       />
     </label>
+  );
+}
+
+function Stat({ k, v, accent }: { k: string; v: string; accent?: boolean }) {
+  return (
+    <div className="bg-white/70 rounded-lg px-2.5 py-1.5">
+      <div className="text-[10px] text-slate-400">{k}</div>
+      <div className={`font-semibold tnum ${accent ? "text-indigo-700" : "text-slate-700"}`}>{v}</div>
+    </div>
   );
 }
 

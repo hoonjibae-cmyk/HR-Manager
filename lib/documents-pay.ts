@@ -3,6 +3,11 @@
 import { won, wonUnit, ymd, ymdKo } from "./format";
 import { INCOME_TYPE_LABEL } from "./constants";
 import type { DocCompany, DocEmployee } from "./documents";
+import {
+  summarizeIncentive,
+  STUDENT_STATUS_LABEL,
+  type RosterStudent,
+} from "./incentive";
 
 export interface DocPayroll {
   year: number;
@@ -359,5 +364,93 @@ export function certCareerHtml(args: {
       <div style="font-weight:800;font-size:16pt;letter-spacing:0.02em">${esc(c.name)}</div>
       <div style="margin-top:6px">대표이사 ${esc(c.ceo)} <span class="seal">(직인)</span></div>
     </div>
+  </div>`;
+}
+
+/* ==================== 인센티브 산정 내역서 (명세서 첨부) ==================== */
+/**
+ * 월급+인센티브 강사의 학생 명단별 인센티브 산정 근거.
+ * 엑셀 '인센티브 계산' 양식과 동일하게 좌·우 2개 블록으로 학생을 나열한다.
+ */
+export function incentiveDetailHtml(args: {
+  employee: DocEmployee;
+  company: DocCompany;
+  year: number;
+  month: number;
+  students: RosterStudent[];
+  threshold: number;
+  perStudent: number;
+  monthlyPay?: number | null; // 월급여 (교차확인용)
+  retention?: number | null; // 퇴직유보금
+}): string {
+  const { employee: e, company: c, students } = args;
+  const s = summarizeIncentive(students, {
+    threshold: args.threshold,
+    perStudent: args.perStudent,
+  });
+
+  const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/0+$/, ""));
+  const md = (d?: Date | null) =>
+    d ? `${new Date(d).getUTCMonth() + 1}/${new Date(d).getUTCDate()}` : "";
+  const sessTxt = (r: (typeof s.rows)[number]) =>
+    r.sessions == null ? `${s.standardSessions}회` : `${num(r.sessions)}회`;
+
+  // 좌/우 2개 블록으로 분할 (엑셀 양식과 동일한 배치)
+  const half = Math.ceil(s.rows.length / 2);
+  const blocks = [s.rows.slice(0, half), s.rows.slice(half)];
+  const rowHtml = (r: (typeof s.rows)[number], i: number, offset: number) => {
+    const dim = r.amount === 0 && r.weight >= 1; // 기준 인원 이내 만근 학생
+    return `<tr class="${dim ? "dim" : ""}">
+      <td class="c">${r.seq ?? offset + i + 1}</td>
+      <td class="c">${esc(STUDENT_STATUS_LABEL[r.status] ?? "재원")}</td>
+      <td>${esc(r.name)}</td>
+      <td class="sm">${esc(r.className ?? "")}</td>
+      <td class="c sm">${md(r.enrollDate)}</td>
+      <td class="c sm">${md(r.withdrawDate)}</td>
+      <td class="c">${sessTxt(r)}</td>
+      <td class="num">${r.amount ? won(r.amount) : "-"}</td>
+    </tr>`;
+  };
+  const tableHtml = (rows: typeof s.rows, offset: number) =>
+    rows.length
+      ? `<table class="pay roster">
+      <thead><tr><th>번호</th><th>상태</th><th>이름</th><th>반</th><th>입학</th><th>퇴원</th><th>회차</th><th>인센티브</th></tr></thead>
+      <tbody>${rows.map((r, i) => rowHtml(r, i, offset)).join("")}</tbody></table>`
+      : "";
+
+  const payable = s.amount - (args.retention ?? 0);
+
+  return `<div class="compact">${head(
+    c,
+    `<div class="small">${args.year}년 ${args.month}월분</div>`
+  )}
+  <div class="doc-title" style="letter-spacing:0.2em">인센티브 산정 내역서</div>
+  <p style="text-align:center" class="muted">${args.year}년 ${args.month}월 · ${esc(e.name)} ${esc(e.position ?? "선생님")}</p>
+
+  <table class="kv">
+    <tr><th>기준 인원수</th><td>${s.threshold}명</td><th>1인당 기준금액</th><td>${wonUnit(s.perStudent)}</td></tr>
+    <tr><th>1회당 단가</th><td>${wonUnit(s.perSession)} <span class="muted">(기준금액 ÷ ${s.standardSessions}회)</span></td><th>월 표준 수업</th><td>${s.standardSessions}회 (만근)</td></tr>
+    <tr><th>학생 인원</th><td>총 ${s.totalCount}명 <span class="muted">(만근 ${s.fullCount}명 · 중도 ${s.partialCount}명)</span></td><th>가중 인원</th><td><b>${num(s.units)}명</b></td></tr>
+    <tr><th>기준 초과</th><td><b>${num(s.over)}명</b> <span class="muted">(가중 ${num(s.units)} − 기준 ${s.threshold})</span></td><th>인센티브 합계</th><td><b>${wonUnit(s.amount)}</b></td></tr>
+    ${
+      args.retention
+        ? `<tr><th>퇴직유보금</th><td>${wonUnit(args.retention)} <span class="muted">(인센티브 × 1/12, 별도통장)</span></td><th>인센티브 지급액</th><td><b>${wonUnit(payable)}</b></td></tr>`
+        : ""
+    }
+    ${args.monthlyPay ? `<tr><th>월급여(기본급)</th><td>${wonUnit(args.monthlyPay)}</td><th>급여 + 인센티브</th><td><b>${wonUnit(args.monthlyPay + s.amount)}</b></td></tr>` : ""}
+  </table>
+
+  <div class="roster-grid">
+    <div>${tableHtml(blocks[0], 0)}</div>
+    <div>${tableHtml(blocks[1], half)}</div>
+  </div>
+
+  <div class="clause" style="margin-top:8px">
+    <div class="small">· 산정식: <b>인센티브 = (가중 인원 − 기준 인원수) × 1인당 기준금액</b></div>
+    <div class="small">· 가중 인원 = 학생별 재원계수의 합. 재원계수 = 해당 월 수업 회차 ÷ ${s.standardSessions}회(만근), 최대 1.0</div>
+    <div class="small">· 월 중간에 입학·전출·퇴원한 학생은 실제 수업 회차에 비례하여 산정됩니다 (1회당 ${won(s.perSession)}원, 0회는 미산정).</div>
+    <div class="small">· 기준 인원수(${s.threshold}명) 이내의 학생은 인센티브가 발생하지 않으며, 만근 학생이 기준 인원을 먼저 채웁니다.</div>
+    <div class="small">· 본 내역서는 급여명세서의 <b>인센티브</b> 항목 산출 근거로 첨부됩니다.</div>
+  </div>
   </div>`;
 }

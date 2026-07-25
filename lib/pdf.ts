@@ -296,6 +296,17 @@ table.pay tr.total td{background:#eef4ff;font-weight:800;}
 /* 자필 따라쓰기 안내 글씨 — 연한 회색으로 출력해 펜으로 덧쓸 수 있게 함 */
 .trace{color:#b1b7c1;font-weight:400;}
 .badge{display:inline-block;padding:1px 8px;border:1px solid #1f45f5;border-radius:10px;color:#1f45f5;font-size:9pt;}
+/* 인센티브 산정 내역서 — 학생 명단 2단 배치 */
+.roster-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;}
+table.pay.roster{margin-top:0;table-layout:fixed;}
+table.pay.roster th,table.pay.roster td{padding:1.5px 3px;font-size:7.4pt;line-height:1.25;}
+table.pay.roster td.c{text-align:center;}
+table.pay.roster td.sm{font-size:6.9pt;color:#475569;overflow:hidden;white-space:nowrap;}
+table.pay.roster tr.dim td{color:#94a3b8;}
+table.pay.roster th:nth-child(1),table.pay.roster th:nth-child(2){width:26px;}
+table.pay.roster th:nth-child(5),table.pay.roster th:nth-child(6){width:26px;}
+table.pay.roster th:nth-child(7){width:30px;}
+table.pay.roster th:nth-child(8){width:52px;}
 /* 연결된 조항+서명줄 등이 페이지 경계에서 분리되지 않도록 묶음 처리 */
 .avoid{page-break-inside:avoid;break-inside:avoid;}
 .clause h3{page-break-after:avoid;break-after:avoid;}

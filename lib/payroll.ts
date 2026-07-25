@@ -53,8 +53,8 @@ export interface EmployeePayInput {
   ratioPercent?: number | null;
 }
 
-/** 인센티브 퇴직유보금 요율 — 확인서 기준 '인센티브 원천액의 8.3%' */
-export const RETENTION_RATE = 0.083;
+/** 인센티브 퇴직유보금 요율 — 확인서 기준 '인센티브 원천액의 8.3%'(= 1/12) */
+export const RETENTION_RATE = 1 / 12;
 
 /* ───────────── 월중 계약 변경(갱신) 일할 가중 ───────────── */
 
@@ -108,7 +108,10 @@ export interface MonthlyInput {
   overtimeHours?: number; // 법정 연장근로(월): 1일8h·주40h 초과분 — ×1.5
   nightHours?: number; // 야간근로(월, 22~06시) — +0.5 가산
   holidayHours?: number; // 휴일근로(월, 주휴일·공휴일) — ×1.5
-  studentCount?: number | null; // 인센티브용
+  studentCount?: number | null; // 인센티브용 (명단 없을 때 수동 입력 정수)
+  /** 인센티브 가중 인원 — 학생 명단 기반. 월중 입학·전출·퇴원은 회차 비례(0~1)로
+   *  환산되므로 소수. 지정 시 studentCount 대신 사용한다. */
+  studentUnits?: number | null;
   classRevenue?: number | null; // 비율제용
   bonus?: number; // 특별상여
   incentiveManual?: number; // 수동 인센티브 조정
@@ -286,13 +289,16 @@ export function computePayroll(
   if (emp.payScheme === "INCENTIVE") {
     const th = emp.incThreshold ?? 0;
     const per = emp.incPerStudent ?? 0;
-    const cnt = month.studentCount ?? 0;
+    // 명단 기반 가중 인원(월중 입학·전출·퇴원 회차 비례)이 있으면 우선 사용
+    const cnt = month.studentUnits ?? month.studentCount ?? 0;
     const over = Math.max(cnt - th, 0);
     incentiveP = round0(over * per);
-    if (over > 0)
+    if (over > 0) {
+      const cntTxt = Number.isInteger(cnt) ? String(cnt) : cnt.toFixed(3);
       notes.push(
-        `인센티브: (학생 ${cnt} - 기준 ${th}) × ${per.toLocaleString()}원`
+        `인센티브: (학생 ${cntTxt}${month.studentUnits != null ? "명(가중)" : ""} - 기준 ${th}) × ${per.toLocaleString()}원`
       );
+    }
   }
   incentiveP += month.incentiveManual ?? 0;
 
@@ -364,7 +370,7 @@ export function computePayroll(
   if (emp.payScheme === "INCENTIVE" && incentiveP > 0) {
     retentionD = floor10(incentiveP * RETENTION_RATE);
     notes.push(
-      `퇴직유보금: 인센티브 ${incentiveP.toLocaleString()}원 × 8.3% (별도통장 송금)`
+      `퇴직유보금: 인센티브 ${incentiveP.toLocaleString()}원 × 1/12(8.3%) (별도통장 송금)`
     );
   }
 

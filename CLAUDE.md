@@ -43,3 +43,7 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - **슬랙 명령 추가** → `app/api/slack/command/route.ts`.
 - **시간기록표 양식 변경** → `lib/timesheet.ts`(파서·주휴 산정, 테스트 있음) + `/api/payroll/timesheet`.
   주휴 기준: 주(월~일) 실근로 15시간 '초과' 시 min(주근로/5, 8)시간. 휴게 30분은 Employee.breakPaid 로 유급/무급.
+- **인센티브 산정 변경** → `lib/incentive.ts`(재원계수·엑셀 명단 파서, 테스트 있음) + `/api/payroll/incentive`.
+  월중 입학·전출·퇴원 학생은 정수 1이 아니라 **회차 비례**(재원계수 = 회차÷8, 상한 1)로 계산.
+  인센티브 = (Σ재원계수 − 기준인원) × 기준금액. 1회당 단가 = 기준금액÷8(만근 8회).
+  명세서에 「인센티브 산정 내역서」가 첨부문서로 자동 첨부(`incentiveDetailHtml`).

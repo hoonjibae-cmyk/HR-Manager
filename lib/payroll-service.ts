@@ -7,6 +7,7 @@ import {
   type EmployeePayInput,
 } from "./payroll";
 import { getActiveRates, getTaxTable, empToPayInput } from "./repo";
+import { summarizeIncentive, type RosterStudent } from "./incentive";
 
 export interface PayrollInputMap {
   [employeeId: number]: MonthlyInput;
@@ -106,6 +107,30 @@ export async function wageSegmentsFor(
       result.set(emp.id, { segs, futureStart: future?.startDate ?? null });
   }
   return result;
+}
+
+/** 저장된 인센티브 학생 명단 → 엔진 입력용 */
+export function rosterToStudents(rows: any[]): RosterStudent[] {
+  return rows.map((r) => ({
+    seq: r.seq,
+    status: r.status as RosterStudent["status"],
+    name: r.name,
+    className: r.className,
+    school: r.school,
+    enrollDate: r.enrollDate,
+    withdrawDate: r.withdrawDate,
+    sessions: r.sessions,
+    fullSessions: r.fullSessions,
+  }));
+}
+
+/** 강사·월 인센티브 명단 조회 (없으면 null) */
+export async function incentiveRosterFor(employeeId: number, year: number, month: number) {
+  const rows = await prisma.incentiveStudent.findMany({
+    where: { employeeId, year, month },
+    orderBy: [{ seq: "asc" }, { id: "asc" }],
+  });
+  return rows.length ? rows : null;
 }
 
 /** 월중 계약변경 가중 결과 — 명세서 산출 근거 표시용 구조화 데이터 */
@@ -289,6 +314,20 @@ export async function runPayrollMonth(
   const emps = await prisma.employee.findMany({ where });
   // 월중 계약 갱신 대비: 이 달에 적용된 계약 조건 구간(역일수) 일괄 조회
   const segMap = await wageSegmentsFor(emps, year, month);
+  // 인센티브 강사: 학생 명단(회차 비례 가중 인원) 일괄 조회
+  const incEmpIds = emps.filter((e) => e.payScheme === "INCENTIVE").map((e) => e.id);
+  const rosterMap = new Map<number, any[]>();
+  if (incEmpIds.length) {
+    const rosterRows = await prisma.incentiveStudent.findMany({
+      where: { employeeId: { in: incEmpIds }, year, month },
+      orderBy: [{ seq: "asc" }, { id: "asc" }],
+    });
+    for (const r of rosterRows) {
+      const arr = rosterMap.get(r.employeeId) ?? [];
+      arr.push(r);
+      rosterMap.set(r.employeeId, arr);
+    }
+  }
 
   const results = [];
   for (const emp of emps) {
@@ -318,6 +357,21 @@ export async function runPayrollMonth(
     // 월중 계약 갱신 시 기본급(시급)·수당을 역일수 가중평균으로 치환
     const payInput = empToPayInput(emp);
     const blend = applyMidMonthBlend(payInput, segMap.get(emp.id));
+
+    // 인센티브: 학생 명단이 있으면 회차 비례 가중 인원으로 산정
+    let incSummary: ReturnType<typeof summarizeIncentive> | null = null;
+    if (emp.payScheme === "INCENTIVE") {
+      const roster = rosterMap.get(emp.id);
+      if (roster?.length) {
+        incSummary = summarizeIncentive(rosterToStudents(roster), {
+          threshold: payInput.incThreshold ?? 0,
+          perStudent: payInput.incPerStudent ?? 0,
+        });
+        mInput.studentUnits = incSummary.units;
+      } else if (mInput.studentUnits === undefined) {
+        mInput.studentUnits = existing?.studentUnits ?? null;
+      }
+    }
 
     const r = computePayroll(payInput, mInput, rates, tax);
 
@@ -369,6 +423,7 @@ export async function runPayrollMonth(
       nightHours: mInput.nightHours ?? 0,
       holidayHours: mInput.holidayHours ?? 0,
       studentCount: mInput.studentCount ?? null,
+      studentUnits: mInput.studentUnits ?? null,
       classRevenue: mInput.classRevenue ?? null,
       bonus: mInput.bonus ?? 0,
       incentiveManual: mInput.incentiveManual ?? 0,
@@ -399,6 +454,21 @@ export async function runPayrollMonth(
         // 월중 계약변경 가중 내역
         baseApplied: payInput.baseWage,
         blend: blend?.info ?? null,
+        // 인센티브 명단 산정 요약 (상세는 IncentiveStudent 테이블)
+        incentive: incSummary
+          ? {
+              threshold: incSummary.threshold,
+              perStudent: incSummary.perStudent,
+              perSession: incSummary.perSession,
+              standardSessions: incSummary.standardSessions,
+              units: incSummary.units,
+              over: incSummary.over,
+              amount: incSummary.amount,
+              fullCount: incSummary.fullCount,
+              partialCount: incSummary.partialCount,
+              totalCount: incSummary.totalCount,
+            }
+          : null,
       }),
       status: "DRAFT",
     };

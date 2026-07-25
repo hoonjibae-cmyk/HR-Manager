@@ -116,6 +116,7 @@ model Employee {
 
   contracts   Contract[]
   payrolls    PayrollRecord[]
+  incentiveStudents IncentiveStudent[]
   leaveGrants LeaveGrant[]
   leaveTxns   LeaveTransaction[]
   leaveReqs   LeaveRequest[]
@@ -178,7 +179,8 @@ model PayrollRecord {
   overtimeHours   Float   @default(0) // 연장근로시간(월, 법정초과 ×1.5)
   nightHours      Float   @default(0) // 야간근로시간(월)
   holidayHours    Float   @default(0) // 휴일근로시간(월)
-  studentCount    Int?    // 인센티브용 학생수
+  studentCount    Int?    // 인센티브용 학생수 (명단 없을 때 수동 입력)
+  studentUnits    Float?  // 인센티브 가중 인원 (명단 기반, 월중 입학·전출·퇴원 반영 0.x 가능)
   classRevenue    Int?    // 비율제용 반 매출액
   bonus           Int     @default(0) // 특별상여
   incentiveManual Int     @default(0) // 수동 인센티브 조정
@@ -338,4 +340,33 @@ model AuditLog {
   target    String?
   detail    String   @default("{}")
   createdAt DateTime @default(now())
+}
+
+
+/// 인센티브 학생 명단 (월급+인센티브 강사, 강사·연월 단위 스냅샷)
+model IncentiveStudent {
+  id           Int      @id @default(autoincrement())
+  employeeId   Int
+  employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  year         Int
+  month        Int
+
+  seq          Int?
+  // 재원(ENROLLED) | 전출(TRANSFERRED) | 퇴원(WITHDRAWN)
+  status       String   @default("ENROLLED")
+  name         String
+  className    String?
+  school       String?
+  enrollDate   DateTime?
+  withdrawDate DateTime?
+  // 해당 월 실제 수업 회차 (null = 만근)
+  sessions     Float?
+  // 월 표준 회차 (기본 8회)
+  fullSessions Float    @default(8)
+  // 재원계수 0~1 (= sessions / fullSessions, 상한 1)
+  weight       Float    @default(1)
+
+  createdAt    DateTime @default(now())
+
+  @@index([employeeId, year, month])
 }

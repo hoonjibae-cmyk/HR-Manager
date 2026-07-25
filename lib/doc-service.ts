@@ -9,11 +9,13 @@ import {
 } from "./documents";
 import {
   payslipHtml,
+  incentiveDetailHtml,
   certEmploymentHtml,
   certCareerHtml,
   type DocPayroll,
 } from "./documents-pay";
 import { getCompany, empToDoc, contractToDoc } from "./repo";
+import { incentiveRosterFor, rosterToStudents } from "./payroll-service";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { existsSync } from "fs";
@@ -115,9 +117,29 @@ export async function genPayslip(payrollId: number) {
   if (!pr) throw new Error("급여기록 없음");
   const company = await getCompany();
   const payroll: DocPayroll = pr as any;
-  const pdf = await htmlToPdf(
-    payslipHtml({ employee: empToDoc(pr.employee), payroll, company })
-  );
+  const employee = empToDoc(pr.employee);
+  const pages = [payslipHtml({ employee, payroll, company })];
+
+  // 인센티브 강사: 학생 명단이 있으면 '인센티브 산정 내역서'를 첨부
+  if (pr.employee.payScheme === "INCENTIVE") {
+    const roster = await incentiveRosterFor(pr.employeeId, pr.year, pr.month);
+    if (roster?.length) {
+      pages.push(
+        incentiveDetailHtml({
+          employee,
+          company,
+          year: pr.year,
+          month: pr.month,
+          students: rosterToStudents(roster),
+          threshold: pr.employee.incThreshold ?? 0,
+          perStudent: pr.employee.incPerStudent ?? 0,
+          monthlyPay: pr.baseP,
+          retention: pr.retentionD,
+        })
+      );
+    }
+  }
+  const pdf = pages.length > 1 ? await htmlPagesToPdf(pages) : await htmlToPdf(pages[0]);
   const path = await save(pdf, `급여명세서_${pr.employee.name}_${pr.year}-${pr.month}.pdf`);
   await record(pr.employeeId, "PAYSLIP", `급여명세서 ${pr.year}.${pr.month} - ${pr.employee.name}`, path, {
     payrollId,
