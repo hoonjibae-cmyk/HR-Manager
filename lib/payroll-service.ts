@@ -97,15 +97,22 @@ export async function wageSegmentsFor(
   return result;
 }
 
+/** 월중 계약변경 가중 결과 — 명세서 산출 근거 표시용 구조화 데이터 */
+export interface BlendInfo {
+  totalDays: number;
+  segments: Array<{ days: number; baseWage: number }>;
+  baseWage: number; // 가중평균 기본급(시급)
+}
+
 /**
  * 월중 계약 갱신(조건이 서로 다른 구간 2개 이상)이면 임금 조건을 역일수
  * 가중평균으로 치환. 그 외(계약 없음/단일 구간/동일 조건)는 직원 카드 값 유지.
- * 반환: 변경 내역 노트(감사용) 또는 null.
+ * 반환: 감사 노트 + 명세서 표기용 구조화 정보, 해당 없으면 null.
  */
 function applyMidMonthBlend(
   payInput: EmployeePayInput,
   segs: WageSegment[] | undefined
-): string | null {
+): { note: string; info: BlendInfo } | null {
   if (!segs || segs.length < 2) return null;
   const differs = segs.some(
     (s) =>
@@ -127,7 +134,14 @@ function applyMidMonthBlend(
   const segDesc = segs
     .map((s) => `${s.days}일×${s.baseWage.toLocaleString()}원`)
     .join(" + ");
-  return `월중 계약변경 일할가중 적용: ${segDesc} → 기본급(시급) ${b.baseWage.toLocaleString()}원 (변경 전 기준 ${before.toLocaleString()}원)`;
+  return {
+    note: `월중 계약변경 일할가중 적용: ${segDesc} → 기본급(시급) ${b.baseWage.toLocaleString()}원 (변경 전 기준 ${before.toLocaleString()}원)`,
+    info: {
+      totalDays: segs.reduce((a, s) => a + s.days, 0),
+      segments: segs.map((s) => ({ days: s.days, baseWage: s.baseWage })),
+      baseWage: b.baseWage,
+    },
+  };
 }
 
 /** 저장된 레코드의 공제 최종본 조립 + 합계 재계산 */
@@ -257,7 +271,7 @@ export async function runPayrollMonth(
 
     // 월중 계약 갱신 시 기본급(시급)·수당을 역일수 가중평균으로 치환
     const payInput = empToPayInput(emp);
-    const blendNote = applyMidMonthBlend(payInput, segMap.get(emp.id));
+    const blend = applyMidMonthBlend(payInput, segMap.get(emp.id));
 
     const r = computePayroll(payInput, mInput, rates, tax);
 
@@ -333,8 +347,12 @@ export async function runPayrollMonth(
       // 배치 재실행 시 기타공제 세부 항목 보존 (합계 otherD 는 fin 에서 보존됨)
       otherItems: existing?.otherItems ?? null,
       breakdown: JSON.stringify({
-        notes: blendNote ? [blendNote, ...r.notes] : r.notes,
+        notes: blend ? [blend.note, ...r.notes] : r.notes,
         taxableGross: r.taxableGross,
+        // 명세서 '기본급 산출 근거' 표기용: 이 달 계산에 실제 사용된 기본급(시급)과
+        // 월중 계약변경 가중 내역
+        baseApplied: payInput.baseWage,
+        blend: blend?.info ?? null,
       }),
       status: "DRAFT",
     };

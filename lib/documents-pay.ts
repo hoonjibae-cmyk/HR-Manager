@@ -43,6 +43,7 @@ export interface DocPayroll {
   hourlyWage: number;
   prorationRatio?: number;
   weeklyHolidayHours?: number | null; // 시급제 주휴시간(월 합계, 시간기록표 기반)
+  breakdown?: string | null; // 산출 근거 JSON {notes, baseApplied, blend}
 }
 
 function esc(s: any): string {
@@ -182,6 +183,66 @@ export function payslipHtml(args: {
     }
   }
 
+  // ── 기본급 산출 근거 (월중 입·퇴사 일할 / 월중 계약변경 가중) ──
+  let bd: any = null;
+  try {
+    bd = p.breakdown ? JSON.parse(p.breakdown) : null;
+  } catch {}
+  const blend =
+    bd?.blend && Array.isArray(bd.blend.segments) && bd.blend.segments.length >= 2
+      ? bd.blend
+      : null;
+  const baseApplied: number | null =
+    typeof bd?.baseApplied === "number" ? bd.baseApplied : null;
+  const ratio = p.prorationRatio ?? 1;
+  const isMonthlyLike = p.payScheme === "MONTHLY" || p.payScheme === "INCENTIVE";
+
+  const basisLines: string[] = [];
+  if (blend && p.payScheme !== "RATIO") {
+    const segTxt = blend.segments
+      .map((s: any) => `${s.days}일 × ${won(s.baseWage)}원`)
+      .join(" &nbsp;+&nbsp; ");
+    basisLines.push(
+      `<b>월중 계약 변경</b> — 적용 ${isHourly ? "시급" : "월 기본급"}(역일수 가중평균): ( ${segTxt} ) ÷ ${blend.totalDays}일 = <b>${won(blend.baseWage)}원</b>`
+    );
+  }
+  if (isMonthlyLike && ratio < 1) {
+    // 재직기간 재구성 — 기록 당시 비율과 일치할 때만 일수·기간을 표기
+    const monthStart = new Date(Date.UTC(p.year, p.month - 1, 1));
+    const monthEnd = new Date(Date.UTC(p.year, p.month, 0));
+    const daysInMonth = monthEnd.getUTCDate();
+    const hire = new Date(e.hireDate);
+    const resign = e.resignDate ? new Date(e.resignDate) : null;
+    const from = hire > monthStart ? hire : monthStart;
+    const to = resign && resign < monthEnd ? resign : monthEnd;
+    const activeDays =
+      from <= to ? Math.floor((to.getTime() - from.getTime()) / 86400000) + 1 : 0;
+    const matches =
+      activeDays > 0 && Math.abs(activeDays / daysInMonth - ratio) < 0.005;
+    const baseForCalc = baseApplied ?? (blend ? blend.baseWage : null);
+    if (matches) {
+      const period = `${p.month}월 ${from.getUTCDate()}일 ~ ${p.month}월 ${to.getUTCDate()}일`;
+      basisLines.push(
+        baseForCalc != null
+          ? `<b>월중 입·퇴사 일할계산</b> — 재직 ${period} (${activeDays}일/${daysInMonth}일): ${blend ? "적용 " : ""}기본급 ${won(baseForCalc)}원 × ${activeDays}/${daysInMonth} = <b>${won(p.baseP)}원</b>`
+          : `<b>월중 입·퇴사 일할계산</b> — 재직 ${period} (${activeDays}일/${daysInMonth}일, 재직비율 ${(ratio * 100).toFixed(1)}%) → 기본급 <b>${won(p.baseP)}원</b>`
+      );
+      basisLines.push(
+        `직책수당·식대·차량유지비 등 월 정액 수당도 동일 비율(${activeDays}/${daysInMonth})로 일할 지급됩니다.`
+      );
+    } else {
+      basisLines.push(
+        `<b>일할계산 적용</b> — 재직비율 ${(ratio * 100).toFixed(1)}% → 기본급 <b>${won(p.baseP)}원</b> (월 정액 수당 동일 비율 적용)`
+      );
+    }
+  }
+  const basisBlock = basisLines.length
+    ? `<div style="border:1px solid #cbd5e1;border-radius:8px;padding:6px 10px;margin:8px 0 2px;background:#f8fafc">
+        <div class="small" style="color:#334155"><b>◾ 기본급 산출 근거</b></div>
+        ${basisLines.map((l) => `<div class="small">· ${l}</div>`).join("\n        ")}
+      </div>`
+    : "";
+
   return `${head(c, `<div class="small">지급일: ${ymdKo(payDate)}</div><div class="badge">${esc(INCOME_TYPE_LABEL[p.incomeType] ?? "")}</div>`)}
   <div class="doc-title" style="letter-spacing:0.2em">${esc(title)}</div>
   <p style="text-align:center" class="muted">${p.year}년 ${p.month}월분</p>
@@ -199,6 +260,7 @@ export function payslipHtml(args: {
       <tr class="total"><td colspan="3" style="text-align:right">실수령액</td><td class="num">${won(p.net)}</td></tr>
     </tbody>
   </table>
+  ${basisBlock}
   <div class="clause" style="margin-top:10px">
     ${isHourly ? `<div class="small">· 기본급 = 기본 근로시간 × 시급</div>` : ""}
     <div class="small">· 추가근로수당(법내연장) = 추가근로시간 × 통상시급 &nbsp; · 연장근로수당(법정초과) = 연장근로시간 × 통상시급 × 1.5</div>
@@ -208,7 +270,6 @@ export function payslipHtml(args: {
       ? `<div class="small">· 사업소득 원천징수: 지급총액의 3.3%(소득세 3% + 지방소득세 0.3%) 공제</div>`
       : `<div class="small">· 4대보험 및 근로소득세는 관계법령·간이세액표(또는 세무대리인 산정액)에 따릅니다.</div>`}
     ${p.retentionD ? `<div class="small">· 퇴직유보금: 인센티브 원천액의 8.3%로, 확인서에 따라 별도 통장으로 송금·적립됩니다.</div>` : ""}
-    ${p.prorationRatio != null && p.prorationRatio < 1 ? `<div class="small">· 월중 입·퇴사로 일할계산이 적용되었습니다 (재직비율 ${(p.prorationRatio * 100).toFixed(1)}%).</div>` : ""}
     <div class="small">· 본 명세서는 근로기준법 제48조에 따라 교부됩니다.</div>
   </div>`;
 }
