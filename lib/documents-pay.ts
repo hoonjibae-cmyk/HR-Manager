@@ -124,7 +124,16 @@ export function payslipHtml(args: {
   const isHourly = p.payScheme === "HOURLY";
   let hoursRow = "";
   if (isHourly) {
-    const h1 = (n: number) => (Math.round(n * 10) / 10).toLocaleString("ko-KR");
+    // 소수 시간 → "39시간 30분" 표기 (분은 반올림, 60분 올림 처리)
+    const hm = (n: number) => {
+      let h = Math.floor(n);
+      let m = Math.round((n - h) * 60);
+      if (m === 60) {
+        h += 1;
+        m = 0;
+      }
+      return m > 0 ? `${h.toLocaleString("ko-KR")}시간 ${m}분` : `${h.toLocaleString("ko-KR")}시간`;
+    };
     const baseHours =
       p.workedHours != null && p.workedHours > 0
         ? p.workedHours
@@ -137,13 +146,13 @@ export function payslipHtml(args: {
     const nightH = p.nightHours ?? 0;
     const total = baseHours + exH + otH + holH;
     const parts = [
-      `기본 ${h1(baseHours)}`,
-      exH ? `추가 ${h1(exH)}` : "",
-      otH ? `연장 ${h1(otH)}` : "",
-      holH ? `휴일 ${h1(holH)}` : "",
-      nightH ? `야간 ${h1(nightH)}(가산)` : "",
+      `기본 ${hm(baseHours)}`,
+      exH ? `추가 ${hm(exH)}` : "",
+      otH ? `연장 ${hm(otH)}` : "",
+      holH ? `휴일 ${hm(holH)}` : "",
+      nightH ? `야간 ${hm(nightH)}(가산)` : "",
     ].filter(Boolean);
-    hoursRow = `<tr><th>총 근로시간</th><td colspan="3"><b>${h1(total)}시간</b> <span class="muted">( ${parts.join(" · ")} )</span></td></tr>`;
+    hoursRow = `<tr><th>총 근로시간</th><td colspan="3"><b>${hm(total)}</b> <span class="muted">( ${parts.join(" · ")} )</span></td></tr>`;
   }
 
   return `${head(c, `<div class="small">지급일: ${ymdKo(payDate)}</div><div class="badge">${esc(INCOME_TYPE_LABEL[p.incomeType] ?? "")}</div>`)}
