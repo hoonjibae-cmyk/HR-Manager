@@ -152,7 +152,23 @@ export async function runPayrollMonth(
 
     const r = computePayroll(empToPayInput(emp), mInput, rates, tax);
 
-    const deductMode = existing?.deductMode ?? "MANUAL";
+    // 공제 기본모드: 4대보험(EMPLOYEE)=MANUAL(세무사 지정값 입력),
+    // 사업소득(FREELANCE)=AUTO(3.3% 기계적 계산이므로 자동)
+    // 기존 레코드가 '수동인데 아무 값도 입력 안 된 프리랜서'면 AUTO 로 승격(치유)
+    const untouchedFreelance =
+      !!existing &&
+      existing.deductMode === "MANUAL" &&
+      emp.incomeType === "FREELANCE" &&
+      existing.pensionD === 0 &&
+      existing.employmentD === 0 &&
+      existing.healthD === 0 &&
+      existing.longTermD === 0 &&
+      existing.incomeTaxD === 0 &&
+      existing.localTaxD === 0;
+    const deductMode = untouchedFreelance
+      ? "AUTO"
+      : existing?.deductMode ??
+        (emp.incomeType === "FREELANCE" ? "AUTO" : "MANUAL");
     const fin = assembleDeductions({
       deductMode,
       auto: statutoryOf(r),
