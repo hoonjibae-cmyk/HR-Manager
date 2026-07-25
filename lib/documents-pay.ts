@@ -41,6 +41,7 @@ export interface DocPayroll {
   net: number;
   hourlyWage: number;
   prorationRatio?: number;
+  weeklyHolidayHours?: number | null; // 시급제 주휴시간(월 합계, 시간기록표 기반)
 }
 
 function esc(s: any): string {
@@ -122,18 +123,19 @@ export function payslipHtml(args: {
   // 시급제: 총 근로시간 = 기본(실입력 또는 기본급÷시급 역산) + 추가 + 연장 + 휴일
   //         야간은 타 시간과 중복되는 '가산'이므로 합계에 미포함(참고 표기만)
   const isHourly = p.payScheme === "HOURLY";
+  // 소수 시간 → "39시간 30분" 표기 (분은 반올림, 60분 올림 처리)
+  const hm = (n: number) => {
+    let h = Math.floor(n);
+    let m = Math.round((n - h) * 60);
+    if (m === 60) {
+      h += 1;
+      m = 0;
+    }
+    return m > 0 ? `${h.toLocaleString("ko-KR")}시간 ${m}분` : `${h.toLocaleString("ko-KR")}시간`;
+  };
   let hoursRow = "";
+  let holidayNote = "";
   if (isHourly) {
-    // 소수 시간 → "39시간 30분" 표기 (분은 반올림, 60분 올림 처리)
-    const hm = (n: number) => {
-      let h = Math.floor(n);
-      let m = Math.round((n - h) * 60);
-      if (m === 60) {
-        h += 1;
-        m = 0;
-      }
-      return m > 0 ? `${h.toLocaleString("ko-KR")}시간 ${m}분` : `${h.toLocaleString("ko-KR")}시간`;
-    };
     const baseHours =
       p.workedHours != null && p.workedHours > 0
         ? p.workedHours
@@ -153,6 +155,18 @@ export function payslipHtml(args: {
       nightH ? `야간 ${hm(nightH)}(가산)` : "",
     ].filter(Boolean);
     hoursRow = `<tr><th>총 근로시간</th><td colspan="3"><b>${hm(total)}</b> <span class="muted">( ${parts.join(" · ")} )</span></td></tr>`;
+
+    // 주휴수당 계산 과정 표기
+    if (p.weeklyHolidayP > 0 && p.hourlyWage > 0) {
+      const whHours =
+        p.weeklyHolidayHours != null && p.weeklyHolidayHours > 0
+          ? p.weeklyHolidayHours
+          : p.weeklyHolidayP / p.hourlyWage;
+      holidayNote = `<div class="small">· 주휴수당 = 주휴시간 <b>${hm(whHours)}</b> × 시급 ${won(p.hourlyWage)}원 = <b>${won(p.weeklyHolidayP)}원</b>
+        &nbsp;(1주 실근로가 15시간을 초과한 주에 한해 부여, 주휴시간 = 해당 주 실근로 ÷ 5, 주당 최대 8시간)</div>`;
+    } else if (p.weeklyHolidayP === 0) {
+      holidayNote = `<div class="small">· 주휴수당: 실근로 15시간을 초과한 주가 없어 미발생</div>`;
+    }
   }
 
   return `${head(c, `<div class="small">지급일: ${ymdKo(payDate)}</div><div class="badge">${esc(INCOME_TYPE_LABEL[p.incomeType] ?? "")}</div>`)}
@@ -176,6 +190,7 @@ export function payslipHtml(args: {
     ${isHourly ? `<div class="small">· 기본급 = 기본 근로시간 × 시급</div>` : ""}
     <div class="small">· 추가근로수당(법내연장) = 추가근로시간 × 통상시급 &nbsp; · 연장근로수당(법정초과) = 연장근로시간 × 통상시급 × 1.5</div>
     <div class="small">· 휴일근로수당 = 휴일근로시간 × 통상시급 × 1.5 &nbsp; · 야간근로수당 = 야간근로시간 × 통상시급 × 0.5</div>
+    ${holidayNote}
     ${isFree
       ? `<div class="small">· 사업소득 원천징수: 지급총액의 3.3%(소득세 3% + 지방소득세 0.3%) 공제</div>`
       : `<div class="small">· 4대보험 및 근로소득세는 관계법령·간이세액표(또는 세무대리인 산정액)에 따릅니다.</div>`}

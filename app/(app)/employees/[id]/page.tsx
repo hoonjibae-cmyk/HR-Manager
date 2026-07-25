@@ -68,6 +68,15 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
               ) : (
                 <Row k={emp.payScheme === "HOURLY" ? "시급" : "월 기본급"}>{wonUnit(emp.baseWage)}</Row>
               )}
+              {emp.payScheme === "HOURLY" && (
+                <Row k="휴게 30분">
+                  {emp.breakPaid ? (
+                    <span className="text-emerald-600">유급 (기록 그대로 인정)</span>
+                  ) : (
+                    <span className="text-slate-500">무급 (일별 30분 차감)</span>
+                  )}
+                </Row>
+              )}
               {emp.positionAllow > 0 && <Row k="직책수당">{wonUnit(emp.positionAllow)}</Row>}
               {emp.mealAllow > 0 && <Row k="식대(비과세)">{wonUnit(emp.mealAllow)}</Row>}
               {emp.carAllow > 0 && <Row k="차량유지비">{wonUnit(emp.carAllow)}</Row>}
