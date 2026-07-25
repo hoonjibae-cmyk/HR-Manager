@@ -205,6 +205,16 @@ export function payslipHtml(args: {
     basisLines.push(
       `<b>월중 계약 변경</b> — 적용 ${isHourly ? "시급" : "월 기본급"}(역일수 가중평균): ( ${segTxt} ) ÷ ${blend.totalDays}일 = <b>${won(blend.baseWage)}원</b>`
     );
+  } else if (!blend && p.payScheme !== "RATIO" && Array.isArray(bd?.notes)) {
+    // 구조화 데이터가 없는 과거 기록: 산정 당시 남긴 가중 노트를 그대로 표시
+    const legacy = bd.notes.find(
+      (n: any) => typeof n === "string" && n.startsWith("월중 계약변경")
+    );
+    if (legacy) {
+      basisLines.push(
+        `<b>월중 계약 변경</b> — ${esc(String(legacy).replace(/^월중 계약변경 일할가중 적용:\s*/, ""))}`
+      );
+    }
   }
   if (isMonthlyLike && ratio < 1) {
     // 재직기간 재구성 — 기록 당시 비율과 일치할 때만 일수·기간을 표기

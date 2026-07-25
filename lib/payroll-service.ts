@@ -39,12 +39,19 @@ export function prorationRatioFor(
  * - 재직기간(입사~퇴사)과 교차한 일수만 집계해 입/퇴사 일할계산과 이중 적용을 방지.
  * - DRAFT 계약은 제외.
  */
+export interface MonthContractTerms {
+  segs: WageSegment[];
+  /** 이 달 이후에 시작하는(아직 발효 전) 계약의 최초 시작일 — 있으면 직원 카드가
+   *  미래 조건으로 선반영된 상태이므로, 이 달은 계약 스냅샷 조건을 써야 한다. */
+  futureStart: Date | null;
+}
+
 export async function wageSegmentsFor(
   emps: Array<{ id: number; hireDate: Date; resignDate: Date | null }>,
   year: number,
   month: number
-): Promise<Map<number, WageSegment[]>> {
-  const result = new Map<number, WageSegment[]>();
+): Promise<Map<number, MonthContractTerms>> {
+  const result = new Map<number, MonthContractTerms>();
   if (!emps.length) return result;
   const monthStart = new Date(Date.UTC(year, month - 1, 1));
   const monthEnd = new Date(Date.UTC(year, month, 0));
@@ -53,7 +60,6 @@ export async function wageSegmentsFor(
     where: {
       employeeId: { in: emps.map((e) => e.id) },
       status: { not: "DRAFT" },
-      startDate: { lte: monthEnd },
     },
     orderBy: [{ startDate: "asc" }, { id: "asc" }],
   });
@@ -65,8 +71,12 @@ export async function wageSegmentsFor(
   }
 
   for (const emp of emps) {
-    const list = byEmp.get(emp.id) ?? [];
-    if (!list.length) continue;
+    const all = byEmp.get(emp.id) ?? [];
+    if (!all.length) continue;
+    // 이 달을 지배하는 계약(시작일 <= 말일)과 아직 발효 전(미래 시작) 계약 분리
+    const list = all.filter((c) => c.startDate <= monthEnd);
+    const future = all.find((c) => c.startDate > monthEnd) ?? null;
+
     const winFrom = emp.hireDate > monthStart ? emp.hireDate : monthStart;
     const winTo =
       emp.resignDate && emp.resignDate < monthEnd ? emp.resignDate : monthEnd;
@@ -92,7 +102,8 @@ export async function wageSegmentsFor(
         ratioPercent: c.ratioPercent,
       });
     }
-    if (segs.length) result.set(emp.id, segs);
+    if (segs.length || future)
+      result.set(emp.id, { segs, futureStart: future?.startDate ?? null });
   }
   return result;
 }
@@ -105,43 +116,78 @@ export interface BlendInfo {
 }
 
 /**
- * 월중 계약 갱신(조건이 서로 다른 구간 2개 이상)이면 임금 조건을 역일수
- * 가중평균으로 치환. 그 외(계약 없음/단일 구간/동일 조건)는 직원 카드 값 유지.
- * 반환: 감사 노트 + 명세서 표기용 구조화 정보, 해당 없으면 null.
+ * 이 달에 적용할 임금 조건을 계약 이력 기준으로 결정해 payInput 에 반영.
+ * - 조건이 다른 구간 2개 이상: 역일수 가중평균(월중 계약 변경).
+ * - 단일 구간 + 미래 시작 계약 존재: 직원 카드는 미래 조건으로 선반영된 상태이므로
+ *   이 달을 지배하는 계약의 스냅샷 조건으로 되돌려 계산 (발효 전 선지급 방지).
+ * - 그 외(계약 없음/미래 계약 없음): 직원 카드 값 유지.
  */
-function applyMidMonthBlend(
+export function applyMidMonthBlend(
   payInput: EmployeePayInput,
-  segs: WageSegment[] | undefined
-): { note: string; info: BlendInfo } | null {
-  if (!segs || segs.length < 2) return null;
-  const differs = segs.some(
-    (s) =>
-      s.baseWage !== segs[0].baseWage ||
-      s.positionAllow !== segs[0].positionAllow ||
-      s.mealAllow !== segs[0].mealAllow ||
-      s.carAllow !== segs[0].carAllow ||
-      (s.ratioPercent ?? null) !== (segs[0].ratioPercent ?? null)
-  );
-  if (!differs) return null;
-  const b = blendWageTerms(segs);
-  if (!b) return null;
-  const before = payInput.baseWage;
-  payInput.baseWage = b.baseWage;
-  payInput.positionAllow = b.positionAllow;
-  payInput.mealAllow = b.mealAllow;
-  payInput.carAllow = b.carAllow;
-  if (b.ratioPercent != null) payInput.ratioPercent = b.ratioPercent;
-  const segDesc = segs
-    .map((s) => `${s.days}일×${s.baseWage.toLocaleString()}원`)
-    .join(" + ");
-  return {
-    note: `월중 계약변경 일할가중 적용: ${segDesc} → 기본급(시급) ${b.baseWage.toLocaleString()}원 (변경 전 기준 ${before.toLocaleString()}원)`,
-    info: {
-      totalDays: segs.reduce((a, s) => a + s.days, 0),
-      segments: segs.map((s) => ({ days: s.days, baseWage: s.baseWage })),
-      baseWage: b.baseWage,
-    },
+  entry: MonthContractTerms | undefined
+): { note: string; info: BlendInfo | null } | null {
+  if (!entry || !entry.segs.length) return null;
+  const { segs, futureStart } = entry;
+
+  const applySeg = (s: WageSegment) => {
+    payInput.baseWage = s.baseWage;
+    payInput.positionAllow = s.positionAllow;
+    payInput.mealAllow = s.mealAllow;
+    payInput.carAllow = s.carAllow;
+    if (s.ratioPercent != null) payInput.ratioPercent = s.ratioPercent;
   };
+
+  if (segs.length >= 2) {
+    const differs = segs.some(
+      (s) =>
+        s.baseWage !== segs[0].baseWage ||
+        s.positionAllow !== segs[0].positionAllow ||
+        s.mealAllow !== segs[0].mealAllow ||
+        s.carAllow !== segs[0].carAllow ||
+        (s.ratioPercent ?? null) !== (segs[0].ratioPercent ?? null)
+    );
+    if (!differs) return null;
+    const b = blendWageTerms(segs);
+    if (!b) return null;
+    const before = payInput.baseWage;
+    payInput.baseWage = b.baseWage;
+    payInput.positionAllow = b.positionAllow;
+    payInput.mealAllow = b.mealAllow;
+    payInput.carAllow = b.carAllow;
+    if (b.ratioPercent != null) payInput.ratioPercent = b.ratioPercent;
+    const segDesc = segs
+      .map((s) => `${s.days}일×${s.baseWage.toLocaleString()}원`)
+      .join(" + ");
+    return {
+      note: `월중 계약변경 일할가중 적용: ${segDesc} → 기본급(시급) ${b.baseWage.toLocaleString()}원 (변경 전 기준 ${before.toLocaleString()}원)`,
+      info: {
+        totalDays: segs.reduce((a, s) => a + s.days, 0),
+        segments: segs.map((s) => ({ days: s.days, baseWage: s.baseWage })),
+        baseWage: b.baseWage,
+      },
+    };
+  }
+
+  // 단일 구간 — 미래 시작 계약이 있으면 이 달은 기존(지배) 계약 조건으로 계산
+  if (futureStart) {
+    const s = segs[0];
+    const changed =
+      s.baseWage !== payInput.baseWage ||
+      s.positionAllow !== payInput.positionAllow ||
+      s.mealAllow !== payInput.mealAllow ||
+      s.carAllow !== payInput.carAllow ||
+      (s.ratioPercent != null && s.ratioPercent !== (payInput.ratioPercent ?? null));
+    if (!changed) return null;
+    const cardBase = payInput.baseWage;
+    applySeg(s);
+    const d = futureStart;
+    const ymdStr = `${d.getUTCFullYear()}년 ${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일`;
+    return {
+      note: `변경 계약 발효 전 — 이 달은 기존 계약 조건(기본급 ${s.baseWage.toLocaleString()}원) 적용. 변경 계약(기본급 ${cardBase.toLocaleString()}원)은 ${ymdStr}부터 적용됩니다.`,
+      info: null,
+    };
+  }
+  return null;
 }
 
 /** 저장된 레코드의 공제 최종본 조립 + 합계 재계산 */
