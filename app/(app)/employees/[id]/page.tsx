@@ -38,6 +38,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         desc={`${emp.empNo} · ${emp.department ?? ""} ${emp.position ?? ""}`}
         action={
           <div className="flex gap-2">
+            <Link href="/employees" className="btn-ghost">← 직원 목록</Link>
             <Link href={`/employees/${id}/edit`} className="btn-ghost">정보 수정</Link>
             <DocButton endpoint="/api/documents/newhire" body={{ employeeId: id }} label="신규입사 패키지 발급" className="btn-primary" />
           </div>
