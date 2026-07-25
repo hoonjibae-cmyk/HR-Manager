@@ -137,6 +137,11 @@ export async function runPayrollMonth(
     }
 
     const mInput = { ...(inputs[emp.id] ?? {}) };
+    // 시간기록표로 입력된 실근로/주휴시간은 일반 재계산 시 보존 (새 값이 오면 교체)
+    if (mInput.workedHours === undefined)
+      mInput.workedHours = existing?.workedHours ?? null;
+    if (mInput.weeklyHolidayHours === undefined)
+      mInput.weeklyHolidayHours = existing?.weeklyHolidayHours ?? null;
     mInput.prorationRatio = prorationRatioFor(
       year,
       month,
@@ -173,6 +178,7 @@ export async function runPayrollMonth(
       incomeType: emp.incomeType,
       payScheme: emp.payScheme,
       workedHours: mInput.workedHours ?? null,
+      weeklyHolidayHours: mInput.weeklyHolidayHours ?? null,
       extraHours: mInput.extraHours ?? 0,
       overtimeHours: mInput.overtimeHours ?? 0,
       nightHours: mInput.nightHours ?? 0,
@@ -247,6 +253,7 @@ export async function updateDeductions(payrollId: number, patch: DeductionPatch)
       empToPayInput(rec.employee),
       {
         workedHours: rec.workedHours,
+        weeklyHolidayHours: rec.weeklyHolidayHours,
         extraHours: rec.extraHours,
         overtimeHours: rec.overtimeHours,
         nightHours: rec.nightHours,

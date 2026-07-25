@@ -33,6 +33,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if ("hireDate" in body && body.hireDate) data.hireDate = new Date(body.hireDate);
   if ("resignDate" in body) data.resignDate = body.resignDate ? new Date(body.resignDate) : null;
   if ("active" in body) data.active = !!body.active;
+  if ("breakPaid" in body) data.breakPaid = !!body.breakPaid;
   if ("schedule" in body)
     data.schedule = typeof body.schedule === "string" ? body.schedule : JSON.stringify(body.schedule);
 

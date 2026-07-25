@@ -47,6 +47,7 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     incomeType: initial?.incomeType ?? "EMPLOYEE",
     payScheme: initial?.payScheme ?? "MONTHLY",
     baseWage: initial?.baseWage ?? 0,
+    breakPaid: initial?.breakPaid ?? false,
     positionAllow: initial?.positionAllow ?? 0,
     // 신규 등록 기본값: 4대보험 직원은 식대 20만원 포함
     mealAllow: initial ? initial.mealAllow ?? 0 : 200000,
@@ -164,6 +165,23 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
               <input type="number" className="input" value={f.baseWage} onChange={(e) => set("baseWage", e.target.value)} />
             </Field>
           )}
+          {f.payScheme === "HOURLY" && (
+            <div className="md:col-span-2">
+              <label className="label">휴게 30분 처리 (시간기록표 급여 산정)</label>
+              <label className="flex items-center gap-2 text-sm border border-slate-200 rounded-lg px-3 py-2">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4"
+                  checked={f.breakPaid}
+                  onChange={(e) => set("breakPaid", e.target.checked)}
+                />
+                <span>
+                  <b>휴게 30분 유급</b> — 시간기록표의 시간을 그대로 인정
+                  <span className="text-slate-400"> (체크 해제 시: 근무일마다 30분씩 차감)</span>
+                </span>
+              </label>
+            </div>
+          )}
           {isMonthly && (
             <>
               <Field label="직책수당 (월)"><input type="number" className="input" value={f.positionAllow} onChange={(e) => set("positionAllow", e.target.value)} /></Field>
@@ -204,8 +222,8 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
                   <td className="td">
                     <input type="checkbox" checked={d.work} onChange={(e) => setDay(i, "work", e.target.checked)} className="w-4 h-4" />
                   </td>
-                  <td className="td"><input type="time" className="input py-1" value={d.start} disabled={!d.work} onChange={(e) => setDay(i, "start", e.target.value)} /></td>
-                  <td className="td"><input type="time" className="input py-1" value={d.end} disabled={!d.work} onChange={(e) => setDay(i, "end", e.target.value)} /></td>
+                  <td className="td"><input type="time" step={1800} className="input py-1" value={d.start} disabled={!d.work} onChange={(e) => setDay(i, "start", e.target.value)} /></td>
+                  <td className="td"><input type="time" step={1800} className="input py-1" value={d.end} disabled={!d.work} onChange={(e) => setDay(i, "end", e.target.value)} /></td>
                   <td className="td"><input type="number" step="0.5" className="input py-1 w-20" value={d.breakH} disabled={!d.work} onChange={(e) => setDay(i, "breakH", Number(e.target.value))} /></td>
                 </tr>
               ))}

@@ -58,6 +58,7 @@ export const RETENTION_RATE = 0.083;
 
 export interface MonthlyInput {
   workedHours?: number | null; // 시급제 실근로시간(월). 없으면 스케줄로 추정
+  weeklyHolidayHours?: number | null; // 시급제 주휴시간(월 합계) — 시간기록표 기반. 지정 시 스케줄 추정 대신 사용
   prorationRatio?: number; // 일할계산 비율(월중 입/퇴사). 1=만근월. 월급·수당·추정근로시간에 적용
   extraHours?: number; // 법내연장(월): 소정 외이나 1일8h·주40h 이내 — 가산 없음(×1.0)
   overtimeHours?: number; // 법정 연장근로(월): 1일8h·주40h 초과분 — ×1.5
@@ -213,9 +214,17 @@ export function computePayroll(
         : weeklyContractual * WEEKS_PER_MONTH * prorate; // 스케줄 기반 추정
     baseP = round0(emp.baseWage * monthHours);
     // 시급제 주휴수당
-    weeklyHolidayP = round0(emp.baseWage * weeklyHoliday * WEEKS_PER_MONTH * prorate);
-    if (weeklyHoliday === 0)
-      notes.push("주 15시간 미만으로 주휴수당 미발생");
+    if (month.weeklyHolidayHours != null) {
+      // 시간기록표 기반: 주별 실근로 15시간 초과 주에 대해 산정된 주휴시간 합계
+      weeklyHolidayP = round0(emp.baseWage * month.weeklyHolidayHours);
+      notes.push(
+        `주휴수당: 실근로 기반 주휴시간 ${month.weeklyHolidayHours.toFixed(2)}시간 (주 15시간 초과 주만 부여)`
+      );
+    } else {
+      weeklyHolidayP = round0(emp.baseWage * weeklyHoliday * WEEKS_PER_MONTH * prorate);
+      if (weeklyHoliday === 0)
+        notes.push("주 15시간 미만으로 주휴수당 미발생");
+    }
   } else if (emp.payScheme === "RATIO") {
     const rev = month.classRevenue ?? 0;
     const pct = emp.ratioPercent ?? 0;

@@ -100,6 +100,10 @@ model Employee {
   dependents      Int    @default(1) // 부양가족수(본인포함) — 간이세액표용
   nonTaxTotal     Int    @default(0) // 기타 비과세 총액(월)
 
+  // 시급제(HOURLY) 설정 — 시간기록표의 중간 휴게 30분을 급여에 포함할지
+  // true: 기록표 시간 그대로 인정(휴게 유급) / false: 근무일마다 30분 차감(휴게 무급)
+  breakPaid       Boolean @default(false)
+
   // 인센티브(INCENTIVE) 설정
   incThreshold    Int?   // 학생수 기준 (초과 시 인센 발생)
   incPerStudent   Int?   // 초과 1명당 금액
@@ -168,7 +172,8 @@ model PayrollRecord {
   payScheme   String
 
   // 월별 입력값
-  workedHours     Float?  // 시급제 실근로시간
+  workedHours     Float?  // 시급제 실근로시간 (시간기록표 업로드 시 자동 입력)
+  weeklyHolidayHours Float? // 시급제 주휴시간(월 합계) — 시간기록표 기반 산정 시 입력
   extraHours      Float   @default(0) // 법내연장시간(월, 가산없음 ×1.0)
   overtimeHours   Float   @default(0) // 연장근로시간(월, 법정초과 ×1.5)
   nightHours      Float   @default(0) // 야간근로시간(월)

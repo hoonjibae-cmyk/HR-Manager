@@ -30,6 +30,7 @@ export interface DocEmployee {
   mealAllow: number;
   carAllow: number;
   schedule: string;
+  breakPaid?: boolean;
 }
 export interface DocContract {
   stage: string;
@@ -125,11 +126,15 @@ export function contractHtml(args: {
       <p class="sub">② 수수료는 사업소득으로서 지급 시 원천징수세액(3.3%)을 공제한 후 지급한다.</p>
       <p class="sub">③ 지급일은 매월 ${"익월 7일"}로 하며, 정산 내역은 명세서로 교부한다.</p></div>`;
   } else if (isHourly) {
+    const breakLine = e.breakPaid
+      ? "유급으로 하여 근로시간에 포함한다"
+      : "무급으로 하여 근로시간에서 제외한다";
     wageClause = `<div class="clause"><h3>제 4조 (임금)</h3>
-      <p class="sub">① "${partyB}"의 시간급 임금은 <b>${wonUnit(ct.baseWage)}</b>으로 하며, 실근로시간에 따라 산정하여 지급한다.</p>
-      <p class="sub">② 소정근로시간이 주 15시간 이상인 경우 주휴수당을 별도 지급한다.</p>
-      <p class="sub">③ 임금은 매월 초일부터 말일까지 기산하여 익월 7일에 "${partyB}"의 통장으로 법정 공제액을 공제한 후 지급한다.</p>
-      <p class="sub">④ 연장·야간·휴일근로 시 근로기준법에 따른 가산수당(연장·휴일 1.5배, 야간 0.5배 가산)을 지급한다.</p></div>`;
+      <p class="sub">① "${partyB}"의 시간급 임금은 <b>${wonUnit(ct.baseWage)}</b>으로 하며, 실근로시간(30분 단위 포함)에 따라 산정하여 지급한다.</p>
+      <p class="sub">② 1일 근로 중 휴게시간 30분을 부여하며, 휴게시간은 ${breakLine}.</p>
+      <p class="sub">③ 주휴수당은 1주 실근로시간(휴게시간 제외)이 15시간을 초과하는 주에 대하여 지급한다. 계약상 소정근로시간이 1주 15시간 미만인 경우에도 실근로시간이 15시간을 초과한 주는 주휴수당을 지급한다.</p>
+      <p class="sub">④ 제③항에 따라 주휴수당이 지급되는 경우, 계약상 소정근로시간을 초과한 근로에 대한 별도의 초과(가산)수당은 지급하지 아니하며 해당 근로는 시급(100%)으로 산정한다. 다만 1일 8시간 또는 1주 40시간을 초과하는 근로 및 야간(22~06시)·휴일근로에는 근로기준법에 따른 가산수당을 지급한다.</p>
+      <p class="sub">⑤ 임금은 매월 초일부터 말일까지 기산하여 익월 7일에 "${partyB}"의 통장으로 법정 공제액을 공제한 후 지급한다.</p></div>`;
   } else {
     const incClause =
       ct.templateKey === "INCENTIVE" && ct.incThreshold != null

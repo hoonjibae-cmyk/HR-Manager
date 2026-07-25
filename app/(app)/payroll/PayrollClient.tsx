@@ -52,6 +52,7 @@ export default function PayrollClient() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState("");
   const [openDedId, setOpenDedId] = useState<number | null>(null);
+  const [tsResult, setTsResult] = useState<any>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -132,6 +133,29 @@ export default function PayrollClient() {
     await load();
   }
 
+  async function uploadTimesheet(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy("ts");
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("year", String(year));
+    fd.append("month", String(month));
+    const res = await fetch("/api/payroll/timesheet", { method: "POST", body: fd });
+    const j = await res.json().catch(() => ({}));
+    setBusy("");
+    if (res.ok) {
+      setTsResult(j);
+      await load();
+    } else {
+      alert(
+        "업로드 실패: " + (j.error || "") +
+        (j.unmatched?.length ? "\n미매칭: " + j.unmatched.join(", ") : "")
+      );
+    }
+  }
+
   function openPayslip(id: number) {
     fetch("/api/documents/payslip", {
       method: "POST",
@@ -162,6 +186,10 @@ export default function PayrollClient() {
         <button className="btn-primary" onClick={run} disabled={!!busy}>
           {busy === "calc" ? "산정 중…" : "급여 일괄 산정"}
         </button>
+        <label className={`btn-outline cursor-pointer ${busy ? "opacity-50 pointer-events-none" : ""}`}>
+          {busy === "ts" ? "처리 중…" : "📤 시간기록표 업로드"}
+          <input type="file" accept=".xlsx,.xls" className="hidden" onChange={uploadTimesheet} />
+        </label>
         <div className="flex-1" />
         {recs.length > 0 && (
           <>
@@ -172,6 +200,48 @@ export default function PayrollClient() {
           </>
         )}
       </div>
+
+      {tsResult && (
+        <div className="card p-4 mb-5 border-emerald-200 bg-emerald-50/40">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-bold text-emerald-800 text-sm">
+              ✅ 시간기록표 반영 완료 — {tsResult.year}년 {tsResult.month}월 · {tsResult.matched.length}명
+            </span>
+            <button className="text-xs text-slate-400" onClick={() => setTsResult(null)}>닫기 ✕</button>
+          </div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-slate-500">
+                <th className="text-left py-1">직원</th>
+                <th className="text-right">근무일</th>
+                <th className="text-right">실근로</th>
+                <th className="text-right">주휴시간</th>
+                <th className="text-left pl-3">휴게 30분</th>
+                <th className="text-left">주별 (15h 초과 ✓)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tsResult.matched.map((m: any) => (
+                <tr key={m.employeeId} className="border-t border-emerald-100">
+                  <td className="py-1 font-semibold">{m.name}</td>
+                  <td className="text-right tnum">{m.workedDays}일</td>
+                  <td className="text-right tnum">{fmtHM(m.workHours)}</td>
+                  <td className="text-right tnum font-semibold">{m.weeklyHolidayHours ? fmtHM(m.weeklyHolidayHours) : "-"}</td>
+                  <td className="pl-3">{m.breakPaid ? "유급(그대로)" : "무급(−30분/일)"}</td>
+                  <td className="text-slate-500">
+                    {m.weeks.map((w: any) => `${w.weekStart.slice(5)}주 ${fmtHM(w.hours)}${w.qualified ? "✓" : ""}`).join(" · ")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {tsResult.unmatched?.length > 0 && (
+            <p className="text-xs text-amber-700 mt-2">
+              ⚠️ 미매칭(직원 카드에 없는 이름): {tsResult.unmatched.join(", ")} — 직원 이름을 확인하세요.
+            </p>
+          )}
+        </div>
+      )}
 
       {recs.length > 0 && (
         <div className="grid grid-cols-3 gap-4 mb-5">
@@ -385,6 +455,13 @@ function DedField({ label, v, onChange, disabled, allowNegative }: { label: stri
       />
     </label>
   );
+}
+
+function fmtHM(n: number): string {
+  let h = Math.floor(n);
+  let m = Math.round((n - h) * 60);
+  if (m === 60) { h += 1; m = 0; }
+  return m > 0 ? `${h}시간 ${m}분` : `${h}시간`;
 }
 
 function InlineInput({ label, value, onChange, wide }: { label: string; value: any; onChange: (v: string) => void; wide?: boolean }) {

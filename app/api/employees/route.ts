@@ -41,6 +41,7 @@ export async function POST(req: Request) {
     active: body.active ?? true,
     incomeType: body.incomeType || "EMPLOYEE",
     payScheme: body.payScheme || "MONTHLY",
+    breakPaid: !!body.breakPaid,
     baseWage: Number(body.baseWage) || 0,
     positionAllow: Number(body.positionAllow) || 0,
     mealAllow: Number(body.mealAllow) || 0,

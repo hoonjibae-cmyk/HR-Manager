@@ -111,6 +111,7 @@ export function empToDoc(e: any): DocEmployee {
     mealAllow: e.mealAllow,
     carAllow: e.carAllow,
     schedule: e.schedule,
+    breakPaid: e.breakPaid ?? false,
   };
 }
 
