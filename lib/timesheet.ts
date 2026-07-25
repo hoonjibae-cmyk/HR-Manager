@@ -120,6 +120,56 @@ export function parseTimesheetWorkbook(buf: Buffer | Uint8Array): TimesheetPerso
   return [...merged.values()];
 }
 
+/** 기록표 전체에서 가장 많이 등장하는 연·월 감지 (화면 선택과 무관하게 파일 기준) */
+export function dominantPeriod(
+  people: TimesheetPerson[]
+): { year: number; month: number } | null {
+  const count = new Map<string, number>();
+  for (const p of people)
+    for (const e of p.entries) {
+      const k = e.date.slice(0, 7); // YYYY-MM
+      count.set(k, (count.get(k) ?? 0) + 1);
+    }
+  let best: string | null = null;
+  let n = 0;
+  for (const [k, c] of count)
+    if (c > n) {
+      best = k;
+      n = c;
+    }
+  if (!best) return null;
+  return { year: Number(best.slice(0, 4)), month: Number(best.slice(5, 7)) };
+}
+
+/**
+ * 기록표 이름 → 직원 매칭.
+ * 1) 정규화(직책어·_접미사 제거) 후 완전 일치
+ * 2) 실패 시 포함 검색: 원문에 직원 이름이 들어있으면 매칭
+ *    (후보가 여럿이면 더 긴 이름 우선, 그래도 모호하면 ambiguous 반환)
+ */
+export function matchEmployee<T extends { name: string }>(
+  rawName: string,
+  employees: T[]
+): { emp?: T; ambiguous?: T[] } {
+  const norm = normalizeName(rawName);
+  const exact = employees.filter((e) => normalizeName(e.name) === norm);
+  if (exact.length === 1) return { emp: exact[0] };
+  if (exact.length > 1) return { ambiguous: exact };
+
+  const rawCompact = String(rawName).replace(/\s+/g, "");
+  const contains = employees.filter((e) => {
+    const n = e.name.replace(/\s+/g, "");
+    return n.length >= 2 && rawCompact.includes(n);
+  });
+  if (contains.length === 1) return { emp: contains[0] };
+  if (contains.length > 1) {
+    const sorted = [...contains].sort((a, b) => b.name.length - a.name.length);
+    if (sorted[0].name.length > sorted[1].name.length) return { emp: sorted[0] };
+    return { ambiguous: contains };
+  }
+  return {};
+}
+
 export interface WeekSummary {
   weekStart: string; // 해당 주 월요일 (YYYY-MM-DD)
   hours: number; // 주 실근로(휴게 차감 후)

@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   normalizeName,
   computeMonthlyFromEntries,
+  dominantPeriod,
+  matchEmployee,
   type TimesheetEntry,
+  type TimesheetPerson,
 } from "./timesheet";
 
 describe("normalizeName — 기록표 이름 → 직원 이름", () => {
@@ -13,6 +16,53 @@ describe("normalizeName — 기록표 이름 → 직원 이름", () => {
     expect(normalizeName("임세영조교")).toBe("임세영");
     expect(normalizeName("박지호 조교장")).toBe("박지호");
     expect(normalizeName("  강민서   조교 ")).toBe("강민서");
+  });
+});
+
+describe("matchEmployee — 이름 옆에 다른 정보가 붙어도 매칭", () => {
+  const emps = [{ name: "오은우" }, { name: "권도현" }, { name: "김민" }, { name: "김민수" }];
+
+  it("정규화 일치: 직책어·퇴직 표기 무시", () => {
+    expect(matchEmployee("오은우조교_퇴직", emps).emp?.name).toBe("오은우");
+    expect(matchEmployee("권도현 조교", emps).emp?.name).toBe("권도현");
+  });
+
+  it("포함 검색: 임의의 접미사/접두사가 붙어도 이름이 들어있으면 매칭", () => {
+    expect(matchEmployee("오은우T(오전)", emps).emp?.name).toBe("오은우");
+    expect(matchEmployee("★권도현 선생님★", emps).emp?.name).toBe("권도현");
+    expect(matchEmployee("2월-오은우-근무표", emps).emp?.name).toBe("오은우");
+  });
+
+  it("더 긴 이름 우선 (김민 vs 김민수)", () => {
+    expect(matchEmployee("김민수 조교", emps).emp?.name).toBe("김민수");
+  });
+
+  it("아무 이름도 없으면 미매칭", () => {
+    const r = matchEmployee("장윤지조교", emps);
+    expect(r.emp).toBeUndefined();
+    expect(r.ambiguous).toBeUndefined();
+  });
+});
+
+describe("dominantPeriod — 파일에서 연·월 자동 감지", () => {
+  it("가장 많은 기록이 있는 달을 반환", () => {
+    const people: TimesheetPerson[] = [
+      {
+        rawName: "A",
+        name: "A",
+        entries: [
+          { date: "2026-02-02", hours: 5 },
+          { date: "2026-02-03", hours: 5 },
+          { date: "2026-01-31", hours: 5 }, // 소수의 전월 기록
+        ],
+      },
+      { rawName: "B", name: "B", entries: [{ date: "2026-02-10", hours: 4 }] },
+    ];
+    expect(dominantPeriod(people)).toEqual({ year: 2026, month: 2 });
+  });
+
+  it("기록이 없으면 null", () => {
+    expect(dominantPeriod([])).toBeNull();
   });
 });
 

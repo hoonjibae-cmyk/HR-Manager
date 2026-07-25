@@ -147,11 +147,17 @@ export default function PayrollClient() {
     setBusy("");
     if (res.ok) {
       setTsResult(j);
-      await load();
+      // 파일에서 감지한 연·월로 화면 전환 (다르면 자동 재조회됨)
+      if (j.year === year && j.month === month) await load();
+      else {
+        setYear(j.year);
+        setMonth(j.month);
+      }
     } else {
       alert(
         "업로드 실패: " + (j.error || "") +
-        (j.unmatched?.length ? "\n미매칭: " + j.unmatched.join(", ") : "")
+        (j.unmatched?.length ? "\n\n[직원 카드 없음]\n" + j.unmatched.join(", ") : "") +
+        (j.noRecords?.length ? "\n\n[해당 월 기록 없음]\n" + j.noRecords.join(", ") : "")
       );
     }
   }
@@ -205,7 +211,9 @@ export default function PayrollClient() {
         <div className="card p-4 mb-5 border-emerald-200 bg-emerald-50/40">
           <div className="flex items-center justify-between mb-2">
             <span className="font-bold text-emerald-800 text-sm">
-              ✅ 시간기록표 반영 완료 — {tsResult.year}년 {tsResult.month}월 · {tsResult.matched.length}명
+              ✅ 시간기록표 반영 완료 — {tsResult.year}년 {tsResult.month}월
+              {tsResult.periodDetected && <span className="font-normal text-emerald-600"> (파일에서 자동 감지)</span>}
+              {" "}· {tsResult.matched.length}명
             </span>
             <button className="text-xs text-slate-400" onClick={() => setTsResult(null)}>닫기 ✕</button>
           </div>
@@ -237,7 +245,12 @@ export default function PayrollClient() {
           </table>
           {tsResult.unmatched?.length > 0 && (
             <p className="text-xs text-amber-700 mt-2">
-              ⚠️ 미매칭(직원 카드에 없는 이름): {tsResult.unmatched.join(", ")} — 직원 이름을 확인하세요.
+              ⚠️ <b>직원 카드 없음</b>: {tsResult.unmatched.join(", ")} — 직원 관리에서 시급제로 등록하면 다음 업로드부터 자동 반영됩니다.
+            </p>
+          )}
+          {tsResult.noRecords?.length > 0 && (
+            <p className="text-xs text-slate-500 mt-1">
+              ℹ️ 해당 월 기록 없음: {tsResult.noRecords.join(", ")}
             </p>
           )}
         </div>
