@@ -45,6 +45,34 @@ interface Rec {
 
 const now = new Date();
 
+/** 저장된 레코드 → 변동입력 폼 값 */
+function rowInputsOf(r: Rec) {
+  return {
+    extraHours: r.extraHours || "",
+    overtimeHours: r.overtimeHours || "",
+    holidayHours: r.holidayHours || "",
+    nightHours: r.nightHours || "",
+    studentCount: r.studentCount ?? "",
+    classRevenue: r.classRevenue ?? "",
+    bonus: r.bonus || "",
+    unusedLeaveDays: r.unusedLeaveDays || "",
+  };
+}
+
+/** 변동입력 폼 값 → API 전송용 숫자 변환 */
+function cleanRowInput(v: any) {
+  return {
+    extraHours: v.extraHours ? Number(v.extraHours) : 0,
+    overtimeHours: v.overtimeHours ? Number(v.overtimeHours) : 0,
+    holidayHours: v.holidayHours ? Number(v.holidayHours) : 0,
+    nightHours: v.nightHours ? Number(v.nightHours) : 0,
+    studentCount: v.studentCount !== "" && v.studentCount != null ? Number(v.studentCount) : null,
+    classRevenue: v.classRevenue !== "" && v.classRevenue != null ? Number(v.classRevenue) : null,
+    bonus: v.bonus ? Number(v.bonus) : 0,
+    unusedLeaveDays: v.unusedLeaveDays ? Number(v.unusedLeaveDays) : 0,
+  };
+}
+
 export default function PayrollClient() {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -62,16 +90,7 @@ export default function PayrollClient() {
     setRecs(data);
     const map: Record<number, any> = {};
     data.forEach((r: Rec) => {
-      map[r.employeeId] = {
-        extraHours: r.extraHours || "",
-        overtimeHours: r.overtimeHours || "",
-        holidayHours: r.holidayHours || "",
-        nightHours: r.nightHours || "",
-        studentCount: r.studentCount ?? "",
-        classRevenue: r.classRevenue ?? "",
-        bonus: r.bonus || "",
-        unusedLeaveDays: r.unusedLeaveDays || "",
-      };
+      map[r.employeeId] = rowInputsOf(r);
     });
     setInputs(map);
     setLoading(false);
@@ -85,16 +104,7 @@ export default function PayrollClient() {
     setBusy("calc");
     const cleanInputs: Record<number, any> = {};
     for (const [id, v] of Object.entries(inputs)) {
-      cleanInputs[Number(id)] = {
-        extraHours: v.extraHours ? Number(v.extraHours) : 0,
-        overtimeHours: v.overtimeHours ? Number(v.overtimeHours) : 0,
-        holidayHours: v.holidayHours ? Number(v.holidayHours) : 0,
-        nightHours: v.nightHours ? Number(v.nightHours) : 0,
-        studentCount: v.studentCount !== "" ? Number(v.studentCount) : null,
-        classRevenue: v.classRevenue !== "" ? Number(v.classRevenue) : null,
-        bonus: v.bonus ? Number(v.bonus) : 0,
-        unusedLeaveDays: v.unusedLeaveDays ? Number(v.unusedLeaveDays) : 0,
-      };
+      cleanInputs[Number(id)] = cleanRowInput(v);
     }
     await fetch("/api/payroll/run", {
       method: "POST",
@@ -102,6 +112,33 @@ export default function PayrollClient() {
       body: JSON.stringify({ year, month, inputs: cleanInputs }),
     });
     await load();
+    setBusy("");
+  }
+
+  /** 한 직원만 변동입력 저장 + 재산정 (다른 행의 입력 중인 값은 유지) */
+  async function saveRow(employeeId: number) {
+    setBusy(`row-${employeeId}`);
+    const res = await fetch("/api/payroll/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        year,
+        month,
+        inputs: { [employeeId]: cleanRowInput(inputs[employeeId] ?? {}) },
+        employeeIds: [employeeId],
+      }),
+    });
+    if (!res.ok) {
+      alert("저장 실패: " + ((await res.json().catch(() => ({}))).error || ""));
+      setBusy("");
+      return;
+    }
+    // 해당 행만 서버 값으로 갱신 — 다른 행에 입력해 둔 값은 지우지 않는다
+    const r2 = await fetch(`/api/payroll?year=${year}&month=${month}`);
+    const data: Rec[] = r2.ok ? await r2.json() : [];
+    setRecs(data);
+    const fresh = data.find((x) => x.employeeId === employeeId);
+    if (fresh) setInputs((p) => ({ ...p, [employeeId]: rowInputsOf(fresh) }));
     setBusy("");
   }
 
@@ -317,6 +354,14 @@ export default function PayrollClient() {
                       <InlineInput label="야간h" value={inputs[r.employeeId]?.nightHours ?? ""} onChange={(v) => setInput(r.employeeId, "nightHours", v)} />
                       <InlineInput label="상여" value={inputs[r.employeeId]?.bonus ?? ""} onChange={(v) => setInput(r.employeeId, "bonus", v)} wide />
                       <InlineInput label="미사용연차(일)" value={inputs[r.employeeId]?.unusedLeaveDays ?? ""} onChange={(v) => setInput(r.employeeId, "unusedLeaveDays", v)} />
+                      <button
+                        className="btn-primary py-1 px-2.5 text-xs self-end disabled:opacity-40"
+                        disabled={!!busy || r.status !== "DRAFT"}
+                        title={r.status !== "DRAFT" ? "확정/발송된 기록은 재계산되지 않습니다 (상태를 DRAFT로 되돌린 후 수정)" : "이 직원만 저장하고 재산정"}
+                        onClick={() => saveRow(r.employeeId)}
+                      >
+                        {busy === `row-${r.employeeId}` ? "저장 중…" : "저장"}
+                      </button>
                     </div>
                   </td>
                   <td className="td text-right tnum">{won(r.gross)}</td>
@@ -354,7 +399,8 @@ export default function PayrollClient() {
       {recs.length > 0 && (
         <div className="text-xs text-slate-400 mt-3 space-y-1">
           <p>
-            ※ 변동입력을 수정한 뒤 <b>급여 일괄 산정</b>을 다시 누르면 반영됩니다. 확정(CONFIRMED)된 기록은 재계산되지 않습니다.
+            ※ 변동입력은 각 행의 <b>저장</b> 버튼(해당 직원만 즉시 반영) 또는 상단 <b>급여 일괄 산정</b>(전체 반영)으로 저장·재계산됩니다.
+            확정(CONFIRMED)·발송(SENT)된 기록은 재계산되지 않습니다.
           </p>
           <p>
             · <b>추가h</b>: 평일 소정근로 외·토요일 근무 중 <b>1일 8h·주 40h 이내</b>(법내연장) → 가산 없음(통상시급×1.0) &nbsp;
