@@ -8,6 +8,12 @@ export interface DocPayroll {
   year: number;
   month: number;
   incomeType: string;
+  payScheme?: string;
+  workedHours?: number | null;
+  extraHours?: number;
+  overtimeHours?: number;
+  nightHours?: number;
+  holidayHours?: number;
   baseP: number;
   extraP: number;
   overtimeP: number;
@@ -113,13 +119,41 @@ export function payslipHtml(args: {
       <td>${dr ? esc(dr[0]) : ""}</td><td class="num">${dr ? won(dr[1]) : ""}</td></tr>`;
   }
 
+  // 시급제: 총 근로시간 = 기본(실입력 또는 기본급÷시급 역산) + 추가 + 연장 + 휴일
+  //         야간은 타 시간과 중복되는 '가산'이므로 합계에 미포함(참고 표기만)
+  const isHourly = p.payScheme === "HOURLY";
+  let hoursRow = "";
+  if (isHourly) {
+    const h1 = (n: number) => (Math.round(n * 10) / 10).toLocaleString("ko-KR");
+    const baseHours =
+      p.workedHours != null && p.workedHours > 0
+        ? p.workedHours
+        : p.hourlyWage > 0
+        ? p.baseP / p.hourlyWage
+        : 0;
+    const exH = p.extraHours ?? 0;
+    const otH = p.overtimeHours ?? 0;
+    const holH = p.holidayHours ?? 0;
+    const nightH = p.nightHours ?? 0;
+    const total = baseHours + exH + otH + holH;
+    const parts = [
+      `기본 ${h1(baseHours)}`,
+      exH ? `추가 ${h1(exH)}` : "",
+      otH ? `연장 ${h1(otH)}` : "",
+      holH ? `휴일 ${h1(holH)}` : "",
+      nightH ? `야간 ${h1(nightH)}(가산)` : "",
+    ].filter(Boolean);
+    hoursRow = `<tr><th>총 근로시간</th><td colspan="3"><b>${h1(total)}시간</b> <span class="muted">( ${parts.join(" · ")} )</span></td></tr>`;
+  }
+
   return `${head(c, `<div class="small">지급일: ${ymdKo(payDate)}</div><div class="badge">${esc(INCOME_TYPE_LABEL[p.incomeType] ?? "")}</div>`)}
   <div class="doc-title" style="letter-spacing:0.2em">${esc(title)}</div>
   <p style="text-align:center" class="muted">${p.year}년 ${p.month}월분</p>
   <table class="kv">
     <tr><th>성명</th><td>${esc(e.name)}</td><th>소속</th><td>${esc(e.department ?? "")}</td></tr>
     <tr><th>직책</th><td>${esc(e.position ?? "")}</td><th>입사일자</th><td>${ymd(e.hireDate)}</td></tr>
-    <tr><th>통상시급</th><td>${wonUnit(p.hourlyWage)}</td><th>구분</th><td>${esc(INCOME_TYPE_LABEL[p.incomeType] ?? "")}</td></tr>
+    <tr><th>${isHourly ? "시급" : "통상시급"}</th><td>${wonUnit(p.hourlyWage)}</td><th>구분</th><td>${esc(INCOME_TYPE_LABEL[p.incomeType] ?? "")}</td></tr>
+    ${hoursRow}
   </table>
   <table class="pay">
     <thead><tr><th colspan="2">지 급</th><th colspan="2">공 제</th></tr>
@@ -130,6 +164,7 @@ export function payslipHtml(args: {
     </tbody>
   </table>
   <div class="clause" style="margin-top:10px">
+    ${isHourly ? `<div class="small">· 기본급 = 기본 근로시간 × 시급</div>` : ""}
     <div class="small">· 추가근로수당(법내연장) = 추가근로시간 × 통상시급 &nbsp; · 연장근로수당(법정초과) = 연장근로시간 × 통상시급 × 1.5</div>
     <div class="small">· 휴일근로수당 = 휴일근로시간 × 통상시급 × 1.5 &nbsp; · 야간근로수당 = 야간근로시간 × 통상시급 × 0.5</div>
     ${isFree
