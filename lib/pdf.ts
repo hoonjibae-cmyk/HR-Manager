@@ -287,6 +287,39 @@ table.pay tr.total td{background:#eef4ff;font-weight:800;}
 .inline-sign{text-align:right;color:#334155;margin:1px 0 5px;font-size:9.4pt;}
 .hosub{margin:3px 0 3px 32px;text-indent:-16px;padding-left:16px;}
 .footnote{font-size:8.8pt;color:#475569;margin:2px 0 2px 15px;}
-.handover{margin-top:10px;border-top:1px dashed #cbd5e1;padding-top:8px;font-size:9.6pt;}
+.handover{margin-top:10px;border-top:1px dashed #cbd5e1;padding-top:8px;font-size:9.6pt;page-break-inside:avoid;break-inside:avoid;}
 .badge{display:inline-block;padding:1px 8px;border:1px solid #1f45f5;border-radius:10px;color:#1f45f5;font-size:9pt;}
+/* 연결된 조항+서명줄 등이 페이지 경계에서 분리되지 않도록 묶음 처리 */
+.avoid{page-break-inside:avoid;break-inside:avoid;}
+.clause h3{page-break-after:avoid;break-after:avoid;}
+table.kv{page-break-inside:avoid;break-inside:avoid;}
+/* 계약서 전용 축소 레이아웃 — 본문 밀도를 높여 2페이지 이내로 구성 */
+.doc-page > .compact{display:flex;flex-direction:column;flex:1 0 auto;}
+.compact{font-size:8.8pt;line-height:1.42;}
+.compact .doc-title{font-size:14.5pt;margin:0 0 2px;}
+.compact .doc-sub{font-size:8.6pt;margin-bottom:8px;}
+.compact .company-head{margin-bottom:8px;padding-bottom:4px;}
+.compact .company-head .cname{font-size:12.5pt;}
+.compact .company-head .cmeta{font-size:8pt;line-height:1.45;}
+.compact .clause{margin:4px 0;}
+.compact .clause h3{font-size:9.6pt;margin:7px 0 2px;}
+/* 주의: margin 쇼트핸드 금지 — .clause .sub 의 margin-left(내어쓰기)를 덮어써
+   첫 글자가 페이지 밖으로 클리핑된다. 상하 마진만 지정할 것. */
+.compact .clause p{margin-top:1.5px;margin-bottom:1.5px;}
+.compact table.kv{margin:4px 0;}
+.compact table.kv th,.compact table.kv td{padding:2.5px 6px;font-size:8.4pt;}
+.compact table.kv th{width:92px;}
+.compact .inline-sign{font-size:8.4pt;margin:0 0 2px;}
+.compact .hosub{margin:1.5px 0 1.5px 28px;}
+.compact .footnote{font-size:7.9pt;margin:1px 0 1px 13px;}
+.compact .muted{font-size:8.2pt;}
+.compact .date-center{margin:8px 0 4px;font-size:9.5pt;}
+.compact .doc-foot{padding-top:6px;}
+.compact .sign-duo{gap:8px;}
+.compact .sign-box{padding:6px 11px;margin-top:3px;}
+.compact .sign-grid{gap:3px 14px;}
+.compact .sign-grid .f{font-size:8.4pt;}
+.compact .sign-party{margin:4px 0 1px;font-size:8.8pt;}
+.compact .handover{margin-top:7px;padding-top:5px;font-size:8.6pt;}
+.compact .small{font-size:7.8pt;}
 `;

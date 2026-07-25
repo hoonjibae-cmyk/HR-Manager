@@ -233,7 +233,7 @@ export function contractHtml(args: {
     ? `1. 주휴일 (1주 실근로시간이 15시간을 초과하는 주에 유급 부여)`
     : `1. 주휴일 (해당 주 소정근로일 만근 및 소정근로시간 15시간 이상인 경우 유급 부여)`;
 
-  return `${companyHead(c)}
+  return `<div class="compact">${companyHead(c)}
   <div class="doc-title">근 로 계 약 서</div>
   <p class="doc-sub">${esc(title)}</p>
   <p><b>${esc(c.name)}</b> (이하 "갑"이라 한다) 과(와) 근로자 <b>${esc(e.name)}</b> (이하 "을"이라 한다) 은(는) 다음과 같은 조건으로 근로계약을 체결하고, 상호 신의의 원칙 하에 성실하게 이행, 준수할 것을 합의한다.</p>
@@ -245,8 +245,8 @@ export function contractHtml(args: {
   <div class="clause"><h3>제 2조 (근무장소 및 종사할 업무)</h3>
     <p class="sub">① 근무장소: "갑"의 사업장 및 관할 장소 (${esc(c.address)})</p>
     <p class="sub">② 직책 / 업무내용: <b>${esc(e.position ?? "")}</b> / <b>${esc(e.duty ?? "")}</b></p>
-    <p class="sub">③ 제1항 및 제2항에 따른 근무장소, 직책, 업무내용, 임금 등 근로조건은 "갑"의 업무상 필요성에 따라 변경이 가능함을 확인하며, 성실히 이행할 것에 동의한다.</p>
-    ${inlineSign("동 의 자")}</div>
+    <div class="avoid"><p class="sub">③ 제1항 및 제2항에 따른 근무장소, 직책, 업무내용, 임금 등 근로조건은 "갑"의 업무상 필요성에 따라 변경이 가능함을 확인하며, 성실히 이행할 것에 동의한다.</p>
+    ${inlineSign("동 의 자")}</div></div>
 
   <div class="clause"><h3>제 3조 (근로시간 및 휴게시간)</h3>
     ${art3Html}</div>
@@ -267,26 +267,26 @@ export function contractHtml(args: {
   <div class="clause"><h3>제 7조 (의원사직)</h3>
     <p class="sub">① "을"이 사직하고자 할 경우 사직하고자 하는 날의 <b>${resignDays}일 이전</b>에 사직서를 제출하고, 후임자를 선임할 때까지 업무의 인수인계를 비롯하여 성실히 근로한다.</p>
     <p class="sub">② "을"은 본인이 담당하는 반의 해당 학기 수업이 종료될 때까지 근무를 지속하여야 하며, "갑"이 서면으로 인정하는 불가피한 사유가 없는 한 해당 학기 종료 이전에 사직할 수 없다.</p>
-    <p class="sub">③ "을"이 퇴직하는 경우 퇴직 월 임금 및 발생 퇴직금은 익월 임금지급일에 일괄 지급하기로 한다.</p>
-    ${inlineSign("동 의 자")}</div>
+    <div class="avoid"><p class="sub">③ "을"이 퇴직하는 경우 퇴직 월 임금 및 발생 퇴직금은 익월 임금지급일에 일괄 지급하기로 한다.</p>
+    ${inlineSign("동 의 자")}</div></div>
 
   <div class="clause"><h3>제 8조 (기타사항)</h3>
     <p class="sub">① "을"은 맡은 바 임무를 수행함에 있어 근면, 성실, 친절과 공정을 기하여야 한다.</p>
     <p class="sub">② "을"은 근무기간 중은 물론 근로계약종료 후에도 업무상 취득한 "갑"의 기밀을 유지하여야 한다.</p>
-    <p class="sub">③ "을"은 급여액을 포함한 근로조건을 누설하지 아니하며 이를 위반할 경우 인사상 불이익을 받을 수 있음을 확인한다.</p>
-    ${inlineSign("확 인 자")}
+    <div class="avoid"><p class="sub">③ "을"은 급여액을 포함한 근로조건을 누설하지 아니하며 이를 위반할 경우 인사상 불이익을 받을 수 있음을 확인한다.</p>
+    ${inlineSign("확 인 자")}</div>
     <p class="sub">④ "을"이 본 계약기간 동안 생산한 교재, 수업자료, 동영상 자료 등에 대한 지적재산권은 "갑"에게 귀속된다.</p>
     <p class="sub">⑤ "을"의 개인 사정으로 인해 영업일 기준 5일 이상 연속적으로 정상적인 수업이 불가하고, 이로 인해 "갑"이 "을"을 대체할 새로운 계약을 체결한 경우 "갑"은 본 계약을 해지할 수 있다.</p>
     <p class="sub">⑥ "을"이 고의 또는 과실로 "을"에게 할당된 수업을 진행하지 않았을 경우, 이로 인해 발생되는 모든 비용 및 손해에 대한 책임은 "을"에게 있다.</p>
-    <p class="sub">⑦ 급여명세서를 이메일(${esc(e.email ?? "")})로 교부 받는 것에 동의한다.</p>
-    ${inlineSign("동 의 자")}</div>
+    <div class="avoid"><p class="sub">⑦ 급여명세서를 이메일(${esc(e.email ?? "")})로 교부 받는 것에 동의한다.</p>
+    ${inlineSign("동 의 자")}</div></div>
 
   <div class="doc-foot">
     <p style="text-align:center">"갑"과 "을"은 상기와 같이 근로계약을 체결하고, 계약서 2부를 작성하여 '사용자'와 '근로자' 각 1부씩 보관한다.</p>
     <div class="date-center">${ymdKo(ct.startDate)}</div>
     ${signDuo(c, e, "근로자")}
     ${handoverConfirm()}
-  </div>`;
+  </div></div>`;
 }
 
 /* ===================== 강의위탁계약서 (비율제) — 원문 전문 ===================== */
@@ -308,7 +308,7 @@ function ratioContractHtml(args: {
 
   const endPart = ct.endDate ? `<b>${ymdKo(ct.endDate)}</b>` : blank(18);
 
-  return `${companyHead(c)}
+  return `<div class="compact">${companyHead(c)}
   <div class="doc-title">강의위탁계약서</div>
   <p class="doc-sub">강의위탁계약서 (비율제)</p>
   <p><b>${esc(c.name)}</b> (이하 "갑"이라 한다) 과 <b>${esc(e.name)}</b> (이하 "을"이라 한다) 은(는) 다음과 같은 조건으로 강의 위탁 계약을 체결하고, 상호 신의의 원칙 하에 성실하게 이행, 준수할 것을 합의한다.</p>
@@ -376,7 +376,7 @@ function ratioContractHtml(args: {
     <div class="date-center">${ymdKo(ct.startDate)}</div>
     ${signDuo(c, e, "수탁자")}
     ${handoverConfirm()}
-  </div>`;
+  </div></div>`;
 }
 
 /* ================== 인센티브 산정 계약서 (강사) — 별지, 원문 전문 ================== */
@@ -390,7 +390,7 @@ export function incentiveContractHtml(args: {
   const threshold = ct.incThreshold ?? null;
   const perStudent = ct.incPerStudent ?? null;
 
-  return `${companyHead(c)}
+  return `<div class="compact">${companyHead(c)}
   <div class="doc-title">인센티브 산정 계약서</div>
   <p><b>${esc(c.name)}</b> (이하 "갑"이라 한다) 과 근로자 <b>${esc(e.name)}</b> (이하 "을"이라 한다) 은 다음과 같은 조건으로 인센티브 계약을 체결하고, 상호 신의의 원칙 하에 성실하게 이행, 준수할 것을 합의한다.</p>
   <p style="text-align:center" class="muted">- 다&nbsp;&nbsp;음 -</p>
@@ -408,8 +408,8 @@ export function incentiveContractHtml(args: {
 
   <div class="clause"><h3>제 4조 (인센티브의 지급방법)</h3>
     <p class="sub">① "갑"은 "을"에게 제3조 제1항에 따라 산정된 인센티브를 매월 초일부터 말일까지 기산하여, 익월 ${payday}일에 "을" 명의의 통장으로 지급한다. 단, 해당 지급일이 휴일인 경우 지급일 전일에 지급하기로 한다.</p>
-    <p class="sub">② "을"이 월 도중 퇴사하는 경우 해당 월 인센티브는 지급하지 아니한다.</p>
-    ${inlineSign("동 의 자")}</div>
+    <div class="avoid"><p class="sub">② "을"이 월 도중 퇴사하는 경우 해당 월 인센티브는 지급하지 아니한다.</p>
+    ${inlineSign("동 의 자")}</div></div>
 
   <div class="clause"><h3>제 5조 (비밀유지)</h3>
     <p class="sub">"을"은 자신의 보수를 타인에게 알려주거나, 타인의 보수를 알려고 하는 행위를 하지 아니한다. "을"이 이를 위반할 경우 "갑"은 "을"에 대하여 징계 처분할 수 있다.</p></div>
@@ -417,15 +417,15 @@ export function incentiveContractHtml(args: {
   <div class="clause"><h3>제 6조 (퇴직유보금)</h3>
     <p class="sub">① "갑"은 "을"에게 지급한 인센티브 원천액의 <b>8.3%</b>를 퇴직유보금으로 별도 지급하며, 이는 "을"이 1년 이상 근무하고 퇴직하는 경우 지급 받게 될 본 인센티브 계약에 대한 퇴직금을 대체한다.</p>
     <p class="sub">② "을"이 1년 미만 근무함에 따라 퇴직금 및 퇴직연금 지급 대상에 해당하지 아니하는 경우에도 "을"에게 기 지급한 퇴직유보금을 회수하지 아니한다.</p>
-    <p class="sub">③ 제6조 제1항에 따라 "갑"이 "을"의 근무 기간 중 분할 지급한 퇴직유보금은 본 인센티브 계약에 대한 퇴직금과 동일한 효력을 지닌다.</p>
-    ${inlineSign("동 의 자")}</div>
+    <div class="avoid"><p class="sub">③ 제6조 제1항에 따라 "갑"이 "을"의 근무 기간 중 분할 지급한 퇴직유보금은 본 인센티브 계약에 대한 퇴직금과 동일한 효력을 지닌다.</p>
+    ${inlineSign("동 의 자")}</div></div>
 
   <div class="doc-foot">
     <p style="text-align:center">"갑"과 "을"은 상기와 같이 인센티브 지급계약을 체결하고, 2부를 작성하여 '사용자'와 '근로자' 각 1부씩 보관한다.</p>
     <div class="date-center">${ymdKo(ct.startDate)}</div>
     <p class="small" style="text-align:right">본 계약서를 서면으로 교부받았기에 아래와 같이 서명합니다.</p>
     ${signDuo(c, e, "근로자")}
-  </div>`;
+  </div></div>`;
 }
 
 /** 계약서 본문 페이지 목록 (인센티브 계약은 별지 「인센티브 산정 계약서」 포함) */
