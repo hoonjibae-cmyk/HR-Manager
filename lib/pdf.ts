@@ -265,6 +265,9 @@ table.kv th{background:#f5f8ff;text-align:center;white-space:nowrap;width:118px;
 .doc-foot{margin-top:auto;padding-top:12px;}
 .sign-area{padding-top:2px;page-break-inside:avoid;}
 .sign-duo{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+/* 갑/을 박스 등고 정렬 — 그리드 아이템을 세로 flex 로 만들어 박스가 남은 높이를 채움 */
+.sign-duo>div{display:flex;flex-direction:column;}
+.sign-duo .sign-box{flex:1 1 auto;}
 .sign-box{border:1px solid #cbd5e1;border-radius:8px;padding:9px 13px;margin-top:5px;page-break-inside:avoid;}
 .sign-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;}
 .sign-grid.one{grid-template-columns:1fr;}
@@ -288,6 +291,8 @@ table.pay tr.total td{background:#eef4ff;font-weight:800;}
 .hosub{margin:3px 0 3px 32px;text-indent:-16px;padding-left:16px;}
 .footnote{font-size:8.8pt;color:#475569;margin:2px 0 2px 15px;}
 .handover{margin-top:10px;border-top:1px dashed #cbd5e1;padding-top:8px;font-size:9.6pt;page-break-inside:avoid;break-inside:avoid;}
+/* 자필 따라쓰기 안내 글씨 — 연한 회색으로 출력해 펜으로 덧쓸 수 있게 함 */
+.trace{color:#b1b7c1;font-weight:400;}
 .badge{display:inline-block;padding:1px 8px;border:1px solid #1f45f5;border-radius:10px;color:#1f45f5;font-size:9pt;}
 /* 연결된 조항+서명줄 등이 페이지 경계에서 분리되지 않도록 묶음 처리 */
 .avoid{page-break-inside:avoid;break-inside:avoid;}

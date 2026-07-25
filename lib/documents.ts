@@ -113,7 +113,7 @@ function signDuo(c: DocCompany, e: DocEmployee, partyB: string): string {
 /** 계약서 교부 확인 문구 (원문 말미) */
 function handoverConfirm(): string {
   return `<div class="handover">
-    <p>계약자 본인 ( ${blank(10)} ) 은/는 상기와 같이 작성된 계약서를 <b>교부</b> 받았기에 이에 <b>확인</b>합니다. &nbsp;&nbsp; 확인자 : ${blank(10)} (인)</p>
+    <p>계약자 본인 ( ${blank(10)} ) 은/는 상기와 같이 작성된 계약서를 <span class="trace">교부</span> 받았기에 이에 <span class="trace">확인</span>합니다. &nbsp;&nbsp; 확인자 : ${blank(10)} (인)</p>
     <p class="small">** 자필로 회색 글씨를 따라서 기입 후, 날인 요망</p>
   </div>`;
 }
