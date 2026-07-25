@@ -1,0 +1,190 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { CONTRACT_STAGE_LABEL, PAY_SCHEME_LABEL } from "@/lib/constants";
+
+/** 계약 단계별 수습 기본값 — 신규(단기/파트)만 수습 포함, 갱신·정규는 제외 */
+function defaultProbation(stage: string): boolean {
+  return stage === "SHORT_TERM_1" || stage === "PART";
+}
+
+interface EmpSnapshot {
+  id: number;
+  payScheme: string;
+  baseWage: number;
+  positionAllow: number;
+  mealAllow: number;
+  carAllow: number;
+  incThreshold: number | null;
+  incPerStudent: number | null;
+  ratioPercent: number | null; // 0~1
+  position: string | null;
+  duty: string | null;
+}
+
+export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const today = new Date().toISOString().slice(0, 10);
+  const [f, setF] = useState({
+    stage: "RENEWAL_1",
+    startDate: today,
+    endDate: "",
+    isProbation: defaultProbation("RENEWAL_1"),
+    payScheme: emp.payScheme,
+    baseWage: emp.baseWage,
+    positionAllow: emp.positionAllow,
+    mealAllow: emp.mealAllow,
+    carAllow: emp.carAllow,
+    incThreshold: emp.incThreshold ?? "",
+    incPerStudent: emp.incPerStudent ?? "",
+    ratioPercent: emp.ratioPercent != null ? emp.ratioPercent * 100 : "",
+    position: emp.position ?? "",
+    duty: emp.duty ?? "",
+    note: "",
+  });
+  const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v }));
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setErr("");
+    const res = await fetch("/api/contracts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        employeeId: emp.id,
+        stage: f.stage,
+        startDate: f.startDate,
+        endDate: f.endDate || null,
+        isProbation: f.isProbation,
+        payScheme: f.payScheme,
+        baseWage: f.baseWage,
+        positionAllow: f.positionAllow,
+        mealAllow: f.mealAllow,
+        carAllow: f.carAllow,
+        incThreshold: f.incThreshold === "" ? null : Number(f.incThreshold),
+        incPerStudent: f.incPerStudent === "" ? null : Number(f.incPerStudent),
+        ratioPercent: f.ratioPercent === "" ? null : Number(f.ratioPercent) / 100,
+        position: f.position,
+        duty: f.duty,
+        note: f.note || null,
+      }),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setOpen(false);
+      router.refresh();
+    } else {
+      const j = await res.json().catch(() => ({}));
+      setErr(j.error || "신규 계약 생성에 실패했습니다.");
+    }
+  }
+
+  if (!open) {
+    return (
+      <button className="text-xs text-brand-600 font-semibold" onClick={() => setOpen(true)}>
+        + 신규 계약 작성
+      </button>
+    );
+  }
+
+  const isMonthly = f.payScheme === "MONTHLY" || f.payScheme === "INCENTIVE";
+
+  return (
+    <form onSubmit={submit} className="border border-brand-100 bg-brand-50/40 rounded-xl p-4 space-y-3 text-sm">
+      <div className="flex items-center justify-between">
+        <span className="font-bold text-slate-800">신규 계약 작성</span>
+        <button type="button" className="text-xs text-slate-400" onClick={() => setOpen(false)}>닫기 ✕</button>
+      </div>
+      <p className="text-xs text-slate-500">
+        기존 확정 계약서는 이력에 그대로 남고(만료 처리), 아래 조건으로 새 계약이 생성됩니다.
+        저장 후 새 계약 행에서 <b>계약서 발급</b>을 누르세요.
+      </p>
+
+      <div className="grid grid-cols-2 gap-3">
+        <L label="계약 단계">
+          <select
+            className="input"
+            value={f.stage}
+            onChange={(e) => {
+              const stage = e.target.value;
+              setF((p) => ({ ...p, stage, isProbation: defaultProbation(stage) }));
+            }}
+          >
+            {Object.entries(CONTRACT_STAGE_LABEL).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+        </L>
+        <L label="급여형태 (변경 가능)">
+          <select className="input" value={f.payScheme} onChange={(e) => set("payScheme", e.target.value)}>
+            {Object.entries(PAY_SCHEME_LABEL).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+        </L>
+        <L label="계약 시작일 *">
+          <input type="date" required className="input" value={f.startDate} onChange={(e) => set("startDate", e.target.value)} />
+        </L>
+        <L label="계약 종료일 (정규직은 공란)">
+          <input type="date" className="input" value={f.endDate} onChange={(e) => set("endDate", e.target.value)} />
+        </L>
+      </div>
+
+      <label className="flex items-center gap-2">
+        <input type="checkbox" className="w-4 h-4" checked={f.isProbation} onChange={(e) => set("isProbation", e.target.checked)} />
+        <span>수습기간 2개월 조항 포함 <span className="text-slate-400">(신규 계약만 — 갱신·정규 계약서에는 제외)</span></span>
+      </label>
+
+      <div className="grid grid-cols-2 gap-3">
+        {f.payScheme !== "RATIO" && (
+          <L label={f.payScheme === "HOURLY" ? "시급 (원)" : "월 기본급 (원)"}>
+            <input type="number" className="input" value={f.baseWage} onChange={(e) => set("baseWage", e.target.value)} />
+          </L>
+        )}
+        {isMonthly && (
+          <>
+            <L label="직책수당"><input type="number" className="input" value={f.positionAllow} onChange={(e) => set("positionAllow", e.target.value)} /></L>
+            <L label="식대 (비과세)"><input type="number" className="input" value={f.mealAllow} onChange={(e) => set("mealAllow", e.target.value)} /></L>
+            <L label="차량유지비 (비과세)"><input type="number" className="input" value={f.carAllow} onChange={(e) => set("carAllow", e.target.value)} /></L>
+          </>
+        )}
+        {f.payScheme === "INCENTIVE" && (
+          <>
+            <L label="인센티브 기준 학생수"><input type="number" className="input" value={f.incThreshold} onChange={(e) => set("incThreshold", e.target.value)} /></L>
+            <L label="초과 1명당 금액 (원)"><input type="number" className="input" value={f.incPerStudent} onChange={(e) => set("incPerStudent", e.target.value)} /></L>
+          </>
+        )}
+        {f.payScheme === "RATIO" && (
+          <L label="위탁 비율 (%)"><input type="number" step="0.1" className="input" value={f.ratioPercent} onChange={(e) => set("ratioPercent", e.target.value)} /></L>
+        )}
+        <L label="직책"><input className="input" value={f.position} onChange={(e) => set("position", e.target.value)} /></L>
+        <L label="업무내용"><input className="input" value={f.duty} onChange={(e) => set("duty", e.target.value)} /></L>
+      </div>
+
+      <L label="메모 (선택)">
+        <input className="input" placeholder="예: 연봉 조정 재계약" value={f.note} onChange={(e) => set("note", e.target.value)} />
+      </L>
+
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      <div className="flex justify-end gap-2">
+        <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>취소</button>
+        <button className="btn-primary" disabled={saving}>{saving ? "저장 중…" : "신규 계약 생성"}</button>
+      </div>
+    </form>
+  );
+}
+
+function L({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="label">{label}</label>
+      {children}
+    </div>
+  );
+}

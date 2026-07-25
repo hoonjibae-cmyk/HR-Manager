@@ -283,5 +283,10 @@ table.pay td.num{text-align:right;font-variant-numeric:tabular-nums;}
 table.pay tr.total td{background:#eef4ff;font-weight:800;}
 .list-num{margin:5px 0;padding-left:20px;text-indent:-20px;}
 .small{font-size:8.8pt;color:#64748b;}
+.fill{display:inline-block;border-bottom:1px solid #94a3b8;padding:0 6px;min-height:1em;}
+.inline-sign{text-align:right;color:#334155;margin:1px 0 5px;font-size:9.4pt;}
+.hosub{margin:3px 0 3px 32px;text-indent:-16px;padding-left:16px;}
+.footnote{font-size:8.8pt;color:#475569;margin:2px 0 2px 15px;}
+.handover{margin-top:10px;border-top:1px dashed #cbd5e1;padding-top:8px;font-size:9.6pt;}
 .badge{display:inline-block;padding:1px 8px;border:1px solid #1f45f5;border-radius:10px;color:#1f45f5;font-size:9pt;}
 `;

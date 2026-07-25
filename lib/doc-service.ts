@@ -2,7 +2,7 @@ import { prisma } from "./db";
 import { htmlToPdf, htmlPagesToPdf } from "./pdf";
 import {
   newHirePackageBodies,
-  contractHtml,
+  contractBodies,
   pledgeServiceHtml,
   consentPrivacyHtml,
   consentDeductionHtml,
@@ -91,8 +91,9 @@ export async function genContract(contractId: number) {
   });
   if (!ct) throw new Error("계약 없음");
   const company = await getCompany();
-  const pdf = await htmlToPdf(
-    contractHtml({
+  // 인센티브 계약은 별지 「인센티브 산정 계약서」가 함께 붙는다
+  const pdf = await htmlPagesToPdf(
+    contractBodies({
       employee: empToDoc(ct.employee),
       contract: contractToDoc(ct),
       company,

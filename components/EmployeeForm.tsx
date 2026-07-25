@@ -42,6 +42,7 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     bankName: initial?.bankName ?? "",
     bankAccount: initial?.bankAccount ?? "",
     hireDate: initial?.hireDate ? String(initial.hireDate).slice(0, 10) : "",
+    contractEnd: "", // 신규 등록 시 초기(기간제) 계약 종료일 — 공란이면 계약서에도 공란
     resignDate: initial?.resignDate ? String(initial.resignDate).slice(0, 10) : "",
     active: initial?.active ?? true,
     incomeType: initial?.incomeType ?? "EMPLOYEE",
@@ -127,6 +128,12 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           <Field label="직책"><input className="input" placeholder="선임강사 / 조교 / 팀장" value={f.position} onChange={(e) => set("position", e.target.value)} /></Field>
           <Field label="업무"><input className="input" placeholder="강의(학급관리)" value={f.duty} onChange={(e) => set("duty", e.target.value)} /></Field>
           <Field label="입사일자 *"><input type="date" className="input" required value={f.hireDate} onChange={(e) => set("hireDate", e.target.value)} /></Field>
+          {!editing && (
+            <Field label="계약 종료일자 (초기 계약)">
+              <input type="date" className="input" value={f.contractEnd} onChange={(e) => set("contractEnd", e.target.value)} />
+              <p className="text-[11px] text-slate-400 mt-1">초기 계약은 기간제 — 공란이면 계약서에도 공란(자필 기재)으로 출력됩니다.</p>
+            </Field>
+          )}
           <Field label="퇴사일자"><input type="date" className="input" value={f.resignDate} onChange={(e) => set("resignDate", e.target.value)} /></Field>
           <Field label="재직상태">
             <select className="input" value={f.active ? "1" : "0"} onChange={(e) => set("active", e.target.value === "1")}>

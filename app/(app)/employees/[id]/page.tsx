@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { leaveSummaryFor } from "@/lib/repo";
 import { PageHeader, Pill } from "@/components/ui";
 import DocButton from "@/components/DocButton";
+import NewContractForm from "@/components/NewContractForm";
 import {
   INCOME_TYPE_LABEL,
   PAY_SCHEME_LABEL,
@@ -139,7 +140,26 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
           )}
 
           <div className="card p-5">
-            <h2 className="font-bold text-slate-800 mb-3">계약 이력</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-bold text-slate-800">계약 이력</h2>
+            </div>
+            <div className="mb-3">
+              <NewContractForm
+                emp={{
+                  id: emp.id,
+                  payScheme: emp.payScheme,
+                  baseWage: emp.baseWage,
+                  positionAllow: emp.positionAllow,
+                  mealAllow: emp.mealAllow,
+                  carAllow: emp.carAllow,
+                  incThreshold: emp.incThreshold,
+                  incPerStudent: emp.incPerStudent,
+                  ratioPercent: emp.ratioPercent,
+                  position: emp.position,
+                  duty: emp.duty,
+                }}
+              />
+            </div>
             <ul className="space-y-2">
               {emp.contracts.map((c) => (
                 <li key={c.id} className="border border-slate-100 rounded-lg p-3">
@@ -148,8 +168,9 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                     <Pill kind={c.status}>{c.status}</Pill>
                   </div>
                   <div className="text-xs text-slate-400 mt-1">
-                    {ymd(c.startDate)} ~ {c.endDate ? ymd(c.endDate) : "정규(무기한)"}
-                    {c.isProbation && " · 수습"}
+                    {ymd(c.startDate)} ~ {c.endDate ? ymd(c.endDate) : "기한 미기재(공란)"}
+                    {c.isProbation && " · 수습 2개월"}
+                    {c.note ? ` · ${c.note}` : ""}
                   </div>
                   <div className="mt-2">
                     <DocButton endpoint="/api/documents/contract" body={{ contractId: c.id }} label="계약서 발급" className="text-xs text-brand-600 font-semibold" />
