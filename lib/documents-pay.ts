@@ -196,7 +196,7 @@ export function payslipHtml(args: {
       : `<div class="small">· 4대보험 및 근로소득세는 관계법령·간이세액표(또는 세무대리인 산정액)에 따릅니다.</div>`}
     ${p.retentionD ? `<div class="small">· 퇴직유보금: 인센티브 원천액의 8.3%로, 확인서에 따라 별도 통장으로 송금·적립됩니다.</div>` : ""}
     ${p.prorationRatio != null && p.prorationRatio < 1 ? `<div class="small">· 월중 입·퇴사로 일할계산이 적용되었습니다 (재직비율 ${(p.prorationRatio * 100).toFixed(1)}%).</div>` : ""}
-    <div class="small">· 본 명세서는 근로기준법 제48조에 따라 교부되며, 문의사항은 관리부서로 연락바랍니다.</div>
+    <div class="small">· 본 명세서는 근로기준법 제48조에 따라 교부됩니다.</div>
   </div>`;
 }
 
