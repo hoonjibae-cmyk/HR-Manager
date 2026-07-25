@@ -73,7 +73,7 @@ async function main() {
     update: {},
     create: {
       id: 1,
-      name: "㈜유쌤에듀",
+      name: "주식회사 유쌤에듀",
       ceo: "유은정",
       bizNo: "418-86-02289",
       phone: "031-794-3306",

@@ -20,7 +20,7 @@ export function getTransporter(): Transporter | null {
 }
 
 export function mailFrom(): string {
-  return process.env.MAIL_FROM || "㈜유쌤에듀 <no-reply@yoossam.edu>";
+  return process.env.MAIL_FROM || "주식회사 유쌤에듀 <no-reply@yoossam.edu>";
 }
 
 export async function sendTestEmail(to: string) {
@@ -76,8 +76,8 @@ export async function sendPayslipsForMonth(
       await t.sendMail({
         from: mailFrom(),
         to,
-        subject: `[${process.env.COMPANY_NAME || "㈜유쌤에듀"}] ${year}년 ${month}월 ${isFree ? "사업소득 지급명세서" : "급여명세서"}`,
-        text: `${r.employee.name}님, ${year}년 ${month}월 ${isFree ? "사업소득 지급" : "급여"}명세서를 첨부드립니다.\n실수령액: ${r.net.toLocaleString()}원\n\n㈜유쌤에듀 드림`,
+        subject: `[${process.env.COMPANY_NAME || "주식회사 유쌤에듀"}] ${year}년 ${month}월 ${isFree ? "사업소득 지급명세서" : "급여명세서"}`,
+        text: `${r.employee.name}님, ${year}년 ${month}월 ${isFree ? "사업소득 지급" : "급여"}명세서를 첨부드립니다.\n실수령액: ${r.net.toLocaleString()}원\n\n주식회사 유쌤에듀 드림`,
         attachments: [{ filename, content: pdf }],
       });
       sent++;

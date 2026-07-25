@@ -17,7 +17,7 @@ export async function getCompany(): Promise<DocCompany & { payday: number }> {
   const c = await prisma.company.findFirst({ where: { id: 1 } });
   if (!c) {
     return {
-      name: "㈜유쌤에듀",
+      name: "주식회사 유쌤에듀",
       ceo: "유은정",
       bizNo: "418-86-02289",
       phone: "031-794-3306",
@@ -26,7 +26,9 @@ export async function getCompany(): Promise<DocCompany & { payday: number }> {
     };
   }
   return {
-    name: c.name,
+    // ㈜ 글리프는 PDF 임베드 폰트(한글 서브셋)에 없어 빈칸으로 출력됨 →
+    // DB 값에 ㈜ 가 남아 있어도 문서에는 '주식회사 '로 자동 변환
+    name: c.name.replace(/㈜\s*/g, "주식회사 "),
     ceo: c.ceo,
     bizNo: c.bizNo,
     phone: c.phone,

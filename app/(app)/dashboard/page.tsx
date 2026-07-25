@@ -41,7 +41,7 @@ export default async function Dashboard() {
     <div>
       <PageHeader
         title="대시보드"
-        desc={`${company?.name ?? "㈜유쌤에듀"} · 오늘 ${ymd(now)}`}
+        desc={`${company?.name ?? "주식회사 유쌤에듀"} · 오늘 ${ymd(now)}`}
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

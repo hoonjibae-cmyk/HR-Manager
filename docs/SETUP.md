@@ -25,7 +25,7 @@ SMTP_PORT="587"
 SMTP_SECURE="false"
 SMTP_USER="hr@yoossam.edu"
 SMTP_PASS="앱비밀번호16자리"
-MAIL_FROM="㈜유쌤에듀 <hr@yoossam.edu>"
+MAIL_FROM="주식회사 유쌤에듀 <hr@yoossam.edu>"
 ```
 
 > **Gmail 앱 비밀번호**: Google 계정 → 보안 → 2단계 인증 → 앱 비밀번호에서 발급.

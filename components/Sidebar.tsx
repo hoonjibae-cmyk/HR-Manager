@@ -46,7 +46,7 @@ export default function Sidebar() {
           </button>
         </form>
         <div className="px-3 pt-2 text-[10px] text-slate-300">
-          ㈜유쌤에듀 · v1.0
+          주식회사 유쌤에듀 · v1.0
         </div>
       </div>
     </aside>
