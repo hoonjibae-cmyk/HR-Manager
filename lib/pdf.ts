@@ -257,6 +257,8 @@ export const DOC_CSS = `
 table.kv{width:100%;border-collapse:collapse;margin:7px 0;}
 table.kv th,table.kv td{border:1px solid #cbd5e1;padding:5px 8px;font-size:9.8pt;vertical-align:middle;}
 table.kv th{background:#f5f8ff;text-align:center;white-space:nowrap;width:118px;font-weight:700;color:#334155;}
+/* 근로시간표: 요일 7열 균등 폭 */
+table.kv.sched{table-layout:fixed;}
 .clause{margin:8px 0;}
 .clause h3{font-size:11pt;margin:11px 0 3px;font-weight:800;color:#1f2d5a;}
 .clause p{margin:3px 0;}

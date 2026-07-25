@@ -131,7 +131,7 @@ function scheduleTable(schedule: ScheduleDay[]): string {
     const h = eh + em / 60 - (sh + sm / 60) - (s.breakH || 0);
     return h > 0 ? h.toFixed(1) : "-";
   };
-  return `<table class="kv"><tbody>
+  return `<table class="kv sched"><tbody>
     <tr><th>구분</th>${days.map((d) => `<td style="text-align:center;font-weight:700;background:#f7f9ff">${DAY_KO[d]}</td>`).join("")}</tr>
     <tr><th>시업시각</th>${cell((s) => (s?.work ? s.start : "-"))}</tr>
     <tr><th>종업시각</th>${cell((s) => (s?.work ? s.end : "-"))}</tr>
@@ -183,6 +183,13 @@ export function contractHtml(args: {
     `"을"의 근로일은 1주 <b>${workDays}일</b>로 하며 근로일 및 근로시간의 변경이 필요한 경우 근로일 중 "을"의 소정근로시간은 1일 8시간 1주 40시간 범위 내로 한다.`,
   ];
   const art3Post: string[] = [];
+  // 조교팀: 스케줄이 수시로 변경되므로, 통보된 스케줄이 근로시간표를 갈음함을
+  // 명시해 스케줄 변경 근무가 초과근무로 해석될 소지를 차단한다.
+  if ((e.department ?? "").includes("조교")) {
+    art3Post.push(
+      `근로일 및 근로시간의 변경이 필요한 경우 "갑"은 1일 8시간, 1주 40시간 범위 내에서 변경된 스케줄을 사전에 "을"에게 통보하며, 통보된 스케줄은 본 계약서 제2항의 근로시간표를 갈음한다.`
+    );
+  }
   if (!isHourly) {
     art3Post.push(
       `상기 근로시간에 표기되어 있지 않은 토요일 근무의 경우 당번제로 실시하며 토요일 근무시간은 오전 10시 ~ 오후 4시까지로 한다. 토요일 근무 시 해당 주 수요일 근무는 면제된다.`,
