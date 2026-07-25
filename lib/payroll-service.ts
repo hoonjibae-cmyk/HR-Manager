@@ -1,5 +1,11 @@
 import { prisma } from "./db";
-import { computePayroll, type MonthlyInput } from "./payroll";
+import {
+  computePayroll,
+  blendWageTerms,
+  type MonthlyInput,
+  type WageSegment,
+  type EmployeePayInput,
+} from "./payroll";
 import { getActiveRates, getTaxTable, empToPayInput } from "./repo";
 
 export interface PayrollInputMap {
@@ -25,6 +31,103 @@ export function prorationRatioFor(
     Math.floor((to.getTime() - from.getTime()) / 86400000) + 1;
   const ratio = activeDays / daysInMonth;
   return Math.min(Math.max(ratio, 0), 1);
+}
+
+/**
+ * 해당 월에 각 계약 조건이 적용된 역일수 구간을 산출 (월중 계약 갱신 일할가중용).
+ * - 계약 i 의 적용기간은 [시작일, 다음 계약 시작일 전날] — 갱신 계약이 이전 계약을 대체.
+ * - 재직기간(입사~퇴사)과 교차한 일수만 집계해 입/퇴사 일할계산과 이중 적용을 방지.
+ * - DRAFT 계약은 제외.
+ */
+export async function wageSegmentsFor(
+  emps: Array<{ id: number; hireDate: Date; resignDate: Date | null }>,
+  year: number,
+  month: number
+): Promise<Map<number, WageSegment[]>> {
+  const result = new Map<number, WageSegment[]>();
+  if (!emps.length) return result;
+  const monthStart = new Date(Date.UTC(year, month - 1, 1));
+  const monthEnd = new Date(Date.UTC(year, month, 0));
+
+  const contracts = await prisma.contract.findMany({
+    where: {
+      employeeId: { in: emps.map((e) => e.id) },
+      status: { not: "DRAFT" },
+      startDate: { lte: monthEnd },
+    },
+    orderBy: [{ startDate: "asc" }, { id: "asc" }],
+  });
+  const byEmp = new Map<number, typeof contracts>();
+  for (const c of contracts) {
+    const arr = byEmp.get(c.employeeId) ?? [];
+    arr.push(c);
+    byEmp.set(c.employeeId, arr);
+  }
+
+  for (const emp of emps) {
+    const list = byEmp.get(emp.id) ?? [];
+    if (!list.length) continue;
+    const winFrom = emp.hireDate > monthStart ? emp.hireDate : monthStart;
+    const winTo =
+      emp.resignDate && emp.resignDate < monthEnd ? emp.resignDate : monthEnd;
+    if (winFrom > winTo) continue;
+
+    const segs: WageSegment[] = [];
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      const governEnd =
+        i + 1 < list.length
+          ? new Date(list[i + 1].startDate.getTime() - 86400000)
+          : monthEnd;
+      const from = c.startDate > winFrom ? c.startDate : winFrom;
+      const to = governEnd < winTo ? governEnd : winTo;
+      if (from > to) continue;
+      const days = Math.floor((to.getTime() - from.getTime()) / 86400000) + 1;
+      segs.push({
+        days,
+        baseWage: c.baseWage,
+        positionAllow: c.positionAllow,
+        mealAllow: c.mealAllow,
+        carAllow: c.carAllow,
+        ratioPercent: c.ratioPercent,
+      });
+    }
+    if (segs.length) result.set(emp.id, segs);
+  }
+  return result;
+}
+
+/**
+ * 월중 계약 갱신(조건이 서로 다른 구간 2개 이상)이면 임금 조건을 역일수
+ * 가중평균으로 치환. 그 외(계약 없음/단일 구간/동일 조건)는 직원 카드 값 유지.
+ * 반환: 변경 내역 노트(감사용) 또는 null.
+ */
+function applyMidMonthBlend(
+  payInput: EmployeePayInput,
+  segs: WageSegment[] | undefined
+): string | null {
+  if (!segs || segs.length < 2) return null;
+  const differs = segs.some(
+    (s) =>
+      s.baseWage !== segs[0].baseWage ||
+      s.positionAllow !== segs[0].positionAllow ||
+      s.mealAllow !== segs[0].mealAllow ||
+      s.carAllow !== segs[0].carAllow ||
+      (s.ratioPercent ?? null) !== (segs[0].ratioPercent ?? null)
+  );
+  if (!differs) return null;
+  const b = blendWageTerms(segs);
+  if (!b) return null;
+  const before = payInput.baseWage;
+  payInput.baseWage = b.baseWage;
+  payInput.positionAllow = b.positionAllow;
+  payInput.mealAllow = b.mealAllow;
+  payInput.carAllow = b.carAllow;
+  if (b.ratioPercent != null) payInput.ratioPercent = b.ratioPercent;
+  const segDesc = segs
+    .map((s) => `${s.days}일×${s.baseWage.toLocaleString()}원`)
+    .join(" + ");
+  return `월중 계약변경 일할가중 적용: ${segDesc} → 기본급(시급) ${b.baseWage.toLocaleString()}원 (변경 전 기준 ${before.toLocaleString()}원)`;
 }
 
 /** 저장된 레코드의 공제 최종본 조립 + 합계 재계산 */
@@ -124,6 +227,8 @@ export async function runPayrollMonth(
   if (onlyEmployeeIds && onlyEmployeeIds.length)
     where.id = { in: onlyEmployeeIds };
   const emps = await prisma.employee.findMany({ where });
+  // 월중 계약 갱신 대비: 이 달에 적용된 계약 조건 구간(역일수) 일괄 조회
+  const segMap = await wageSegmentsFor(emps, year, month);
 
   const results = [];
   for (const emp of emps) {
@@ -150,7 +255,11 @@ export async function runPayrollMonth(
     );
     if (mInput.prorationRatio === 0) continue; // 해당 월 재직 없음
 
-    const r = computePayroll(empToPayInput(emp), mInput, rates, tax);
+    // 월중 계약 갱신 시 기본급(시급)·수당을 역일수 가중평균으로 치환
+    const payInput = empToPayInput(emp);
+    const blendNote = applyMidMonthBlend(payInput, segMap.get(emp.id));
+
+    const r = computePayroll(payInput, mInput, rates, tax);
 
     // 공제 기본모드: 4대보험(EMPLOYEE)=MANUAL(세무사 지정값 입력),
     // 사업소득(FREELANCE)=AUTO(3.3% 기계적 계산이므로 자동)
@@ -221,7 +330,10 @@ export async function runPayrollMonth(
       deductMode,
       ...fin,
       hourlyWage: r.hourlyWage,
-      breakdown: JSON.stringify({ notes: r.notes, taxableGross: r.taxableGross }),
+      breakdown: JSON.stringify({
+        notes: blendNote ? [blendNote, ...r.notes] : r.notes,
+        taxableGross: r.taxableGross,
+      }),
       status: "DRAFT",
     };
 
@@ -265,8 +377,12 @@ export async function updateDeductions(payrollId: number, patch: DeductionPatch)
   let retentionAuto = rec.retentionD;
   if (deductMode === "AUTO") {
     const [rates, tax] = await Promise.all([getActiveRates(), getTaxTable()]);
+    // 월중 계약 갱신이 있었던 달이면 동일한 가중 조건으로 재산출
+    const payInput = empToPayInput(rec.employee);
+    const segMap = await wageSegmentsFor([rec.employee], rec.year, rec.month);
+    applyMidMonthBlend(payInput, segMap.get(rec.employeeId));
     const r = computePayroll(
-      empToPayInput(rec.employee),
+      payInput,
       {
         workedHours: rec.workedHours,
         weeklyHolidayHours: rec.weeklyHolidayHours,

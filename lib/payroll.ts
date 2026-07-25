@@ -56,6 +56,50 @@ export interface EmployeePayInput {
 /** 인센티브 퇴직유보금 요율 — 확인서 기준 '인센티브 원천액의 8.3%' */
 export const RETENTION_RATE = 0.083;
 
+/* ───────────── 월중 계약 변경(갱신) 일할 가중 ───────────── */
+
+/** 한 달 안에서 특정 계약 조건이 적용된 구간 (역일수 기준) */
+export interface WageSegment {
+  days: number; // 해당 월 중 이 조건이 적용된 역일수 (재직기간과 교차한 일수)
+  baseWage: number; // 월급제=월기본급, 시급제=시급
+  positionAllow: number;
+  mealAllow: number;
+  carAllow: number;
+  ratioPercent?: number | null;
+}
+
+export interface BlendedWage {
+  baseWage: number;
+  positionAllow: number;
+  mealAllow: number;
+  carAllow: number;
+  ratioPercent: number | null;
+}
+
+/**
+ * 월중 계약 갱신 시 임금 조건을 역일수 가중평균으로 환산.
+ * 예) 30일 월: 기본급 300만(1~15일) + 400만(16~30일) → 350만.
+ * 시급제는 시급에 동일 규칙 적용. 입/퇴사 일할계산(prorationRatio)과는
+ * 독립 — 분모는 구간 일수의 합이므로 이중 일할이 되지 않는다.
+ */
+export function blendWageTerms(segments: WageSegment[]): BlendedWage | null {
+  const segs = segments.filter((s) => s.days > 0);
+  const total = segs.reduce((a, s) => a + s.days, 0);
+  if (!total) return null;
+  const avg = (pick: (s: WageSegment) => number) =>
+    Math.round(segs.reduce((a, s) => a + pick(s) * s.days, 0) / total);
+  const hasRatio = segs.some((s) => s.ratioPercent != null);
+  return {
+    baseWage: avg((s) => s.baseWage),
+    positionAllow: avg((s) => s.positionAllow),
+    mealAllow: avg((s) => s.mealAllow),
+    carAllow: avg((s) => s.carAllow),
+    ratioPercent: hasRatio
+      ? segs.reduce((a, s) => a + (s.ratioPercent ?? 0) * s.days, 0) / total
+      : null,
+  };
+}
+
 export interface MonthlyInput {
   workedHours?: number | null; // 시급제 실근로시간(월). 없으면 스케줄로 추정
   weeklyHolidayHours?: number | null; // 시급제 주휴시간(월 합계) — 시간기록표 기반. 지정 시 스케줄 추정 대신 사용

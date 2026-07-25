@@ -4,6 +4,7 @@ import {
   computeWeeklyHours,
   lookupIncomeTax,
   floor10,
+  blendWageTerms,
   DEFAULT_RATES_2025,
   type EmployeePayInput,
   type TaxBracketRow,
@@ -369,5 +370,75 @@ describe("computePayroll — 시급제 주휴수당", () => {
     // 주휴수당 = 시급 × 주휴시간 × 4.345
     expect(r.weeklyHolidayP).toBe(Math.round(12_000 * 6.5 * 4.345));
     expect(r.weeklyHolidayP).toBeGreaterThan(0);
+  });
+});
+
+describe("blendWageTerms — 월중 계약 갱신 일할가중", () => {
+  it("기본급 300만 → 400만, 16일 변경(30일 월) = 350만", () => {
+    const b = blendWageTerms([
+      { days: 15, baseWage: 3_000_000, positionAllow: 0, mealAllow: 200_000, carAllow: 0 },
+      { days: 15, baseWage: 4_000_000, positionAllow: 0, mealAllow: 200_000, carAllow: 0 },
+    ])!;
+    expect(b.baseWage).toBe(3_500_000);
+    expect(b.mealAllow).toBe(200_000); // 동일 조건은 그대로 유지
+  });
+
+  it("31일 월(16일 변경): 역일수 15/16 가중", () => {
+    const b = blendWageTerms([
+      { days: 15, baseWage: 3_000_000, positionAllow: 0, mealAllow: 0, carAllow: 0 },
+      { days: 16, baseWage: 4_000_000, positionAllow: 0, mealAllow: 0, carAllow: 0 },
+    ])!;
+    expect(b.baseWage).toBe(Math.round((3_000_000 * 15 + 4_000_000 * 16) / 31));
+  });
+
+  it("시급 변경도 동일 규칙 (11,000 → 12,000)", () => {
+    const b = blendWageTerms([
+      { days: 15, baseWage: 11_000, positionAllow: 0, mealAllow: 0, carAllow: 0 },
+      { days: 16, baseWage: 12_000, positionAllow: 0, mealAllow: 0, carAllow: 0 },
+    ])!;
+    expect(b.baseWage).toBe(Math.round((11_000 * 15 + 12_000 * 16) / 31)); // 11,516
+  });
+
+  it("단일 구간이면 해당 조건 그대로", () => {
+    const b = blendWageTerms([
+      { days: 31, baseWage: 3_000_000, positionAllow: 100_000, mealAllow: 200_000, carAllow: 0 },
+    ])!;
+    expect(b.baseWage).toBe(3_000_000);
+    expect(b.positionAllow).toBe(100_000);
+  });
+
+  it("적용 일수 0 또는 빈 배열이면 null", () => {
+    expect(blendWageTerms([])).toBeNull();
+    expect(
+      blendWageTerms([{ days: 0, baseWage: 1, positionAllow: 0, mealAllow: 0, carAllow: 0 }])
+    ).toBeNull();
+  });
+
+  it("비율제 % 도 역일수 가중", () => {
+    const b = blendWageTerms([
+      { days: 15, baseWage: 0, positionAllow: 0, mealAllow: 0, carAllow: 0, ratioPercent: 0.4 },
+      { days: 15, baseWage: 0, positionAllow: 0, mealAllow: 0, carAllow: 0, ratioPercent: 0.5 },
+    ])!;
+    expect(b.ratioPercent).toBeCloseTo(0.45, 10);
+  });
+
+  it("가중 기본급을 엔진에 넣으면 지급액에 반영 (월급제 350만)", () => {
+    const blended = blendWageTerms([
+      { days: 15, baseWage: 3_000_000, positionAllow: 0, mealAllow: 200_000, carAllow: 0 },
+      { days: 15, baseWage: 4_000_000, positionAllow: 0, mealAllow: 200_000, carAllow: 0 },
+    ])!;
+    const emp: EmployeePayInput = {
+      incomeType: "EMPLOYEE",
+      payScheme: "MONTHLY",
+      baseWage: blended.baseWage,
+      positionAllow: blended.positionAllow,
+      mealAllow: blended.mealAllow,
+      carAllow: blended.carAllow,
+      dependents: 1,
+      schedule: fullTime,
+    };
+    const r = computePayroll(emp, {}, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.baseP).toBe(3_500_000);
+    expect(r.gross).toBe(3_500_000 + 200_000);
   });
 });
