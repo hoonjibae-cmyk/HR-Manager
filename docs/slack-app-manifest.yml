@@ -33,7 +33,8 @@ oauth_config:
       - commands # 슬래시 명령 수신
       - chat:write # 승인 요청·결과 메시지 게시
       - chat:write.public # 봇 미초대 채널에도 게시
-      - users:read # 신청자 식별(선택)
+      - users:read # 신청자 식별
+      - users:read.email # 이메일로 직원 카드 자동 연결 (슬랙 ID 수동 등록 불필요)
 
 settings:
   interactivity:

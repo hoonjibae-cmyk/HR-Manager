@@ -4,6 +4,7 @@ import {
   verifySlackSignature,
   slackConfigured,
   findEmployeeBySlack,
+  autoLinkEmployeeBySlack,
   parseLeaveText,
   postMessage,
   approvalBlocks,
@@ -29,11 +30,18 @@ export async function POST(req: Request) {
   const userId = form.get("user_id") || "";
   const text = (form.get("text") || "").trim();
 
-  const emp = await findEmployeeBySlack(userId);
+  // 슬랙 ID 미등록이면 이메일(또는 실명)로 직원 카드와 자동 연결 시도
+  let emp = await findEmployeeBySlack(userId);
   if (!emp) {
-    return ephemeral(
-      "등록된 직원 정보를 찾을 수 없습니다. 관리자에게 슬랙 ID 등록을 요청하세요."
-    );
+    const linked = await autoLinkEmployeeBySlack(userId);
+    emp = linked.emp;
+    if (!emp) {
+      const who = linked.email ? `슬랙 이메일: ${linked.email}` : `슬랙 ID: ${userId}`;
+      return ephemeral(
+        `등록된 직원 정보를 찾을 수 없습니다. (${who})\n` +
+          `관리자에게 직원 카드의 *이메일* 을 슬랙 계정과 동일하게 맞추거나, *슬랙 User ID* 등록을 요청하세요.`
+      );
+    }
   }
   if (emp.payScheme === "RATIO") {
     return ephemeral(

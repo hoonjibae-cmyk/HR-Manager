@@ -56,6 +56,64 @@ export async function findEmployeeBySlack(slackUserId: string) {
   return prisma.employee.findFirst({ where: { slackUserId } });
 }
 
+/** 슬랙 사용자 프로필 조회 (users:read.email 권한 필요) */
+export async function slackUserProfile(
+  userId: string
+): Promise<{ email?: string; realName?: string } | null> {
+  if (!process.env.SLACK_BOT_TOKEN || !userId) return null;
+  try {
+    const res = await fetch(`${API}/users.info?user=${encodeURIComponent(userId)}`, {
+      headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
+    });
+    const j: any = await res.json();
+    if (!j?.ok) return null;
+    return {
+      email: j.user?.profile?.email || undefined,
+      realName: j.user?.profile?.real_name || j.user?.real_name || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 슬랙 ID 가 등록되지 않은 사용자를 이메일(또는 실명)로 직원 카드와 자동 연결.
+ * 최초 `/연차` 사용 시 한 번만 수행되며, 이후에는 slackUserId 로 바로 조회된다.
+ * → 직원 24명의 슬랙 ID를 관리자가 일일이 입력할 필요가 없다.
+ */
+export async function autoLinkEmployeeBySlack(slackUserId: string): Promise<{
+  emp: Awaited<ReturnType<typeof findEmployeeBySlack>>;
+  email?: string;
+  realName?: string;
+}> {
+  const profile = await slackUserProfile(slackUserId);
+  if (!profile) return { emp: null };
+
+  let emp = null;
+  if (profile.email) {
+    // 이메일은 대소문자 무시하고 매칭
+    emp = await prisma.employee.findFirst({
+      where: { email: { equals: profile.email, mode: "insensitive" }, slackUserId: null },
+    });
+  }
+  // 이메일이 없거나 매칭 실패 시 실명으로 보조 매칭 (동명이인이면 연결하지 않음)
+  if (!emp && profile.realName) {
+    const name = profile.realName.replace(/\s+/g, "");
+    const candidates = await prisma.employee.findMany({
+      where: { slackUserId: null, active: true },
+    });
+    const hits = candidates.filter((c) => c.name.replace(/\s+/g, "") === name);
+    if (hits.length === 1) emp = hits[0];
+  }
+  if (!emp) return { emp: null, email: profile.email, realName: profile.realName };
+
+  await prisma.employee.update({
+    where: { id: emp.id },
+    data: { slackUserId },
+  });
+  return { emp: { ...emp, slackUserId }, email: profile.email, realName: profile.realName };
+}
+
 export function approverAllowed(userId: string): boolean {
   const list = (process.env.SLACK_APPROVERS || "")
     .split(",")
