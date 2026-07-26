@@ -202,8 +202,15 @@ function ScheduleCard({ schedule, status, onSave }: any) {
             </select>
           </F>
         )}
-        <F l="시각(시, KST)"><input type="number" min={0} max={23} className="input" value={f.hour} onChange={(e) => set("hour", e.target.value)} /></F>
-        <F l="분"><input type="number" min={0} max={59} className="input" value={f.minute} onChange={(e) => set("minute", e.target.value)} /></F>
+        <F l="발송 시각 (KST, 정시)">
+          <select className="input" value={f.hour} onChange={(e) => set("hour", e.target.value)}>
+            {Array.from({ length: 24 }, (_, h) => (
+              <option key={h} value={h}>
+                {String(h).padStart(2, "0")}:00
+              </option>
+            ))}
+          </select>
+        </F>
         <F l="발송 대상 월">
           <select className="input" value={f.targetMonthOffset} onChange={(e) => set("targetMonthOffset", e.target.value)}>
             <option value={0}>당월분</option>
@@ -216,9 +223,7 @@ function ScheduleCard({ schedule, status, onSave }: any) {
         <div>
           · 지급일이 <b>익월 7일</b>이라면 <b>매월 7일 · 전월분</b>으로 설정하세요. (7월 급여 → 8월 7일 발송)
         </div>
-        <div>
-          · 위에 지정한 <b>시각(KST)</b> 에 발송됩니다. 서버가 10분마다 점검하므로 실제 발송은 지정 시각 직후(최대 10분 이내)에 이뤄집니다.
-        </div>
+        <div>· 위에 지정한 <b>시각(KST 정시)</b> 에 발송됩니다. 서버가 매시 정각에 점검합니다.</div>
         <div>· 급여 기록이 아직 없으면 발송 직전에 자동으로 급여를 산정합니다. 이메일 주소가 없는 직원은 제외되고 실패로 기록됩니다.</div>
       </div>
 
@@ -249,7 +254,8 @@ function ScheduleCard({ schedule, status, onSave }: any) {
         <button className="btn-outline" disabled={!!busy} onClick={() => run("force")}>
           {busy === "force" ? "발송 중…" : "지금 발송"}
         </button>
-        <button className="btn-primary" onClick={() => onSave(f)}>저장</button>
+        {/* 정시 발송 — 분은 항상 0 으로 저장 */}
+        <button className="btn-primary" onClick={() => onSave({ ...f, minute: 0 })}>저장</button>
       </div>
     </div>
   );
