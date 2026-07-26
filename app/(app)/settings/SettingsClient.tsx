@@ -342,7 +342,7 @@ function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher }: any) 
     <div className="card p-5">
       <h2 className="font-bold text-slate-800 mb-1">외부 연동 상태</h2>
       <p className="text-xs text-slate-400 mb-4">{envHint}</p>
-      <div className="grid sm:grid-cols-3 gap-4">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Status
           label="SMTP 이메일"
           ok={g.smtp}
@@ -354,6 +354,15 @@ function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher }: any) 
           }
         />
         <Status label="슬랙 연동" ok={g.slack} hint={slackHint} />
+        <Status
+          label="구글 캘린더"
+          ok={g.gcal}
+          hint={
+            g.gcal
+              ? "승인된 휴가가 캘린더에 자동 등록·취소 시 삭제됩니다"
+              : "GOOGLE_CLIENT_EMAIL · GOOGLE_PRIVATE_KEY · GOOGLE_CALENDAR_ID 필요 (선택)"
+          }
+        />
         <Status
           label="예약 발송 실행"
           ok={g.scheduler}

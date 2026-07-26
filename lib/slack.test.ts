@@ -4,6 +4,9 @@ import {
   leaveModalView,
   readLeaveModal,
   leaveLauncherBlocks,
+  leaveCancelModalView,
+  readCancelModal,
+  recordBlocks,
 } from "./slack";
 
 describe("parseLeaveText — 빠른 신청 문법", () => {
@@ -135,13 +138,73 @@ describe("readLeaveModal — 제출값 파싱", () => {
 });
 
 describe("leaveLauncherBlocks — 채널 버튼", () => {
-  it("신청·잔여확인 버튼 2개", () => {
+  it("신청·잔여확인·취소신청 버튼 3개", () => {
     const blocks: any = leaveLauncherBlocks("주식회사 유쌤에듀");
     const actions = blocks.find((b: any) => b.type === "actions");
     expect(actions.elements.map((e: any) => e.action_id)).toEqual([
       "open_leave_modal",
       "check_leave_balance",
+      "open_cancel_modal",
     ]);
     expect(blocks[0].text.text).toContain("휴가 신청");
+  });
+});
+
+describe("휴가 취소 모달", () => {
+  it("취소 대상 목록과 사유 입력을 제공", () => {
+    const v: any = leaveCancelModalView(
+      [
+        { id: 12, label: "2026-08-14 ~ 2026-08-16 · 연차 3일" },
+        { id: 13, label: "2026-09-01 · 오후반차 0.5일" },
+      ],
+      "C999"
+    );
+    expect(v.callback_id).toBe("leave_cancel_submit");
+    const ids = v.blocks.filter((b: any) => b.type === "input").map((b: any) => b.block_id);
+    expect(ids).toEqual(["target", "reason"]);
+    const opts = v.blocks.find((b: any) => b.block_id === "target").element.options;
+    expect(opts.map((o: any) => o.value)).toEqual(["12", "13"]);
+    expect(JSON.parse(v.private_metadata).channel).toBe("C999");
+  });
+
+  it("제출값 파싱", () => {
+    expect(
+      readCancelModal({
+        state: {
+          values: {
+            target: { v: { selected_option: { value: "12" } } },
+            reason: { v: { value: " 일정 변경 " } },
+          },
+        },
+      })
+    ).toEqual({ requestId: 12, reason: "일정 변경" });
+  });
+});
+
+describe("recordBlocks — 휴가-기록 채널 메시지", () => {
+  const base = {
+    name: "홍길동",
+    dept: "교수부",
+    range: "2026-08-14",
+    days: 1,
+    typeLabel: "연차",
+    reason: "개인사유",
+    by: "U123",
+  };
+  it("승인 기록에 캘린더·잔여 표기", () => {
+    const b: any = recordBlocks({ ...base, calendarSynced: true, deducted: true, remaining: 11 });
+    expect(b[0].text.text).toContain("휴가 승인");
+    const ctx = b[2].elements[0].text;
+    expect(ctx).toContain("구글 캘린더에 등록됨");
+    expect(ctx).toContain("잔여 연차 11일");
+  });
+  it("병가·경조사는 '연차 미차감' 표기", () => {
+    const b: any = recordBlocks({ ...base, typeLabel: "병가", deducted: false });
+    expect(b[2].elements[0].text).toContain("연차 미차감");
+  });
+  it("취소 확정 기록", () => {
+    const b: any = recordBlocks({ ...base, canceled: true, calendarSynced: true });
+    expect(b[0].text.text).toContain("휴가 취소 확정");
+    expect(b[2].elements[0].text).toContain("구글 캘린더에서 삭제됨");
   });
 });

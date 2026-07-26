@@ -274,13 +274,21 @@ model LeaveRequest {
   days       Float    // 신청 일수 (0.5 반차 지원)
   leaveType  String   @default("ANNUAL") // ANNUAL(연차) | HALF_AM | HALF_PM | SICK 등
   reason     String?
-  status     String   @default("PENDING") // PENDING | APPROVED | REJECTED | CANCELED
+  status     String   @default("PENDING") // PENDING | APPROVED | REJECTED | CANCEL_PENDING | CANCELED
   source     String   @default("WEB") // WEB | SLACK
   slackChannel String?
   slackTs    String?  // 슬랙 메시지 timestamp (승인버튼 갱신용)
   approverId String?  // 승인자 (slack user or admin)
   decidedAt  DateTime?
   decidedNote String?
+
+  // 구글 캘린더 연동 (승인 시 생성, 취소 승인 시 삭제)
+  calendarEventId String?
+
+  // 취소 신청 (직원이 승인된 휴가를 취소 요청 → 운영진 승인 필요)
+  cancelReason      String?
+  cancelRequestedAt DateTime?
+  cancelDecidedAt   DateTime?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   @@index([employeeId])

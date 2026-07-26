@@ -2,6 +2,7 @@
 import { prisma } from "./db";
 import { countLeaveDays, summarizeLeave, summarizeComp, type LeaveTxn } from "./leave";
 import { postMessage, approvalBlocks } from "./slack";
+import { ymd } from "./format";
 import { LEAVE_TYPE_LABEL } from "./constants";
 
 export async function leaveBalanceOf(emp: { id: number; hireDate: Date }) {
@@ -120,4 +121,32 @@ export async function submitLeaveRequest(
   }
 
   return { ok: true, days, remaining: poolRemaining, poolLabel, requestId: reqRow.id };
+}
+
+/** 표시용 기간 라벨 */
+export function rangeLabel(start: Date, end: Date, days: number): string {
+  return days > 1 ? `${ymd(start)} ~ ${ymd(end)}` : ymd(start);
+}
+
+/**
+ * 직원이 취소 신청할 수 있는 휴가 목록.
+ * 승인 완료(APPROVED) + 종료일이 오늘(KST) 이후인 건만.
+ */
+export async function cancelableLeaves(employeeId: number) {
+  const todayKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const today = new Date(
+    Date.UTC(todayKst.getUTCFullYear(), todayKst.getUTCMonth(), todayKst.getUTCDate())
+  );
+  const rows = await prisma.leaveRequest.findMany({
+    where: { employeeId, status: "APPROVED", endDate: { gte: today } },
+    orderBy: { startDate: "asc" },
+    take: 50,
+  });
+  return rows.map((r) => ({
+    row: r,
+    id: r.id,
+    label: `${rangeLabel(r.startDate, r.endDate, r.days)} · ${
+      LEAVE_TYPE_LABEL[r.leaveType] ?? "연차"
+    } ${r.days}일`,
+  }));
 }

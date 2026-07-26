@@ -10,9 +10,28 @@ import {
   openView,
   leaveModalView,
   readLeaveModal,
+  leaveCancelModalView,
+  readCancelModal,
+  cancelApprovalBlocks,
+  recordBlocks,
+  postMessage,
 } from "@/lib/slack";
-import { approveLeaveRequest, rejectLeaveRequest } from "@/lib/leave-service";
-import { leaveBalanceOf, submitLeaveRequest } from "@/lib/leave-slack";
+import {
+  approveLeaveRequest,
+  rejectLeaveRequest,
+  requestLeaveCancel,
+  approveLeaveCancel,
+  rejectLeaveCancel,
+  deductsLeave,
+} from "@/lib/leave-service";
+import {
+  leaveBalanceOf,
+  submitLeaveRequest,
+  cancelableLeaves,
+  rangeLabel,
+} from "@/lib/leave-slack";
+import { createLeaveEvent, deleteLeaveEvent, gcalConfigured } from "@/lib/gcal";
+import { LEAVE_TYPE_LABEL } from "@/lib/constants";
 import { ymd } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -97,6 +116,63 @@ export async function POST(req: Request) {
     return Response.json({ response_action: "clear" });
   }
 
+  /* ---------- 휴가 취소 신청 모달 제출 ---------- */
+  if (payload.type === "view_submission" && payload.view?.callback_id === "leave_cancel_submit") {
+    const userId = payload.user?.id as string;
+    const { emp } = await resolveEmployee(userId);
+    if (!emp) {
+      return Response.json({
+        response_action: "errors",
+        errors: { target: "직원 정보를 찾을 수 없습니다." },
+      });
+    }
+    const { requestId, reason } = readCancelModal(payload.view);
+    const target = await prisma.leaveRequest.findUnique({ where: { id: requestId } });
+    if (!target || target.employeeId !== emp.id || target.status !== "APPROVED") {
+      return Response.json({
+        response_action: "errors",
+        errors: { target: "취소할 수 없는 휴가입니다. 목록을 다시 확인하세요." },
+      });
+    }
+
+    await requestLeaveCancel(requestId, reason);
+
+    const typeLabel = LEAVE_TYPE_LABEL[target.leaveType] ?? "연차";
+    const range = rangeLabel(target.startDate, target.endDate, target.days);
+    let meta: any = {};
+    try {
+      meta = JSON.parse(payload.view.private_metadata || "{}");
+    } catch {}
+    const approvalChannel = process.env.SLACK_APPROVAL_CHANNEL || meta.channel;
+    if (approvalChannel) {
+      const posted: any = await postMessage(
+        approvalChannel,
+        `휴가 취소 신청: ${emp.name} ${range}`,
+        cancelApprovalBlocks({
+          requestId,
+          name: emp.name,
+          dept: emp.department ?? "",
+          range,
+          days: target.days,
+          typeLabel,
+          cancelReason: reason || "사유 미기재",
+        })
+      );
+      if (posted?.ok) {
+        await prisma.leaveRequest.update({
+          where: { id: requestId },
+          data: { slackChannel: posted.channel, slackTs: posted.ts },
+        });
+      }
+    }
+    await slackCall("chat.postMessage", {
+      channel: userId,
+      text: `🚫 휴가 취소를 신청했습니다.\n• 대상: ${range} · ${typeLabel} ${target.days}일\n운영진 승인 후 취소가 확정됩니다.`,
+    }).catch(() => {});
+
+    return Response.json({ response_action: "clear" });
+  }
+
   const action = payload.actions?.[0];
   if (!action) return new Response("", { status: 200 });
 
@@ -161,6 +237,28 @@ export async function POST(req: Request) {
   }
 
   const userId = payload.user?.id as string;
+
+  /* ---------- 채널의 '휴가 취소 신청' 버튼 ---------- */
+  if (action.action_id === "open_cancel_modal") {
+    const channelId = payload.container?.channel_id || payload.channel?.id;
+    const { emp, email } = await resolveEmployee(userId);
+    if (!emp) {
+      await slackCall("chat.postEphemeral", { channel: channelId, user: userId, text: notLinkedText(email) });
+      return new Response("", { status: 200 });
+    }
+    const items = await cancelableLeaves(emp.id);
+    if (!items.length) {
+      await slackCall("chat.postEphemeral", {
+        channel: channelId,
+        user: userId,
+        text: "취소할 수 있는 휴가가 없습니다. (승인 완료 + 종료일이 오늘 이후인 휴가만 취소 신청할 수 있습니다)",
+      });
+      return new Response("", { status: 200 });
+    }
+    await openView(payload.trigger_id, leaveCancelModalView(items, channelId));
+    return new Response("", { status: 200 });
+  }
+
   const requestId = Number(action.value);
   const channel = payload.container?.channel_id || payload.channel?.id;
   const msgTs = payload.container?.message_ts || payload.message?.ts;
@@ -173,17 +271,22 @@ export async function POST(req: Request) {
 
   const range =
     reqRow.days > 1 ? `${ymd(reqRow.startDate)} ~ ${ymd(reqRow.endDate)}` : ymd(reqRow.startDate);
+  const typeLabel = LEAVE_TYPE_LABEL[reqRow.leaveType] ?? "연차";
+  const recordChannel = process.env.SLACK_RECORD_CHANNEL;
 
   if (!approverAllowed(userId)) {
     await slackCall("chat.postEphemeral", {
       channel,
       user: userId,
-      text: "연차를 승인/반려할 권한이 없습니다.",
+      text: "휴가를 승인/반려할 권한이 없습니다.",
     });
     return new Response("", { status: 200 });
   }
 
-  if (reqRow.status !== "PENDING") {
+  const isCancelAction =
+    action.action_id === "approve_cancel" || action.action_id === "reject_cancel";
+  const expected = isCancelAction ? "CANCEL_PENDING" : "PENDING";
+  if (reqRow.status !== expected) {
     await slackCall("chat.postEphemeral", {
       channel,
       user: userId,
@@ -193,11 +296,118 @@ export async function POST(req: Request) {
   }
 
   try {
+    /* ---------- 휴가 취소 승인 / 반려 ---------- */
+    if (action.action_id === "approve_cancel") {
+      await approveLeaveCancel(requestId, userId);
+      // 구글 캘린더 일정 삭제
+      let calDeleted = false;
+      if (reqRow.calendarEventId && gcalConfigured()) {
+        calDeleted = await deleteLeaveEvent(reqRow.calendarEventId);
+        if (calDeleted) {
+          await prisma.leaveRequest.update({
+            where: { id: requestId },
+            data: { calendarEventId: null },
+          });
+        }
+      }
+      if (channel && msgTs) {
+        await updateMessage(
+          channel,
+          msgTs,
+          `취소 승인: ${reqRow.employee.name}`,
+          recordBlocks({
+            name: reqRow.employee.name,
+            dept: reqRow.employee.department ?? "",
+            range,
+            days: reqRow.days,
+            typeLabel,
+            reason: reqRow.cancelReason ?? "",
+            canceled: true,
+            by: userId,
+            calendarSynced: calDeleted,
+          })
+        );
+      }
+      if (reqRow.employee.slackUserId) {
+        await slackCall("chat.postMessage", {
+          channel: reqRow.employee.slackUserId,
+          text: `🚫 휴가 취소(${range}, ${typeLabel} ${reqRow.days}일)가 승인되었습니다.${
+            deductsLeave(reqRow.leaveType) ? " 사용한 연차가 복원되었습니다." : ""
+          }`,
+        });
+      }
+      if (recordChannel) {
+        await postMessage(
+          recordChannel,
+          `휴가 취소 확정: ${reqRow.employee.name} ${range}`,
+          recordBlocks({
+            name: reqRow.employee.name,
+            dept: reqRow.employee.department ?? "",
+            range,
+            days: reqRow.days,
+            typeLabel,
+            reason: reqRow.cancelReason ?? "",
+            canceled: true,
+            by: userId,
+            calendarSynced: calDeleted,
+          })
+        );
+      }
+      return new Response("", { status: 200 });
+    }
+
+    if (action.action_id === "reject_cancel") {
+      await rejectLeaveCancel(requestId, userId);
+      if (channel && msgTs) {
+        await updateMessage(
+          channel,
+          msgTs,
+          `취소 반려: ${reqRow.employee.name}`,
+          decidedBlocks({
+            name: `${reqRow.employee.name} (휴가 취소 요청)`,
+            range,
+            days: reqRow.days,
+            approved: false,
+            by: userId,
+          })
+        );
+      }
+      if (reqRow.employee.slackUserId) {
+        await slackCall("chat.postMessage", {
+          channel: reqRow.employee.slackUserId,
+          text: `❌ 휴가 취소 요청(${range})이 반려되었습니다. 기존 휴가는 그대로 유지됩니다.`,
+        });
+      }
+      return new Response("", { status: 200 });
+    }
+
     if (action.action_id === "approve_leave") {
       const { summary, comp } = await approveLeaveRequest(requestId, userId);
       const isComp = reqRow.leaveType === "COMP";
+      const deducted = deductsLeave(reqRow.leaveType);
       const remaining = isComp ? comp.remaining : summary.remaining;
       const poolLabel = isComp ? "대휴보상연차" : "연차";
+
+      // 구글 캘린더 등록
+      let eventId: string | null = null;
+      if (gcalConfigured()) {
+        eventId = await createLeaveEvent({
+          name: reqRow.employee.name,
+          typeLabel,
+          start: reqRow.startDate,
+          end: reqRow.endDate,
+          reason: reqRow.reason,
+          department: reqRow.employee.department,
+          days: reqRow.days,
+        });
+        if (eventId) {
+          await prisma.leaveRequest.update({
+            where: { id: requestId },
+            data: { calendarEventId: eventId },
+          });
+        }
+      }
+
       if (channel && msgTs) {
         await updateMessage(
           channel,
@@ -210,8 +420,30 @@ export async function POST(req: Request) {
       if (reqRow.employee.slackUserId) {
         await slackCall("chat.postMessage", {
           channel: reqRow.employee.slackUserId,
-          text: `✅ ${poolLabel} 신청(${range}, ${reqRow.days}일)이 승인되었습니다. ${poolLabel} 잔여 ${remaining}일.`,
+          text:
+            `✅ ${typeLabel} 신청(${range}, ${reqRow.days}일)이 승인되었습니다.` +
+            (deducted ? ` ${poolLabel} 잔여 ${remaining}일.` : " (연차에서 차감되지 않는 휴가입니다.)") +
+            (eventId ? "\n구글 캘린더에 일정이 등록되었습니다." : ""),
         });
+      }
+      // 휴가-기록 채널 게시
+      if (recordChannel) {
+        await postMessage(
+          recordChannel,
+          `휴가 승인: ${reqRow.employee.name} ${range}`,
+          recordBlocks({
+            name: reqRow.employee.name,
+            dept: reqRow.employee.department ?? "",
+            range,
+            days: reqRow.days,
+            typeLabel,
+            reason: reqRow.reason ?? "",
+            by: userId,
+            calendarSynced: !!eventId,
+            deducted,
+            remaining: deducted ? remaining : undefined,
+          })
+        );
       }
     } else if (action.action_id === "reject_leave") {
       await rejectLeaveRequest(requestId, userId);

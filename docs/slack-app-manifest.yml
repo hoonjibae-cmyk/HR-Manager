@@ -3,13 +3,13 @@
 # 사용법
 #  1) https://api.slack.com/apps → [Create New App] → [From an app manifest]
 #  2) 워크스페이스 선택 → YAML 탭에 이 파일 내용을 붙여넣기
-#  3) 아래 <도메인> 3곳을 실제 배포 주소로 바꾼 뒤 생성
+#  3) 아래 <도메인> 2곳을 실제 배포 주소로 바꾼 뒤 생성
 #     예) hr-manager-nine.vercel.app
 #  4) 생성 후 [Install to Workspace] → 권한 허용
 #  5) Basic Information → Signing Secret  → 환경변수 SLACK_SIGNING_SECRET
 #     OAuth & Permissions → Bot User OAuth Token(xoxb-...) → SLACK_BOT_TOKEN
-#  6) 승인 채널에서 `/invite @유쌤에듀 HR` 로 봇 초대 후,
-#     채널 ID(채널명 우클릭 → 링크 복사의 마지막 C... 값)를 SLACK_APPROVAL_CHANNEL 에 입력
+#  6) 세 채널(#휴가-신청 / #알림-운영진 / #휴가-기록)에서 `/invite @유쌤에듀 HR` 로 봇 초대 후
+#     채널 ID를 SLACK_APPROVAL_CHANNEL(운영진) · SLACK_RECORD_CHANNEL(기록) 에 입력
 
 display_information:
   name: 유쌤에듀 HR

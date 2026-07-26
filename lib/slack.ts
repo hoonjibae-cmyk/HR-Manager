@@ -281,6 +281,11 @@ export function leaveLauncherBlocks(companyName = "유쌤에듀") {
           text: { type: "plain_text", text: "내 잔여 연차 확인", emoji: true },
           action_id: "check_leave_balance",
         },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "휴가 취소 신청", emoji: true },
+          action_id: "open_cancel_modal",
+        },
       ],
     },
   ];
@@ -389,4 +394,145 @@ export function readLeaveModal(view: any): {
     halftime: (v.halftime?.v?.value ?? "").trim(),
     reason: (v.reason?.v?.value ?? "").trim(),
   };
+}
+
+/* ==================== 휴가 취소 신청 ==================== */
+
+export interface CancelableLeave {
+  id: number;
+  label: string; // "2026-08-14 ~ 08-16 · 연차 3일"
+}
+
+/** 취소할 휴가 선택 + 사유 입력 모달 */
+export function leaveCancelModalView(items: CancelableLeave[], channel?: string) {
+  return {
+    type: "modal",
+    callback_id: "leave_cancel_submit",
+    private_metadata: JSON.stringify({ channel: channel ?? "" }),
+    title: { type: "plain_text", text: "휴가 취소 신청" },
+    submit: { type: "plain_text", text: "취소 신청" },
+    close: { type: "plain_text", text: "닫기" },
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "취소할 휴가를 선택하세요. *운영진 승인 후* 취소가 확정되며, 연차는 다시 복원됩니다.",
+        },
+      },
+      {
+        type: "input",
+        block_id: "target",
+        label: { type: "plain_text", text: "취소할 휴가" },
+        element: {
+          type: "static_select",
+          action_id: "v",
+          placeholder: { type: "plain_text", text: "옵션을 선택하세요." },
+          options: items.slice(0, 100).map((it) => ({
+            text: { type: "plain_text", text: it.label.slice(0, 75) },
+            value: String(it.id),
+          })),
+        },
+      },
+      {
+        type: "input",
+        block_id: "reason",
+        label: { type: "plain_text", text: "취소 사유" },
+        element: {
+          type: "plain_text_input",
+          action_id: "v",
+          multiline: true,
+          placeholder: { type: "plain_text", text: "작성해 주세요." },
+        },
+      },
+    ],
+  };
+}
+
+export function readCancelModal(view: any): { requestId: number; reason: string } {
+  const v = view?.state?.values ?? {};
+  return {
+    requestId: Number(v.target?.v?.selected_option?.value ?? 0),
+    reason: (v.reason?.v?.value ?? "").trim(),
+  };
+}
+
+/** 운영진 채널용 취소 승인 카드 */
+export function cancelApprovalBlocks(args: {
+  requestId: number;
+  name: string;
+  dept: string;
+  range: string;
+  days: number;
+  typeLabel: string;
+  cancelReason: string;
+}) {
+  return [
+    { type: "header", text: { type: "plain_text", text: "🚫 휴가 취소 신청", emoji: true } },
+    {
+      type: "section",
+      fields: [
+        { type: "mrkdwn", text: `*신청자*\n${args.name} (${args.dept})` },
+        { type: "mrkdwn", text: `*취소 대상*\n${args.range} · ${args.typeLabel} ${args.days}일` },
+        { type: "mrkdwn", text: `*취소 사유*\n${args.cancelReason}` },
+      ],
+    },
+    {
+      type: "actions",
+      block_id: `cancel_${args.requestId}`,
+      elements: [
+        {
+          type: "button",
+          style: "primary",
+          text: { type: "plain_text", text: "취소 승인", emoji: true },
+          action_id: "approve_cancel",
+          value: String(args.requestId),
+        },
+        {
+          type: "button",
+          style: "danger",
+          text: { type: "plain_text", text: "취소 반려", emoji: true },
+          action_id: "reject_cancel",
+          value: String(args.requestId),
+        },
+      ],
+    },
+  ];
+}
+
+/** 휴가-기록 채널에 남길 확정 내역 */
+export function recordBlocks(args: {
+  name: string;
+  dept: string;
+  range: string;
+  days: number;
+  typeLabel: string;
+  reason: string;
+  canceled?: boolean;
+  by: string;
+  calendarSynced?: boolean;
+  deducted?: boolean;
+  remaining?: number;
+}) {
+  const head = args.canceled
+    ? `🚫 *휴가 취소 확정* — ${args.name}`
+    : `✅ *휴가 승인* — ${args.name}`;
+  const notes: string[] = [`처리자 <@${args.by}>`];
+  if (args.calendarSynced)
+    notes.push(args.canceled ? "구글 캘린더에서 삭제됨" : "구글 캘린더에 등록됨");
+  if (!args.canceled && args.deducted === false) notes.push("연차 미차감");
+  if (!args.canceled && args.remaining != null) notes.push(`잔여 연차 ${args.remaining}일`);
+  return [
+    { type: "section", text: { type: "mrkdwn", text: head } },
+    {
+      type: "section",
+      fields: [
+        { type: "mrkdwn", text: `*소속*\n${args.dept || "-"}` },
+        { type: "mrkdwn", text: `*기간*\n${args.range} · ${args.days}일` },
+        { type: "mrkdwn", text: `*종류*\n${args.typeLabel}` },
+        { type: "mrkdwn", text: `*사유*\n${args.reason || "-"}` },
+      ],
+    },
+    { type: "context", elements: [{ type: "mrkdwn", text: notes.join(" · ") }] },
+  ];
 }

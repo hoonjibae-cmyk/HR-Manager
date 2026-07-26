@@ -44,6 +44,11 @@ export async function GET() {
       slackToken: !!process.env.SLACK_BOT_TOKEN,
       slackSecret: !!process.env.SLACK_SIGNING_SECRET,
       slackChannel: !!process.env.SLACK_APPROVAL_CHANNEL,
+      slackRecordChannel: !!process.env.SLACK_RECORD_CHANNEL,
+      gcal:
+        !!process.env.GOOGLE_CLIENT_EMAIL &&
+        !!process.env.GOOGLE_PRIVATE_KEY &&
+        !!process.env.GOOGLE_CALENDAR_ID,
       // 서버리스(Vercel)에서는 내부 스케줄러가 아니라 Vercel Cron 이 실행 주체
       serverless: !!process.env.VERCEL,
       scheduler: !!process.env.VERCEL || process.env.ENABLE_SCHEDULER === "true",
