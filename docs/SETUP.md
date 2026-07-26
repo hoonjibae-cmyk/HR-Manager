@@ -1,8 +1,21 @@
 # 연동 설정 가이드 (SMTP · 슬랙 · 스케줄러 · 배포)
 
 이 문서는 유쌤에듀 HR 프로그램의 **이메일 자동발송**과 **슬랙 연차 신청/승인**을
-실제로 동작시키기 위한 설정 방법을 안내합니다. 모든 설정은 `.env` 파일에 값을 넣는 것으로 끝나며,
+실제로 동작시키기 위한 설정 방법을 안내합니다. 모든 설정은 환경변수 값을 넣는 것으로 끝나며,
 코드 수정은 필요하지 않습니다.
+
+> **Vercel 배포를 쓰는 경우** — 아래 예시의 `.env` 대신
+> **Vercel → 프로젝트 → Settings → Environment Variables** 에 같은 이름/값을 넣고
+> **Redeploy** 하세요. (환경변수는 재배포해야 반영됩니다. 값이 빈 항목은 아예 만들지 마세요.)
+> 설정이 끝나면 앱 `설정` 화면의 **외부 연동 상태**가 `연결됨` 으로 바뀝니다.
+
+### 지금 무엇을 설정해야 하나 (요약)
+
+| 항목 | 필수 | 없으면 |
+|---|---|---|
+| **SMTP** (`SMTP_HOST` 등) | ✅ 필수 | 급여명세서 발송이 **전혀 동작하지 않음** (수동·예약 모두) |
+| **슬랙** (`SLACK_BOT_TOKEN` 등) | 선택 | 연차를 슬랙으로 신청·승인할 수 없음. 화면에서 직접 등록·승인은 가능 |
+| **CRON_SECRET** | 권장 | 외부에서 `/api/cron` 을 호출해 발송을 트리거할 수 있음(보안) |
 
 ---
 
@@ -48,32 +61,32 @@ MAIL_FROM="주식회사 유쌤에듀 <hr@yoossam.edu>"
 `설정` 화면 → **급여명세서 자동발송 예약**
 - **자동발송 사용** 체크
 - 주기: `매월` (예: 매월 7일) 또는 `매주` (예: 매주 금요일)
-- 시각: 시/분
+- 발송 시각: 정시 선택 (한국시간)
 - 발송 대상 월: `전월분` 또는 `당월분`
+  → 지급일이 익월 7일이면 **매월 7일 + 전월분** (8월 7일에 7월분 발송)
+
+저장하면 **다음 발송 예정** 시각이 표시됩니다.
+**발송 대상 확인 → 모의 실행 → 지금 발송** 버튼으로 미리 점검할 수 있습니다.
 
 ### 2-2. 스케줄러 구동 방식 (둘 중 택1)
 
-**(A) 상시 구동 서버 (권장: 자체 서버, VPS, Docker 등)**
+**(A) Vercel 배포 (현재 방식 — 별도 작업 없음)**
+- `vercel.json` 에 크론이 이미 설정되어 있어 **매시 정각**에 조건을 확인합니다.
+- 권장 환경변수:
+  ```env
+  CRON_SECRET="충분히-긴-임의문자열"   # 외부에서 임의로 발송 트리거하는 것 차단
+  ```
+- 자세한 내용은 `docs/DEPLOY.md` 4단계 참고.
+
+**(B) 상시 구동 서버 (자체 서버, VPS, Docker 등)**
 ```env
 ENABLE_SCHEDULER="true"
 ```
-- `npm start` 로 서버를 상시 구동하면 내부 스케줄러가 60초마다 조건을 확인해 자동 발송합니다.
-- **서버 시간대를 KST로** 설정하세요: `TZ=Asia/Seoul npm start`
+- `npm start` 로 상시 구동하면 내부 스케줄러가 60초마다 확인해 자동 발송합니다.
+- 판단은 한국시간 기준으로 처리되므로 서버 시간대와 무관하게 동작합니다.
 
-**(B) 서버리스/외부 크론 (Vercel, 방화벽 뒤 배포 등)**
-```env
-ENABLE_SCHEDULER="false"
-CRON_SECRET="충분히-긴-임의문자열"
-```
-- 외부 크론이 아래 URL을 **매분(또는 매시)** 호출하도록 등록합니다.
-  ```
-  GET  https://<배포주소>/api/cron?secret=<CRON_SECRET>
-  또는  Authorization: Bearer <CRON_SECRET>
-  ```
-- 예) **cron-job.org**, **GitHub Actions**, **Vercel Cron**(`vercel.json`)
-- 강제 실행(테스트): `.../api/cron?secret=...&force=1`
-
-> 자동발송 시 해당 월 급여기록이 없으면 자동으로 산정(DRAFT) 후 발송합니다.
+> 자동발송 시 해당 월 급여기록이 없으면 자동으로 산정 후 발송합니다.
+> **이미 발송된 명세서는 자동 제외**되어 중복 발송되지 않습니다.
 
 ---
 
@@ -81,26 +94,25 @@ CRON_SECRET="충분히-긴-임의문자열"
 
 직원이 슬랙에서 `/연차` 로 신청하고, 관리자가 채널에서 버튼으로 승인/반려합니다.
 
-### 3-1. 슬랙 앱 생성
-1. https://api.slack.com/apps → **Create New App** → *From scratch* → 워크스페이스 선택.
-2. **OAuth & Permissions** → *Bot Token Scopes* 에 다음 추가:
-   - `commands` (슬래시 명령)
-   - `chat:write` (메시지 전송)
-   - `chat:write.public` (미가입 공개채널 전송, 선택)
-   - `users:read` (선택)
-3. **Install to Workspace** → 발급된 **Bot User OAuth Token**(`xoxb-...`) 복사.
-4. **Basic Information** → *App Credentials* → **Signing Secret** 복사.
+### 3-1. 슬랙 앱 생성 — 매니페스트로 한 번에 (권장)
+1. 저장소의 **`docs/slack-app-manifest.yml`** 을 열어 `<도메인>` 3곳을 실제 배포 주소로 바꿉니다.
+   (예: `hr-manager-nine.vercel.app`)
+2. https://api.slack.com/apps → **Create New App** → **From an app manifest**
+   → 워크스페이스 선택 → **YAML** 탭에 파일 내용을 붙여넣고 생성.
+   → 슬래시 명령(`/연차`)·버튼 인터랙티브·권한이 한 번에 설정됩니다.
+3. **Install to Workspace** → 권한 허용.
+4. **OAuth & Permissions** → **Bot User OAuth Token**(`xoxb-...`) 복사.
+5. **Basic Information** → *App Credentials* → **Signing Secret** 복사.
 
-### 3-2. 슬래시 명령 등록
-**Slash Commands** → *Create New Command*
-- Command: `/연차` (원하면 `/leave` 도 별도 등록)
-- Request URL: `https://<배포주소>/api/slack/command`
-- Short Description: `연차 신청 및 잔여 조회`
-- Usage Hint: `8/14 개인사유`
+<details>
+<summary>수동으로 만들려면 (From scratch)</summary>
 
-### 3-3. 인터랙티브(버튼) 등록
-**Interactivity & Shortcuts** → *Interactivity* **ON**
-- Request URL: `https://<배포주소>/api/slack/interactivity`
+1. **OAuth & Permissions** → *Bot Token Scopes*: `commands`, `chat:write`, `chat:write.public`, `users:read`
+2. **Slash Commands** → *Create New Command*
+   - Command `/연차`, Request URL `https://<배포주소>/api/slack/command`
+3. **Interactivity & Shortcuts** → *Interactivity* **ON**
+   - Request URL `https://<배포주소>/api/slack/interactivity`
+</details>
 
 ### 3-4. `.env` 설정
 ```env

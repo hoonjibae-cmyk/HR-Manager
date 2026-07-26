@@ -1,0 +1,44 @@
+# 유쌤에듀 HR — 슬랙 앱 매니페스트
+#
+# 사용법
+#  1) https://api.slack.com/apps → [Create New App] → [From an app manifest]
+#  2) 워크스페이스 선택 → YAML 탭에 이 파일 내용을 붙여넣기
+#  3) 아래 <도메인> 3곳을 실제 배포 주소로 바꾼 뒤 생성
+#     예) hr-manager-nine.vercel.app
+#  4) 생성 후 [Install to Workspace] → 권한 허용
+#  5) Basic Information → Signing Secret  → 환경변수 SLACK_SIGNING_SECRET
+#     OAuth & Permissions → Bot User OAuth Token(xoxb-...) → SLACK_BOT_TOKEN
+#  6) 승인 채널에서 `/invite @유쌤에듀 HR` 로 봇 초대 후,
+#     채널 ID(채널명 우클릭 → 링크 복사의 마지막 C... 값)를 SLACK_APPROVAL_CHANNEL 에 입력
+
+display_information:
+  name: 유쌤에듀 HR
+  description: 연차 신청·승인 및 급여명세서 발송 알림
+  background_color: "#1f45f5"
+
+features:
+  bot_user:
+    display_name: 유쌤에듀 HR
+    always_online: true
+  slash_commands:
+    - command: /연차
+      url: https://<도메인>/api/slack/command
+      description: 연차 신청 및 잔여 조회
+      usage_hint: "10/15 연차 가족행사  |  조회  |  도움말"
+      should_escape: false
+
+oauth_config:
+  scopes:
+    bot:
+      - commands # 슬래시 명령 수신
+      - chat:write # 승인 요청·결과 메시지 게시
+      - chat:write.public # 봇 미초대 채널에도 게시
+      - users:read # 신청자 식별(선택)
+
+settings:
+  interactivity:
+    is_enabled: true
+    request_url: https://<도메인>/api/slack/interactivity
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

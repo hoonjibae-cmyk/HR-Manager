@@ -36,8 +36,18 @@ export async function GET() {
     })),
     integrations: {
       smtp: !!process.env.SMTP_HOST,
-      slack: !!process.env.SLACK_BOT_TOKEN,
-      scheduler: process.env.ENABLE_SCHEDULER === "true",
+      smtpHost: process.env.SMTP_HOST || null,
+      smtpUser: process.env.SMTP_USER || null,
+      mailFrom: process.env.MAIL_FROM || null,
+      // 슬랙은 봇 토큰 + 서명 시크릿이 모두 있어야 동작
+      slack: !!process.env.SLACK_BOT_TOKEN && !!process.env.SLACK_SIGNING_SECRET,
+      slackToken: !!process.env.SLACK_BOT_TOKEN,
+      slackSecret: !!process.env.SLACK_SIGNING_SECRET,
+      slackChannel: !!process.env.SLACK_APPROVAL_CHANNEL,
+      // 서버리스(Vercel)에서는 내부 스케줄러가 아니라 Vercel Cron 이 실행 주체
+      serverless: !!process.env.VERCEL,
+      scheduler: !!process.env.VERCEL || process.env.ENABLE_SCHEDULER === "true",
+      cronSecret: !!process.env.CRON_SECRET,
     },
   });
 }

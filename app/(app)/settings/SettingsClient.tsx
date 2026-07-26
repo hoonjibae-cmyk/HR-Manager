@@ -306,33 +306,76 @@ function EmailLogCard({ logs }: { logs: any[] }) {
   );
 }
 
-function IntegrationCard({ integrations, onTestEmail }: any) {
+function IntegrationCard({ integrations: g, onTestEmail }: any) {
+  const envHint = g.serverless
+    ? "Vercel → Settings → Environment Variables 에 추가 후 재배포"
+    : ".env 파일에 추가 후 서버 재시작";
+
+  const slackHint = g.slack
+    ? g.slackChannel
+      ? "연차 신청·승인, 발송 알림 사용 가능"
+      : "SLACK_APPROVAL_CHANNEL 미설정 — 승인 채널 지정 필요"
+    : !g.slackToken && !g.slackSecret
+    ? "SLACK_BOT_TOKEN · SLACK_SIGNING_SECRET 필요 (선택 기능)"
+    : `${!g.slackToken ? "SLACK_BOT_TOKEN" : "SLACK_SIGNING_SECRET"} 누락`;
+
   return (
     <div className="card p-5">
-      <h2 className="font-bold text-slate-800 mb-4">외부 연동 상태</h2>
+      <h2 className="font-bold text-slate-800 mb-1">외부 연동 상태</h2>
+      <p className="text-xs text-slate-400 mb-4">{envHint}</p>
       <div className="grid sm:grid-cols-3 gap-4">
-        <Status label="SMTP 이메일" ok={integrations.smtp} hint=".env의 SMTP_HOST 설정" />
-        <Status label="슬랙 연동" ok={integrations.slack} hint=".env의 SLACK_BOT_TOKEN 설정" />
-        <Status label="내부 스케줄러" ok={integrations.scheduler} hint="ENABLE_SCHEDULER=true" />
+        <Status
+          label="SMTP 이메일"
+          ok={g.smtp}
+          required
+          hint={
+            g.smtp
+              ? `${g.smtpHost}${g.smtpUser ? ` · ${g.smtpUser}` : ""}`
+              : "SMTP_HOST · SMTP_USER · SMTP_PASS 필요 — 설정 전에는 명세서 발송 불가"
+          }
+        />
+        <Status label="슬랙 연동" ok={g.slack} hint={slackHint} />
+        <Status
+          label="예약 발송 실행"
+          ok={g.scheduler}
+          hint={
+            g.serverless
+              ? `Vercel Cron · 매시 정각${g.cronSecret ? " · CRON_SECRET 설정됨" : ""}`
+              : g.scheduler
+              ? "내부 스케줄러 구동 중 (60초 주기)"
+              : "ENABLE_SCHEDULER=true 필요"
+          }
+        />
       </div>
       <div className="mt-4 flex gap-2">
         <button className="btn-outline" onClick={onTestEmail}>테스트 메일 발송</button>
       </div>
-      <p className="text-xs text-slate-400 mt-3">연동 설정 방법은 프로젝트의 <code>docs/SETUP.md</code> 를 참고하세요.</p>
+      {!g.smtp && (
+        <p className="text-xs text-amber-700 mt-3">
+          ⚠️ SMTP가 설정되지 않아 <b>급여명세서 발송(수동·예약 모두)이 동작하지 않습니다.</b> 설정 방법은{" "}
+          <code>docs/SETUP.md</code> 를 참고하세요.
+        </p>
+      )}
+      <p className="text-xs text-slate-400 mt-3">
+        연동 설정 방법은 프로젝트의 <code>docs/SETUP.md</code> 를 참고하세요.
+      </p>
     </div>
   );
 }
 
-function Status({ label, ok, hint }: { label: string; ok: boolean; hint: string }) {
+function Status({ label, ok, hint, required }: { label: string; ok: boolean; hint: string; required?: boolean }) {
   return (
-    <div className="border border-slate-200 rounded-xl p-4">
+    <div className={`border rounded-xl p-4 ${!ok && required ? "border-amber-300 bg-amber-50/40" : "border-slate-200"}`}>
       <div className="flex items-center justify-between">
-        <span className="font-medium text-sm">{label}</span>
-        <span className={`pill ${ok ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>
+        <span className="font-medium text-sm">
+          {label}
+          {required && <span className="text-[10px] text-amber-600 ml-1">필수</span>}
+        </span>
+        <span className={`pill ${ok ? "bg-emerald-50 text-emerald-700" : required ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-400"}`}>
           {ok ? "연결됨" : "미설정"}
         </span>
       </div>
-      <div className="text-xs text-slate-400 mt-2">{hint}</div>
+      <div className="text-xs text-slate-400 mt-2 break-all">{hint}</div>
     </div>
   );
 }
