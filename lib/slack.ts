@@ -117,12 +117,51 @@ export async function autoLinkEmployeeBySlack(slackUserId: string): Promise<{
   return { emp: { ...emp, slackUserId }, email: profile.email, realName: profile.realName };
 }
 
-/** 워크스페이스 사용자 목록 (봇·삭제된 계정 제외) */
-export async function slackUserList(): Promise<
-  Array<{ id: string; realName: string; displayName: string; email?: string }>
-> {
-  if (!process.env.SLACK_BOT_TOKEN) return [];
-  const out: Array<{ id: string; realName: string; displayName: string; email?: string }> = [];
+export interface SlackUserRow {
+  id: string;
+  realName: string;
+  displayName: string;
+  email?: string;
+}
+
+/**
+ * 토큰 점검 — 워크스페이스·봇 이름과 **실제 부여된 권한 목록**을 확인한다.
+ * 권한은 응답 헤더 x-oauth-scopes 로 내려온다.
+ */
+export async function slackAuthTest(): Promise<{
+  ok: boolean;
+  team?: string;
+  botName?: string;
+  scopes: string[];
+  error?: string;
+}> {
+  if (!process.env.SLACK_BOT_TOKEN) return { ok: false, scopes: [], error: "no_token" };
+  try {
+    const res = await fetch(`${API}/auth.test`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
+    });
+    const scopes = (res.headers.get("x-oauth-scopes") || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const j: any = await res.json();
+    return {
+      ok: !!j?.ok,
+      team: j?.team,
+      botName: j?.user,
+      scopes,
+      error: j?.ok ? undefined : j?.error || "unknown",
+    };
+  } catch (e: any) {
+    return { ok: false, scopes: [], error: e.message };
+  }
+}
+
+/** 워크스페이스 사용자 목록 (봇·삭제된 계정 제외). 실패 시 error 로 사유 반환 */
+export async function slackUserList(): Promise<{ users: SlackUserRow[]; error?: string }> {
+  if (!process.env.SLACK_BOT_TOKEN) return { users: [], error: "no_token" };
+  const out: SlackUserRow[] = [];
   let cursor = "";
   for (let page = 0; page < 5; page++) {
     const url = `${API}/users.list?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
@@ -130,7 +169,7 @@ export async function slackUserList(): Promise<
       headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
     });
     const j: any = await res.json();
-    if (!j?.ok) break;
+    if (!j?.ok) return { users: out, error: j?.error || "unknown" };
     for (const m of j.members ?? []) {
       if (m.is_bot || m.deleted || m.id === "USLACKBOT") continue;
       out.push({
@@ -143,7 +182,27 @@ export async function slackUserList(): Promise<
     cursor = j.response_metadata?.next_cursor || "";
     if (!cursor) break;
   }
-  return out;
+  return { users: out };
+}
+
+/** 슬랙 API 오류코드 → 조치 안내 */
+export function slackErrorHint(error?: string): string {
+  switch (error) {
+    case "missing_scope":
+      return "앱에 필요한 권한이 없습니다. api.slack.com/apps → OAuth & Permissions → Bot Token Scopes 에 users:read, users:read.email 을 추가한 뒤 Reinstall to Workspace 하세요.";
+    case "invalid_auth":
+    case "not_authed":
+      return "봇 토큰이 올바르지 않습니다. SLACK_BOT_TOKEN 이 xoxb- 로 시작하는 Bot User OAuth Token 인지 확인하세요.";
+    case "token_revoked":
+    case "account_inactive":
+      return "토큰이 만료·해지되었습니다. 앱을 워크스페이스에 다시 설치(Reinstall)하고 새 토큰을 넣으세요.";
+    case "no_token":
+      return "SLACK_BOT_TOKEN 환경변수가 비어 있습니다. Vercel 환경변수 설정 후 Redeploy 하세요.";
+    case "ratelimited":
+      return "슬랙 API 호출 제한에 걸렸습니다. 잠시 후 다시 시도하세요.";
+    default:
+      return "슬랙 앱 설정(권한·설치 상태)을 확인하세요.";
+  }
 }
 
 export function approverAllowed(userId: string): boolean {

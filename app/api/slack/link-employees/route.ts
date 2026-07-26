@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { slackConfigured, slackUserList } from "@/lib/slack";
+import { slackConfigured, slackUserList, slackAuthTest, slackErrorHint } from "@/lib/slack";
 import { matchEmployee } from "@/lib/timesheet";
 
 export const dynamic = "force-dynamic";
@@ -18,12 +18,31 @@ export async function POST() {
   if (!slackConfigured())
     return NextResponse.json({ error: "슬랙이 설정되지 않았습니다." }, { status: 400 });
 
-  const users = await slackUserList();
-  if (!users.length)
+  const { users, error } = await slackUserList();
+  if (error || !users.length) {
+    // 토큰 자체를 점검해 실제 부여된 권한까지 함께 알려준다
+    const auth = await slackAuthTest();
+    const scopeInfo = auth.scopes.length
+      ? `\n\n현재 부여된 권한: ${auth.scopes.join(", ")}`
+      : auth.ok
+      ? ""
+      : `\n\n토큰 점검 실패: ${auth.error ?? "unknown"}`;
+    const missing = ["users:read", "users:read.email"].filter((s) => !auth.scopes.includes(s));
     return NextResponse.json(
-      { error: "슬랙 사용자 목록을 불러오지 못했습니다. users:read 권한을 확인하세요." },
+      {
+        error:
+          `슬랙 사용자 목록을 불러오지 못했습니다. (${error ?? "빈 목록"})\n` +
+          slackErrorHint(error) +
+          (missing.length ? `\n\n누락된 권한: ${missing.join(", ")}` : "") +
+          scopeInfo +
+          (auth.ok && auth.team ? `\n연결된 워크스페이스: ${auth.team}` : ""),
+        slackError: error,
+        scopes: auth.scopes,
+        missing,
+      },
       { status: 400 }
     );
+  }
 
   const employees = await prisma.employee.findMany();
   const linkedIds = new Set(employees.map((e) => e.slackUserId).filter(Boolean) as string[]);
