@@ -3,8 +3,8 @@
 # 사용법
 #  1) https://api.slack.com/apps → [Create New App] → [From an app manifest]
 #  2) 워크스페이스 선택 → YAML 탭에 이 파일 내용을 붙여넣기
-#  3) 아래 <도메인> 2곳을 실제 배포 주소로 바꾼 뒤 생성
-#     예) hr-manager-nine.vercel.app
+#  3) 아래 YOUR-DOMAIN.vercel.app 2곳을 실제 배포 주소로 바꾼 뒤 생성
+#     예) hr-manager-nine.vercel.app  ← 꺾쇠괄호 < > 를 남기면 오류가 납니다
 #  4) 생성 후 [Install to Workspace] → 권한 허용
 #  5) Basic Information → Signing Secret  → 환경변수 SLACK_SIGNING_SECRET
 #     OAuth & Permissions → Bot User OAuth Token(xoxb-...) → SLACK_BOT_TOKEN
@@ -18,11 +18,12 @@ display_information:
 
 features:
   bot_user:
-    display_name: 유쌤에듀 HR
+    # 봇 표시명은 사용자명으로 변환되므로 한글 불가 (앱 이름은 한글 가능)
+    display_name: Yoossam HR
     always_online: true
   slash_commands:
     - command: /연차
-      url: https://<도메인>/api/slack/command
+      url: https://YOUR-DOMAIN.vercel.app/api/slack/command
       description: 연차 신청 및 잔여 조회
       usage_hint: "10/15 연차 가족행사  |  조회  |  도움말"
       should_escape: false
@@ -40,7 +41,7 @@ oauth_config:
 settings:
   interactivity:
     is_enabled: true
-    request_url: https://<도메인>/api/slack/interactivity
+    request_url: https://YOUR-DOMAIN.vercel.app/api/slack/interactivity
   org_deploy_enabled: false
   socket_mode_enabled: false
   token_rotation_enabled: false

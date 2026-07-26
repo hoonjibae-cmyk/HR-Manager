@@ -117,8 +117,10 @@ ENABLE_SCHEDULER="true"
 > **병가·경조사는 차감하지 않고 기록만** 남습니다.
 
 ### 3-1. 슬랙 앱 생성 — 매니페스트로 한 번에 (권장)
-1. 저장소의 **`docs/slack-app-manifest.yml`** 을 열어 `<도메인>` 3곳을 실제 배포 주소로 바꿉니다.
-   (예: `hr-manager-nine.vercel.app`)
+1. 저장소의 **`docs/slack-app-manifest.yml`** 을 열어 `YOUR-DOMAIN.vercel.app` 2곳을
+   실제 배포 주소로 바꿉니다. (예: `hr-manager-nine.vercel.app`)
+   - 주소에 꺾쇠괄호 `< >` 를 남기면 오류가 납니다.
+   - 봇 표시명(`display_name`)은 **영문만** 가능합니다. (앱 이름은 한글 가능)
 2. https://api.slack.com/apps → **Create New App** → **From an app manifest**
    → 워크스페이스 선택 → **YAML** 탭에 파일 내용을 붙여넣고 생성.
    → 슬래시 명령(`/연차`)·버튼 인터랙티브·권한이 한 번에 설정됩니다.
