@@ -2,20 +2,38 @@ import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { invalidateTaxCache } from "@/lib/repo";
+import { computeNextRun, formatKst } from "@/lib/scheduler";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const [company, rates, schedule] = await Promise.all([
+  const [company, rates, schedule, emailLogs] = await Promise.all([
     prisma.company.findFirst({ where: { id: 1 } }),
     prisma.insuranceRate.findFirst({ where: { isActive: true }, orderBy: { year: "desc" } }),
     prisma.emailSchedule.findFirst(),
+    prisma.emailLog.findMany({ orderBy: { createdAt: "desc" }, take: 15 }),
   ]);
+  const next = schedule ? computeNextRun(schedule) : null;
   return NextResponse.json({
     company,
     rates,
     schedule,
+    scheduleStatus: {
+      nextRunLabel: next ? formatKst(next) : null,
+      lastRunLabel: schedule?.lastRunAt ? formatKst(schedule.lastRunAt) : null,
+      // Vercel Cron 실행 시각 (vercel.json: 매일 00:00 UTC = 09:00 KST)
+      cronLabel: "매일 09:00 (KST)",
+      serverless: !!process.env.VERCEL,
+    },
+    emailLogs: emailLogs.map((l) => ({
+      id: l.id,
+      to: l.to,
+      subject: l.subject,
+      status: l.status,
+      error: l.error,
+      at: formatKst(l.sentAt ?? l.createdAt),
+    })),
     integrations: {
       smtp: !!process.env.SMTP_HOST,
       slack: !!process.env.SLACK_BOT_TOKEN,
@@ -74,10 +92,16 @@ export async function PATCH(req: Request) {
       minute: Number(data.minute) || 0,
       targetMonthOffset: Number(data.targetMonthOffset) || 0,
     };
-    const s = existing
+    const saved = existing
       ? await prisma.emailSchedule.update({ where: { id: existing.id }, data: payload })
       : await prisma.emailSchedule.create({ data: payload });
-    return NextResponse.json(s);
+    // 다음 발송 예정 시각 저장 (KST 기준)
+    const nextRunAt = computeNextRun(saved);
+    const s = await prisma.emailSchedule.update({
+      where: { id: saved.id },
+      data: { nextRunAt },
+    });
+    return NextResponse.json({ ...s, nextRunLabel: nextRunAt ? formatKst(nextRunAt) : null });
   }
 
   return NextResponse.json({ error: "unknown section" }, { status: 400 });

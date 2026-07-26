@@ -43,7 +43,16 @@ export default function SettingsClient() {
 
       <CompanyCard company={data.company} onSave={(d: any) => save("company", d)} />
       <RatesCard rates={data.rates} onSave={(d: any) => save("rates", d)} />
-      <ScheduleCard schedule={data.schedule} onSave={(d: any) => save("schedule", d)} />
+      <ScheduleCard
+        schedule={data.schedule}
+        status={data.scheduleStatus}
+        onSave={async (d: any) => {
+          await save("schedule", d);
+          const fresh = await fetch("/api/settings").then((r) => r.json());
+          setData(fresh);
+        }}
+      />
+      <EmailLogCard logs={data.emailLogs ?? []} />
       <IntegrationCard integrations={data.integrations} onTestEmail={testEmail} />
     </div>
   );
@@ -104,18 +113,75 @@ function RatesCard({ rates, onSave }: any) {
   );
 }
 
-function ScheduleCard({ schedule, onSave }: any) {
+function ScheduleCard({ schedule, status, onSave }: any) {
   const [f, setF] = useState({
     enabled: schedule?.enabled ?? false, frequency: schedule?.frequency ?? "MONTHLY",
     dayOfMonth: schedule?.dayOfMonth ?? 7, dayOfWeek: schedule?.dayOfWeek ?? 1,
     hour: schedule?.hour ?? 9, minute: schedule?.minute ?? 0, targetMonthOffset: schedule?.targetMonthOffset ?? -1,
   });
+  const [preview, setPreview] = useState<any>(null);
+  const [busy, setBusy] = useState("");
   const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v }));
   const dow = ["일", "월", "화", "수", "목", "금", "토"];
+  const serverless = status?.serverless;
+
+  const loadPreview = async () => {
+    const r = await fetch("/api/email/preview").then((x) => x.json()).catch(() => null);
+    setPreview(r);
+    return r;
+  };
+  useEffect(() => {
+    loadPreview();
+  }, []);
+
+  async function run(mode: "dry" | "force") {
+    const pv = preview ?? (await loadPreview());
+    if (!pv?.year) return alert("발송 대상을 확인할 수 없습니다.");
+    if (mode === "force") {
+      if (
+        !confirm(
+          `${pv.year}년 ${pv.month}월분 명세서를 ${pv.targetCount}명에게 지금 발송합니다.\n` +
+            `발송된 기록은 잠기며(발송완료) 이후 수정·재계산할 수 없습니다. 진행할까요?`
+        )
+      )
+        return;
+    }
+    setBusy(mode);
+    const res = await fetch("/api/email/schedule-run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // 미리보기와 동일한 대상 월을 명시적으로 전달
+      body: JSON.stringify({ force: true, dryRun: mode === "dry", year: pv.year, month: pv.month }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setBusy("");
+    if (!res.ok) return alert("실행 실패: " + (j.error || ""));
+    if (mode === "dry")
+      alert(
+        `모의 실행 결과\n대상: ${j.year}년 ${j.month}월분\n급여기록 ${j.total ?? 0}건 (미발송 ${j.pending ?? 0}건)\n\n실제 발송은 하지 않았습니다.`
+      );
+    else
+      alert(
+        `발송 완료\n${j.year}년 ${j.month}월분 · 성공 ${j.sent ?? 0}건 / 실패 ${j.failed ?? 0}건` +
+          (j.skippedSent ? `\n(이미 발송되어 제외 ${j.skippedSent}건)` : "")
+      );
+    await loadPreview();
+  }
+
   return (
     <div className="card p-5">
       <h2 className="font-bold text-slate-800 mb-1">급여명세서 자동발송 예약</h2>
-      <p className="text-xs text-slate-400 mb-4">지정한 요일·시간에 급여명세서를 직원 이메일로 자동 발송합니다. (SMTP 설정 및 스케줄러 필요)</p>
+      <p className="text-xs text-slate-400 mb-4">
+        지정한 날짜·요일에 급여명세서 PDF를 직원 이메일로 자동 발송합니다. 이미 발송된 기록은 제외되어 중복 발송되지 않습니다.
+      </p>
+
+      {/* 예약 상태 */}
+      <div className="grid sm:grid-cols-3 gap-3 mb-4">
+        <StatBox k="상태" v={f.enabled ? "사용 중" : "중지"} ok={f.enabled} />
+        <StatBox k="다음 발송 예정" v={status?.nextRunLabel ?? (f.enabled ? "저장 후 계산" : "-")} />
+        <StatBox k="마지막 발송" v={status?.lastRunLabel ?? "기록 없음"} />
+      </div>
+
       <div className="flex items-center gap-2 mb-4">
         <input type="checkbox" checked={f.enabled} onChange={(e) => set("enabled", e.target.checked)} className="w-4 h-4" />
         <span className="text-sm font-medium">자동발송 사용</span>
@@ -128,7 +194,7 @@ function ScheduleCard({ schedule, onSave }: any) {
           </select>
         </F>
         {f.frequency === "MONTHLY" ? (
-          <F l="매월 n일"><input type="number" className="input" value={f.dayOfMonth} onChange={(e) => set("dayOfMonth", e.target.value)} /></F>
+          <F l="매월 n일 (말일 초과 시 말일)"><input type="number" min={1} max={31} className="input" value={f.dayOfMonth} onChange={(e) => set("dayOfMonth", e.target.value)} /></F>
         ) : (
           <F l="요일">
             <select className="input" value={f.dayOfWeek} onChange={(e) => set("dayOfWeek", e.target.value)}>
@@ -136,7 +202,7 @@ function ScheduleCard({ schedule, onSave }: any) {
             </select>
           </F>
         )}
-        <F l="시각(시)"><input type="number" min={0} max={23} className="input" value={f.hour} onChange={(e) => set("hour", e.target.value)} /></F>
+        <F l="시각(시, KST)"><input type="number" min={0} max={23} className="input" value={f.hour} onChange={(e) => set("hour", e.target.value)} /></F>
         <F l="분"><input type="number" min={0} max={59} className="input" value={f.minute} onChange={(e) => set("minute", e.target.value)} /></F>
         <F l="발송 대상 월">
           <select className="input" value={f.targetMonthOffset} onChange={(e) => set("targetMonthOffset", e.target.value)}>
@@ -145,7 +211,94 @@ function ScheduleCard({ schedule, onSave }: any) {
           </select>
         </F>
       </div>
-      <div className="flex justify-end mt-4"><button className="btn-primary" onClick={() => onSave(f)}>저장</button></div>
+
+      <div className="mt-3 text-[11px] text-slate-500 bg-slate-50 rounded-lg p-3 space-y-1">
+        <div>
+          · 지급일이 <b>익월 7일</b>이라면 <b>매월 7일 · 전월분</b>으로 설정하세요. (7월 급여 → 8월 7일 발송)
+        </div>
+        {serverless !== false && (
+          <div>
+            · 현재 배포(Vercel)에서는 <b>{status?.cronLabel ?? "매일 09:00 (KST)"}</b>에 자동 점검이 실행되며, 그날이 발송일이면 그 시각에 발송됩니다.
+            시·분을 정확히 맞추려면 외부 크론(cron-job.org 등)에서 <code>/api/cron?secret=…&amp;strict=1</code> 을 10분 간격으로 호출하세요.
+          </div>
+        )}
+        <div>· 급여 기록이 아직 없으면 발송 직전에 자동으로 급여를 산정합니다. 이메일 주소가 없는 직원은 제외되고 실패로 기록됩니다.</div>
+      </div>
+
+      {/* 발송 대상 미리보기 */}
+      {preview && (
+        <div className="mt-3 border border-brand-100 bg-brand-50/40 rounded-lg p-3 text-xs">
+          <div className="font-semibold text-brand-800 mb-1">
+            발송 대상 미리보기 — {preview.year}년 {preview.month}월분
+          </div>
+          <div className="text-slate-600">
+            발송 대상 <b>{preview.targetCount}명</b> · 이미 발송 {preview.alreadySentCount}건 · 급여기록 {preview.total}건
+            {preview.totalNet > 0 && <> · 실지급 합계 {Number(preview.totalNet).toLocaleString()}원</>}
+          </div>
+          {preview.noEmailNames?.length > 0 && (
+            <div className="text-amber-700 mt-1">⚠️ 이메일 미등록: {preview.noEmailNames.join(", ")}</div>
+          )}
+          {!preview.smtpReady && <div className="text-red-600 mt-1">⚠️ SMTP 미설정 — 발송할 수 없습니다.</div>}
+        </div>
+      )}
+
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="btn-ghost" disabled={!!busy} onClick={() => loadPreview()}>
+          대상 새로고침
+        </button>
+        <button className="btn-outline" disabled={!!busy} onClick={() => run("dry")}>
+          {busy === "dry" ? "실행 중…" : "모의 실행"}
+        </button>
+        <button className="btn-outline" disabled={!!busy} onClick={() => run("force")}>
+          {busy === "force" ? "발송 중…" : "지금 발송"}
+        </button>
+        <button className="btn-primary" onClick={() => onSave(f)}>저장</button>
+      </div>
+    </div>
+  );
+}
+
+function StatBox({ k, v, ok }: { k: string; v: string; ok?: boolean }) {
+  return (
+    <div className="border border-slate-200 rounded-xl px-3 py-2">
+      <div className="text-[11px] text-slate-400">{k}</div>
+      <div className={`text-sm font-semibold tnum ${ok ? "text-emerald-600" : "text-slate-700"}`}>{v}</div>
+    </div>
+  );
+}
+
+function EmailLogCard({ logs }: { logs: any[] }) {
+  if (!logs.length) return null;
+  return (
+    <div className="card p-5">
+      <h2 className="font-bold text-slate-800 mb-3">최근 발송 이력</h2>
+      <div className="max-h-64 overflow-y-auto">
+        <table className="w-full text-xs">
+          <thead className="text-slate-400">
+            <tr>
+              <th className="text-left py-1">일시</th>
+              <th className="text-left">받는 사람</th>
+              <th className="text-left">제목</th>
+              <th className="text-left">상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logs.map((l) => (
+              <tr key={l.id} className="border-t border-slate-100">
+                <td className="py-1 tnum text-slate-500">{l.at}</td>
+                <td className="truncate max-w-[160px]">{l.to}</td>
+                <td className="truncate max-w-[260px] text-slate-600">{l.subject}</td>
+                <td>
+                  <span className={`pill ${l.status === "SENT" ? "bg-emerald-50 text-emerald-700" : l.status === "FAILED" ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-500"}`}>
+                    {l.status === "SENT" ? "발송" : l.status === "FAILED" ? "실패" : "대기"}
+                  </span>
+                  {l.error && <span className="text-red-400 ml-1">{l.error}</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
