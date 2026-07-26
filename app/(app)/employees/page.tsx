@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { PageHeader, Pill, Empty } from "@/components/ui";
+import SlackLinkButton from "@/components/SlackLinkButton";
 import { INCOME_TYPE_LABEL, PAY_SCHEME_LABEL } from "@/lib/constants";
 import { won, ymd } from "@/lib/format";
 
@@ -30,9 +31,12 @@ export default async function EmployeesPage({
         title="직원 관리"
         desc={`전체 ${emps.length}명`}
         action={
-          <Link href="/employees/new" className="btn-primary">
-            + 신규 직원 등록
-          </Link>
+          <div className="flex gap-2">
+            <SlackLinkButton />
+            <Link href="/employees/new" className="btn-primary">
+              + 신규 직원 등록
+            </Link>
+          </div>
         }
       />
 
@@ -74,6 +78,7 @@ export default async function EmployeesPage({
                 <th className="th">급여형태</th>
                 <th className="th text-right">기준액</th>
                 <th className="th">입사일</th>
+                <th className="th">슬랙</th>
                 <th className="th">상태</th>
               </tr>
             </thead>
@@ -107,6 +112,15 @@ export default async function EmployeesPage({
                       : `${won(e.baseWage)}`}
                   </td>
                   <td className="td tnum text-slate-500">{ymd(e.hireDate)}</td>
+                  <td className="td">
+                    {e.slackUserId ? (
+                      <span className="pill bg-emerald-50 text-emerald-700" title={e.slackUserId}>
+                        연동됨
+                      </span>
+                    ) : (
+                      <span className="pill bg-slate-100 text-slate-400">미연동</span>
+                    )}
+                  </td>
                   <td className="td">
                     {e.active ? (
                       <Pill kind="ACTIVE">재직</Pill>

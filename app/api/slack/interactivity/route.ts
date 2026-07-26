@@ -36,19 +36,26 @@ import { ymd } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-/** 슬랙 사용자 → 직원 카드 (미등록이면 이메일로 자동 연결) */
+/** 슬랙 사용자 → 직원 카드 (미등록이면 이메일·이름으로 자동 연결) */
 async function resolveEmployee(userId: string) {
   const found = await findEmployeeBySlack(userId);
-  if (found) return { emp: found, email: undefined as string | undefined };
+  if (found) return { emp: found, info: {} as any };
   const linked = await autoLinkEmployeeBySlack(userId);
-  return { emp: linked.emp, email: linked.email };
+  return { emp: linked.emp, info: linked };
 }
 
-function notLinkedText(email?: string) {
-  return (
-    `등록된 직원 정보를 찾을 수 없습니다.${email ? ` (슬랙 이메일: ${email})` : ""}\n` +
-    `관리자에게 직원 카드의 *이메일* 을 슬랙 계정과 동일하게 맞추도록 요청해 주세요.`
-  );
+/** 연결 실패 사유를 구체적으로 안내 (관리자가 바로 조치할 수 있도록) */
+function notLinkedText(info: { email?: string; realName?: string; profileFailed?: boolean } = {}) {
+  const found: string[] = [];
+  if (info.realName) found.push(`슬랙 이름: ${info.realName}`);
+  if (info.email) found.push(`슬랙 이메일: ${info.email}`);
+  const detail = found.length ? `\n(${found.join(" · ")})` : "";
+  const hint = info.profileFailed
+    ? "\n관리자: 슬랙 앱 권한(users:read, users:read.email)을 확인해 주세요."
+    : !info.email
+    ? "\n관리자: 직원 관리 화면의 *슬랙 계정 일괄 연결* 을 실행하거나, 직원 카드에 슬랙 User ID 를 입력해 주세요."
+    : "\n관리자: 직원 카드의 *이메일* 을 위 슬랙 이메일과 동일하게 맞춰 주세요.";
+  return `등록된 직원 정보를 찾을 수 없습니다.${detail}${hint}`;
 }
 
 export async function POST(req: Request) {
@@ -65,11 +72,11 @@ export async function POST(req: Request) {
   /* ---------- 휴가신청서 모달 제출 ---------- */
   if (payload.type === "view_submission" && payload.view?.callback_id === "leave_request_submit") {
     const userId = payload.user?.id as string;
-    const { emp, email } = await resolveEmployee(userId);
+    const { emp, info } = await resolveEmployee(userId);
     if (!emp) {
       return Response.json({
         response_action: "errors",
-        errors: { kind: notLinkedText(email).replace(/\n/g, " ") },
+        errors: { kind: notLinkedText(info).replace(/\n/g, " ").slice(0, 150) },
       });
     }
     const f = readLeaveModal(payload.view);
@@ -180,12 +187,12 @@ export async function POST(req: Request) {
   if (action.action_id === "open_leave_modal") {
     const userId = payload.user?.id as string;
     const channelId = payload.container?.channel_id || payload.channel?.id;
-    const { emp, email } = await resolveEmployee(userId);
+    const { emp, info } = await resolveEmployee(userId);
     if (!emp) {
       await slackCall("chat.postEphemeral", {
         channel: channelId,
         user: userId,
-        text: notLinkedText(email),
+        text: notLinkedText(info),
       });
       return new Response("", { status: 200 });
     }
@@ -215,9 +222,9 @@ export async function POST(req: Request) {
   if (action.action_id === "check_leave_balance") {
     const userId = payload.user?.id as string;
     const channelId = payload.container?.channel_id || payload.channel?.id;
-    const { emp, email } = await resolveEmployee(userId);
+    const { emp, info } = await resolveEmployee(userId);
     if (!emp) {
-      await slackCall("chat.postEphemeral", { channel: channelId, user: userId, text: notLinkedText(email) });
+      await slackCall("chat.postEphemeral", { channel: channelId, user: userId, text: notLinkedText(info) });
       return new Response("", { status: 200 });
     }
     const { summary, comp } = await leaveBalanceOf(emp);
@@ -241,9 +248,9 @@ export async function POST(req: Request) {
   /* ---------- 채널의 '휴가 취소 신청' 버튼 ---------- */
   if (action.action_id === "open_cancel_modal") {
     const channelId = payload.container?.channel_id || payload.channel?.id;
-    const { emp, email } = await resolveEmployee(userId);
+    const { emp, info } = await resolveEmployee(userId);
     if (!emp) {
-      await slackCall("chat.postEphemeral", { channel: channelId, user: userId, text: notLinkedText(email) });
+      await slackCall("chat.postEphemeral", { channel: channelId, user: userId, text: notLinkedText(info) });
       return new Response("", { status: 200 });
     }
     const items = await cancelableLeaves(emp.id);

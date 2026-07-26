@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { prisma } from "./db";
 import { ymd } from "./format";
+import { matchEmployee } from "./timesheet";
 
 const API = "https://slack.com/api";
 
@@ -85,25 +86,27 @@ export async function autoLinkEmployeeBySlack(slackUserId: string): Promise<{
   emp: Awaited<ReturnType<typeof findEmployeeBySlack>>;
   email?: string;
   realName?: string;
+  /** 진단용: 프로필 조회 자체가 실패(권한 부족 등) */
+  profileFailed?: boolean;
 }> {
   const profile = await slackUserProfile(slackUserId);
-  if (!profile) return { emp: null };
+  if (!profile) return { emp: null, profileFailed: true };
 
   let emp = null;
   if (profile.email) {
-    // 이메일은 대소문자 무시하고 매칭
+    // 이메일은 대소문자 무시하고 매칭 (가장 확실한 식별자)
     emp = await prisma.employee.findFirst({
-      where: { email: { equals: profile.email, mode: "insensitive" }, slackUserId: null },
+      where: { email: { equals: profile.email, mode: "insensitive" } },
     });
   }
-  // 이메일이 없거나 매칭 실패 시 실명으로 보조 매칭 (동명이인이면 연결하지 않음)
+  // 이메일이 없거나(권한 미부여) 매칭 실패 시 이름으로 보조 매칭.
+  // 슬랙 표시명에 '_부원장', '조교' 등이 붙어도 인식하도록 시간기록표와 같은 규칙 사용.
   if (!emp && profile.realName) {
-    const name = profile.realName.replace(/\s+/g, "");
     const candidates = await prisma.employee.findMany({
       where: { slackUserId: null, active: true },
     });
-    const hits = candidates.filter((c) => c.name.replace(/\s+/g, "") === name);
-    if (hits.length === 1) emp = hits[0];
+    const matched = matchEmployee(profile.realName, candidates);
+    if (matched.emp) emp = matched.emp;
   }
   if (!emp) return { emp: null, email: profile.email, realName: profile.realName };
 
@@ -112,6 +115,35 @@ export async function autoLinkEmployeeBySlack(slackUserId: string): Promise<{
     data: { slackUserId },
   });
   return { emp: { ...emp, slackUserId }, email: profile.email, realName: profile.realName };
+}
+
+/** 워크스페이스 사용자 목록 (봇·삭제된 계정 제외) */
+export async function slackUserList(): Promise<
+  Array<{ id: string; realName: string; displayName: string; email?: string }>
+> {
+  if (!process.env.SLACK_BOT_TOKEN) return [];
+  const out: Array<{ id: string; realName: string; displayName: string; email?: string }> = [];
+  let cursor = "";
+  for (let page = 0; page < 5; page++) {
+    const url = `${API}/users.list?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
+    });
+    const j: any = await res.json();
+    if (!j?.ok) break;
+    for (const m of j.members ?? []) {
+      if (m.is_bot || m.deleted || m.id === "USLACKBOT") continue;
+      out.push({
+        id: m.id,
+        realName: m.profile?.real_name || m.real_name || "",
+        displayName: m.profile?.display_name || "",
+        email: m.profile?.email || undefined,
+      });
+    }
+    cursor = j.response_metadata?.next_cursor || "";
+    if (!cursor) break;
+  }
+  return out;
 }
 
 export function approverAllowed(userId: string): boolean {
