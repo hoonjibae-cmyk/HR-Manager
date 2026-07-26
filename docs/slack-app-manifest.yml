@@ -21,6 +21,17 @@ features:
     # 봇 표시명은 사용자명으로 변환되므로 한글 불가 (앱 이름은 한글 가능)
     display_name: Yussam HR
     always_online: true
+  app_home:
+    # 사이드바에서 앱을 누르면 나오는 상시 화면 (채널 메시지처럼 위로 밀리지 않음)
+    home_tab_enabled: true
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: true
+  shortcuts:
+    # 메시지 입력창 옆 ⚡ 버튼 → 어디서든 휴가신청서 열기
+    - name: 휴가 신청
+      type: global
+      callback_id: leave_request_shortcut
+      description: 휴가신청서 양식을 엽니다
   slash_commands:
     - command: /연차
       url: https://YOUR-DOMAIN.vercel.app/api/slack/command
@@ -42,6 +53,11 @@ settings:
   interactivity:
     is_enabled: true
     request_url: https://YOUR-DOMAIN.vercel.app/api/slack/interactivity
+  event_subscriptions:
+    # 앱 홈을 열 때마다 최신 연차 현황으로 다시 그리기 위해 필요
+    request_url: https://YOUR-DOMAIN.vercel.app/api/slack/events
+    bot_events:
+      - app_home_opened
   org_deploy_enabled: false
   socket_mode_enabled: false
   token_rotation_enabled: false

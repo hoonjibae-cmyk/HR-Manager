@@ -32,6 +32,7 @@ import {
   leaveBalanceText,
   modalPeriod,
 } from "@/lib/leave-slack";
+import { refreshHomeTab } from "@/lib/home-tab";
 import { createLeaveEvent, deleteLeaveEvent, gcalConfigured } from "@/lib/gcal";
 import { LEAVE_TYPE_LABEL } from "@/lib/constants";
 import { ymd } from "@/lib/format";
@@ -46,6 +47,15 @@ async function resolveEmployee(userId: string) {
   return { emp: linked.emp, info: linked };
 }
 
+/**
+ * 사용자에게 짧은 안내를 보낸다.
+ * 채널 안이면 그 자리에만 보이는 임시 메시지, 앱 홈·단축키처럼 채널이 없으면 DM.
+ */
+async function tellUser(channelId: string | undefined, userId: string, text: string) {
+  if (channelId) return slackCall("chat.postEphemeral", { channel: channelId, user: userId, text });
+  return slackCall("chat.postMessage", { channel: userId, text });
+}
+
 /** 연결 실패 사유를 구체적으로 안내 (관리자가 바로 조치할 수 있도록) */
 function notLinkedText(info: { email?: string; realName?: string; profileFailed?: boolean } = {}) {
   const found: string[] = [];
@@ -58,6 +68,35 @@ function notLinkedText(info: { email?: string; realName?: string; profileFailed?
     ? "\n관리자: 직원 관리 화면의 *슬랙 계정 일괄 연결* 을 실행하거나, 직원 카드에 슬랙 User ID 를 입력해 주세요."
     : "\n관리자: 직원 카드의 *이메일* 을 위 슬랙 이메일과 동일하게 맞춰 주세요.";
   return `등록된 직원 정보를 찾을 수 없습니다.${detail}${hint}`;
+}
+
+/** 휴가신청서 모달 열기 — 채널 버튼·앱 홈·전역 단축키가 공유한다 */
+async function openLeaveForm(triggerId: string, userId: string, channelId?: string) {
+  const { emp, info } = await resolveEmployee(userId);
+  if (!emp) {
+    await tellUser(channelId, userId, notLinkedText(info));
+    return;
+  }
+  if (emp.payScheme === "RATIO") {
+    await tellUser(
+      channelId,
+      userId,
+      "완전비율제(위탁) 계약은 연차휴가 적용 대상이 아닙니다. 문의는 관리자에게 부탁드립니다."
+    );
+    return;
+  }
+  const { summary, comp } = await leaveBalanceOf(emp);
+  await openView(
+    triggerId,
+    leaveModalView({
+      empName: emp.name,
+      remaining: summary.remaining,
+      compRemaining: comp.remaining,
+      serviceLabel: summary.serviceLabel,
+      period: modalPeriod(summary),
+      channel: channelId,
+    })
+  );
 }
 
 export async function POST(req: Request) {
@@ -122,6 +161,7 @@ export async function POST(req: Request) {
         `• 현재 ${res.poolLabel} 잔여: ${res.remaining}일\n` +
         `관리자 승인 후 반영됩니다.`,
     }).catch(() => {});
+    await refreshHomeTab(userId).catch(() => {});
 
     return Response.json({ response_action: "clear" });
   }
@@ -179,46 +219,33 @@ export async function POST(req: Request) {
       channel: userId,
       text: `🚫 휴가 취소를 신청했습니다.\n• 대상: ${range} · ${typeLabel} ${target.days}일\n운영진 승인 후 취소가 확정됩니다.`,
     }).catch(() => {});
+    await refreshHomeTab(userId).catch(() => {});
 
     return Response.json({ response_action: "clear" });
+  }
+
+  /* ---------- 전역 단축키(⚡) → 휴가신청서 ---------- */
+  if (payload.type === "shortcut" && payload.callback_id === "leave_request_shortcut") {
+    await openLeaveForm(payload.trigger_id, payload.user?.id);
+    return new Response("", { status: 200 });
   }
 
   const action = payload.actions?.[0];
   if (!action) return new Response("", { status: 200 });
 
-  /* ---------- 채널의 '휴가신청서 작성' 버튼 ---------- */
+  /* ---------- '휴가신청서 작성' 버튼 (채널 · 앱 홈) ---------- */
   if (action.action_id === "open_leave_modal") {
-    const userId = payload.user?.id as string;
-    const channelId = payload.container?.channel_id || payload.channel?.id;
-    const { emp, info } = await resolveEmployee(userId);
-    if (!emp) {
-      await slackCall("chat.postEphemeral", {
-        channel: channelId,
-        user: userId,
-        text: notLinkedText(info),
-      });
-      return new Response("", { status: 200 });
-    }
-    if (emp.payScheme === "RATIO") {
-      await slackCall("chat.postEphemeral", {
-        channel: channelId,
-        user: userId,
-        text: "완전비율제(위탁) 계약은 연차휴가 적용 대상이 아닙니다. 문의는 관리자에게 부탁드립니다.",
-      });
-      return new Response("", { status: 200 });
-    }
-    const { summary, comp } = await leaveBalanceOf(emp);
-    await openView(
+    await openLeaveForm(
       payload.trigger_id,
-      leaveModalView({
-        empName: emp.name,
-        remaining: summary.remaining,
-        compRemaining: comp.remaining,
-        serviceLabel: summary.serviceLabel,
-        period: modalPeriod(summary),
-        channel: channelId,
-      })
+      payload.user?.id,
+      payload.container?.channel_id || payload.channel?.id
     );
+    return new Response("", { status: 200 });
+  }
+
+  /* ---------- 앱 홈 '새로고침' ---------- */
+  if (action.action_id === "refresh_home") {
+    await refreshHomeTab(payload.user?.id).catch(() => {});
     return new Response("", { status: 200 });
   }
 
@@ -228,15 +255,11 @@ export async function POST(req: Request) {
     const channelId = payload.container?.channel_id || payload.channel?.id;
     const { emp, info } = await resolveEmployee(userId);
     if (!emp) {
-      await slackCall("chat.postEphemeral", { channel: channelId, user: userId, text: notLinkedText(info) });
+      await tellUser(channelId, userId, notLinkedText(info));
       return new Response("", { status: 200 });
     }
     const { summary, comp } = await leaveBalanceOf(emp);
-    await slackCall("chat.postEphemeral", {
-      channel: channelId,
-      user: userId,
-      text: leaveBalanceText(emp.name, summary, comp),
-    });
+    await tellUser(channelId, userId, leaveBalanceText(emp.name, summary, comp));
     return new Response("", { status: 200 });
   }
 
@@ -247,16 +270,16 @@ export async function POST(req: Request) {
     const channelId = payload.container?.channel_id || payload.channel?.id;
     const { emp, info } = await resolveEmployee(userId);
     if (!emp) {
-      await slackCall("chat.postEphemeral", { channel: channelId, user: userId, text: notLinkedText(info) });
+      await tellUser(channelId, userId, notLinkedText(info));
       return new Response("", { status: 200 });
     }
     const items = await cancelableLeaves(emp.id);
     if (!items.length) {
-      await slackCall("chat.postEphemeral", {
-        channel: channelId,
-        user: userId,
-        text: "취소할 수 있는 휴가가 없습니다. (승인 완료 + 종료일이 오늘 이후인 휴가만 취소 신청할 수 있습니다)",
-      });
+      await tellUser(
+        channelId,
+        userId,
+        "취소할 수 있는 휴가가 없습니다. (승인 완료 + 종료일이 오늘 이후인 휴가만 취소 신청할 수 있습니다)"
+      );
       return new Response("", { status: 200 });
     }
     await openView(payload.trigger_id, leaveCancelModalView(items, channelId));
@@ -468,6 +491,9 @@ export async function POST(req: Request) {
         });
       }
     }
+    // 신청자의 앱 홈(잔여 연차·예정된 휴가)도 최신 상태로
+    if (reqRow.employee.slackUserId)
+      await refreshHomeTab(reqRow.employee.slackUserId).catch(() => {});
   } catch (e: any) {
     await slackCall("chat.postEphemeral", { channel, user: userId, text: `처리 실패: ${e.message}` });
   }

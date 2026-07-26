@@ -392,6 +392,78 @@ export function leaveLauncherBlocks(companyName = "유쌤에듀") {
   ];
 }
 
+/* ==================== 앱 홈 탭 (사이드바 → 앱 이름) ==================== */
+
+export async function publishHomeView(userId: string, view: any) {
+  return slackCall("views.publish", { user_id: userId, view });
+}
+
+/**
+ * 앱 홈 화면. 채널 메시지와 달리 위로 밀려 올라가지 않는 상시 진입점이라
+ * 잔여 연차와 예정된 휴가를 함께 보여준다.
+ */
+export function homeTabView(ctx: {
+  balanceText?: string;
+  notice?: string;
+  upcoming?: Array<{ label: string; status: string }>;
+  companyName?: string;
+}) {
+  const blocks: any[] = [
+    { type: "header", text: { type: "plain_text", text: "🏖️ 휴가 신청", emoji: true } },
+  ];
+
+  if (ctx.notice) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: ctx.notice } });
+  } else {
+    if (ctx.balanceText)
+      blocks.push({ type: "section", text: { type: "mrkdwn", text: ctx.balanceText } });
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          style: "primary",
+          text: { type: "plain_text", text: "휴가신청서 작성", emoji: true },
+          action_id: "open_leave_modal",
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "휴가 취소 신청", emoji: true },
+          action_id: "open_cancel_modal",
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "새로고침", emoji: true },
+          action_id: "refresh_home",
+        },
+      ],
+    });
+    blocks.push({ type: "divider" });
+    const list = ctx.upcoming ?? [];
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: list.length
+          ? `*예정된 휴가*\n${list.map((u) => `• ${u.label} — ${u.status}`).join("\n")}`
+          : "*예정된 휴가*\n_예정된 휴가가 없습니다._",
+      },
+    });
+  }
+
+  blocks.push({
+    type: "context",
+    elements: [
+      {
+        type: "mrkdwn",
+        text: `${ctx.companyName ?? "유쌤에듀"} HR · 승인 결과는 DM 으로 안내됩니다. 채널에서 신청하려면 *#휴가-신청* 의 고정 메시지를 이용하세요.`,
+      },
+    ],
+  });
+
+  return { type: "home", blocks };
+}
+
 export interface LeaveModalContext {
   empName: string;
   remaining: number;
