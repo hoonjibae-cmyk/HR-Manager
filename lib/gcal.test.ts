@@ -40,11 +40,11 @@ describe("구글 캘린더 일정 생성", () => {
     expect(
       buildLeaveEvent({
         name: "이직원",
-        typeLabel: "오후반차",
+        typeLabel: "반차",
         start: new Date("2026-09-01T00:00:00Z"),
         end: new Date("2026-09-01T00:00:00Z"),
       }).summary
-    ).toBe("이직원 오후반차");
+    ).toBe("이직원 반차");
     expect(
       buildLeaveEvent({
         name: "박직원",

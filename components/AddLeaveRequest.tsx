@@ -44,10 +44,10 @@ export default function AddLeaveRequest({ employees }: { employees: Emp[] }) {
         <label className="label">종류</label>
         <select className="input w-32" value={f.leaveType} onChange={(e) => setF({ ...f, leaveType: e.target.value })}>
           <option value="ANNUAL">연차</option>
-          <option value="HALF_AM">오전반차</option>
-          <option value="HALF_PM">오후반차</option>
+          <option value="HALF">반차</option>
           <option value="COMP">대휴(보상)</option>
           <option value="SICK">병가</option>
+          <option value="SPECIAL">경조사</option>
         </select>
       </div>
       <div className="flex-1 min-w-[140px]"><label className="label">사유</label><input className="input" value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} /></div>

@@ -119,15 +119,26 @@ export const LEAVE_STATUS_LABEL: Record<string, string> = {
   CANCELED: "취소",
 };
 
-/** 연차 종류 */
+/**
+ * 연차 종류.
+ * 학원 근무시간이 통상 14~22시라 오전/오후 반차 구분이 무의미해 `HALF`(반차) 하나로 통합했다.
+ * HALF_AM/HALF_PM 은 통합 이전에 등록된 기록 표시용으로만 남겨 둔다(신규 선택 불가).
+ */
 export const LEAVE_TYPE_LABEL: Record<string, string> = {
   ANNUAL: "연차",
+  HALF: "반차",
   HALF_AM: "오전반차",
   HALF_PM: "오후반차",
   COMP: "대휴(보상)",
   SICK: "병가",
   SPECIAL: "경조사",
 };
+
+/** 0.5일로 차감되는 휴가 종류 */
+export const HALF_DAY_LEAVE_TYPES = ["HALF", "HALF_AM", "HALF_PM"] as const;
+export function isHalfDayLeave(leaveType: string | null | undefined): boolean {
+  return HALF_DAY_LEAVE_TYPES.includes(leaveType as any);
+}
 
 export const DAY_KO: Record<string, string> = {
   mon: "월",

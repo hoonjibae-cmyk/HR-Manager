@@ -237,9 +237,10 @@ export function parseLeaveText(text: string): {
     t = t.replace(/대휴보상연차|보상휴가|보상연차|대휴/gi, " ");
   }
 
+  // 반차는 오전/오후를 구분하지 않는다 (근무시간 14~22시 — 사용시간은 사유에 적는다)
   if (/반차|반가|half/i.test(t)) {
     half = true;
-    if (leaveType !== "COMP") leaveType = /오전|am/i.test(t) ? "HALF_AM" : "HALF_PM";
+    if (leaveType !== "COMP") leaveType = "HALF";
     t = t.replace(/오전반차|오후반차|반차|반가|half\s*(am|pm)?/gi, " ");
   }
 
@@ -419,9 +420,8 @@ export function leaveModalView(ctx: LeaveModalContext) {
           action_id: "v",
           placeholder: { type: "plain_text", text: "옵션을 선택하세요." },
           options: [
-            { text: { type: "plain_text", text: "연차" }, value: "ANNUAL" },
-            { text: { type: "plain_text", text: "오전반차" }, value: "HALF_AM" },
-            { text: { type: "plain_text", text: "오후반차" }, value: "HALF_PM" },
+            { text: { type: "plain_text", text: "연차 (1일)" }, value: "ANNUAL" },
+            { text: { type: "plain_text", text: "반차 (0.5일)" }, value: "HALF" },
             { text: { type: "plain_text", text: "대휴(보상연차)" }, value: "COMP" },
             { text: { type: "plain_text", text: "병가" }, value: "SICK" },
             { text: { type: "plain_text", text: "경조사" }, value: "SPECIAL" },
@@ -447,7 +447,7 @@ export function leaveModalView(ctx: LeaveModalContext) {
         block_id: "halftime",
         optional: true,
         label: { type: "plain_text", text: "반차일 경우 사용시간" },
-        hint: { type: "plain_text", text: "ex. 3시~5시30분" },
+        hint: { type: "plain_text", text: "ex. 14시~18시 / 18시~22시" },
         element: {
           type: "plain_text_input",
           action_id: "v",

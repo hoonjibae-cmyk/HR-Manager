@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { countLeaveDays } from "@/lib/leave";
+import { isHalfDayLeave } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
   }
   const start = new Date(b.startDate);
   const end = new Date(b.endDate || b.startDate);
-  const half = b.leaveType === "HALF_AM" || b.leaveType === "HALF_PM";
+  const half = isHalfDayLeave(b.leaveType);
   const holidays = (await prisma.holiday.findMany()).map((h) => h.date);
   const days = b.days ? Number(b.days) : countLeaveDays(start, end, { half, holidays });
   const row = await prisma.leaveRequest.create({

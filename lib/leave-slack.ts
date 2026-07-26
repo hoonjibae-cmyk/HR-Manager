@@ -3,7 +3,7 @@ import { prisma } from "./db";
 import { countLeaveDays, summarizeLeave, summarizeComp, type LeaveTxn } from "./leave";
 import { postMessage, approvalBlocks } from "./slack";
 import { ymd } from "./format";
-import { LEAVE_TYPE_LABEL } from "./constants";
+import { LEAVE_TYPE_LABEL, isHalfDayLeave } from "./constants";
 
 export async function leaveBalanceOf(emp: { id: number; hireDate: Date }) {
   const txns = await prisma.leaveTransaction.findMany({ where: { employeeId: emp.id } });
@@ -20,7 +20,7 @@ export async function leaveBalanceOf(emp: { id: number; hireDate: Date }) {
 }
 
 export interface LeaveSubmitInput {
-  leaveType: string; // ANNUAL | HALF_AM | HALF_PM | COMP | SICK | SPECIAL
+  leaveType: string; // ANNUAL | HALF | COMP | SICK | SPECIAL
   start: Date;
   end: Date;
   reason: string;
@@ -55,7 +55,7 @@ export async function submitLeaveRequest(
     return { ok: false, error: "종료일이 시작일보다 빠릅니다.", field: "end" };
   }
 
-  const isHalf = input.leaveType === "HALF_AM" || input.leaveType === "HALF_PM";
+  const isHalf = isHalfDayLeave(input.leaveType);
   const holidays = (await prisma.holiday.findMany()).map((h) => h.date);
   const days = countLeaveDays(input.start, input.end, { half: isHalf, holidays });
   if (days <= 0) {

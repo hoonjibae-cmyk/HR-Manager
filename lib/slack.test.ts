@@ -24,10 +24,15 @@ describe("parseLeaveText — 빠른 신청 문법", () => {
     expect(r.end.toISOString().slice(0, 10)).toBe(`${y}-08-16`);
     expect(r.reason).toBe("가족여행");
   });
-  it("오전/오후 반차", () => {
-    expect(parseLeaveText("오전반차 8/14 병원")!.leaveType).toBe("HALF_AM");
-    expect(parseLeaveText("오후반차 8/14 병원")!.leaveType).toBe("HALF_PM");
-    expect(parseLeaveText("오후반차 8/14 병원")!.half).toBe(true);
+  it("반차는 오전/오후 구분 없이 HALF", () => {
+    expect(parseLeaveText("반차 8/14 병원")!.leaveType).toBe("HALF");
+    expect(parseLeaveText("반차 8/14 병원")!.half).toBe(true);
+    // 예전 표현으로 적어도 반차로 인식
+    expect(parseLeaveText("오전반차 8/14 병원")!.leaveType).toBe("HALF");
+    expect(parseLeaveText("오후반차 8/14 병원")!.leaveType).toBe("HALF");
+  });
+  it("반차 표기를 지운 나머지가 사유", () => {
+    expect(parseLeaveText("반차 8/14 병원")!.reason).toBe("병원");
   });
   it("대휴 사용", () => {
     const r = parseLeaveText("대휴 8/14")!;
@@ -91,16 +96,16 @@ describe("leaveModalView — 휴가신청서 모달 구조", () => {
     expect(v.blocks[0].text.text).not.toContain("대휴보상연차");
   });
 
-  it("휴가종류 6가지를 제공한다", () => {
+  it("휴가종류 5가지 — 반차는 오전/오후로 나누지 않는다", () => {
     const kind = view.blocks.find((b: any) => b.block_id === "kind");
     expect(kind.element.options.map((o: any) => o.value)).toEqual([
       "ANNUAL",
-      "HALF_AM",
-      "HALF_PM",
+      "HALF",
       "COMP",
       "SICK",
       "SPECIAL",
     ]);
+    expect(kind.element.options.map((o: any) => o.text.text)).not.toContain("오전반차");
   });
 });
 
@@ -109,19 +114,19 @@ describe("readLeaveModal — 제출값 파싱", () => {
     const submitted = {
       state: {
         values: {
-          kind: { v: { selected_option: { value: "HALF_PM" } } },
+          kind: { v: { selected_option: { value: "HALF" } } },
           start: { v: { selected_date: "2026-08-14" } },
           end: { v: { selected_date: null } },
-          halftime: { v: { value: " 3시~5시30분 " } },
+          halftime: { v: { value: " 14시~18시 " } },
           reason: { v: { value: "병원 방문" } },
         },
       },
     };
     expect(readLeaveModal(submitted)).toEqual({
-      kind: "HALF_PM",
+      kind: "HALF",
       start: "2026-08-14",
       end: null,
-      halftime: "3시~5시30분",
+      halftime: "14시~18시",
       reason: "병원 방문",
     });
   });
@@ -155,7 +160,7 @@ describe("휴가 취소 모달", () => {
     const v: any = leaveCancelModalView(
       [
         { id: 12, label: "2026-08-14 ~ 2026-08-16 · 연차 3일" },
-        { id: 13, label: "2026-09-01 · 오후반차 0.5일" },
+        { id: 13, label: "2026-09-01 · 반차 0.5일" },
       ],
       "C999"
     );

@@ -87,7 +87,7 @@ export function exclusiveEnd(end: Date): string {
 
 export interface LeaveEventInput {
   name: string;
-  typeLabel: string; // 연차 / 오전반차 / 병가 ...
+  typeLabel: string; // 연차 / 반차 / 병가 ...
   start: Date;
   end: Date;
   reason?: string | null;
