@@ -22,8 +22,8 @@ export async function GET() {
     scheduleStatus: {
       nextRunLabel: next ? formatKst(next) : null,
       lastRunLabel: schedule?.lastRunAt ? formatKst(schedule.lastRunAt) : null,
-      // Vercel Cron 실행 시각 (vercel.json: 매일 00:00 UTC = 09:00 KST)
-      cronLabel: "매일 09:00 (KST)",
+      // vercel.json: 10분마다 점검 → 아래 설정한 시:분(KST)에 발송
+      cronLabel: "10분마다 점검 → 설정한 시각에 발송",
       serverless: !!process.env.VERCEL,
     },
     emailLogs: emailLogs.map((l) => ({

@@ -3,7 +3,7 @@ import { isAuthed } from "@/lib/auth";
 import { runDueSchedules } from "@/lib/scheduler";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 /**
  * 관리자 화면에서 예약 발송을 수동 실행.

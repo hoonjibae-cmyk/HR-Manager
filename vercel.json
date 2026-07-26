@@ -2,12 +2,12 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["icn1"],
   "crons": [
-    { "path": "/api/cron", "schedule": "0 0 * * *" }
+    { "path": "/api/cron", "schedule": "*/10 * * * *" }
   ],
   "functions": {
-    "app/api/documents/**/route.ts": { "maxDuration": 60 },
-    "app/api/email/**/route.ts": { "maxDuration": 60 },
-    "app/api/payroll/**/route.ts": { "maxDuration": 60 },
-    "app/api/cron/route.ts": { "maxDuration": 60 }
+    "app/api/documents/**/route.ts": { "maxDuration": 120 },
+    "app/api/email/**/route.ts": { "maxDuration": 300 },
+    "app/api/payroll/**/route.ts": { "maxDuration": 120 },
+    "app/api/cron/route.ts": { "maxDuration": 300 }
   }
 }

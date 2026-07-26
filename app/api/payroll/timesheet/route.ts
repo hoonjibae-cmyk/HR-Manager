@@ -10,7 +10,7 @@ import {
 import { runPayrollMonth, type PayrollInputMap } from "@/lib/payroll-service";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 /**
  * 시급제 시간기록표(엑셀) 업로드 → 실근로시간·주휴수당 자동 산정 → 급여 생성.

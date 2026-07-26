@@ -216,12 +216,9 @@ function ScheduleCard({ schedule, status, onSave }: any) {
         <div>
           · 지급일이 <b>익월 7일</b>이라면 <b>매월 7일 · 전월분</b>으로 설정하세요. (7월 급여 → 8월 7일 발송)
         </div>
-        {serverless !== false && (
-          <div>
-            · 현재 배포(Vercel)에서는 <b>{status?.cronLabel ?? "매일 09:00 (KST)"}</b>에 자동 점검이 실행되며, 그날이 발송일이면 그 시각에 발송됩니다.
-            시·분을 정확히 맞추려면 외부 크론(cron-job.org 등)에서 <code>/api/cron?secret=…&amp;strict=1</code> 을 10분 간격으로 호출하세요.
-          </div>
-        )}
+        <div>
+          · 위에 지정한 <b>시각(KST)</b> 에 발송됩니다. 서버가 10분마다 점검하므로 실제 발송은 지정 시각 직후(최대 10분 이내)에 이뤄집니다.
+        </div>
         <div>· 급여 기록이 아직 없으면 발송 직전에 자동으로 급여를 산정합니다. 이메일 주소가 없는 직원은 제외되고 실패로 기록됩니다.</div>
       </div>
 

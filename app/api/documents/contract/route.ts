@@ -2,7 +2,7 @@ import { isAuthed } from "@/lib/auth";
 import { genContract, pdfResponse } from "@/lib/doc-service";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(req: Request) {
   if (!(await isAuthed())) return new Response("unauthorized", { status: 401 });

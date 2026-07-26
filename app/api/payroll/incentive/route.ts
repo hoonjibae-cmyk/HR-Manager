@@ -6,7 +6,7 @@ import { matchEmployee } from "@/lib/timesheet";
 import { runPayrollMonth } from "@/lib/payroll-service";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 /**
  * 인센티브 학생 명단(엑셀) 업로드 → 회차 비례 가중 인원 산정 → 해당 강사 급여 재계산.

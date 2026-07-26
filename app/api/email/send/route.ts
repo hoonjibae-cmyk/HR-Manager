@@ -3,7 +3,7 @@ import { isAuthed } from "@/lib/auth";
 import { sendPayslipsForMonth } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function POST(req: Request) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
