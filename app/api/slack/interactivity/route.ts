@@ -29,6 +29,8 @@ import {
   submitLeaveRequest,
   cancelableLeaves,
   rangeLabel,
+  leaveBalanceText,
+  modalPeriod,
 } from "@/lib/leave-slack";
 import { createLeaveEvent, deleteLeaveEvent, gcalConfigured } from "@/lib/gcal";
 import { LEAVE_TYPE_LABEL } from "@/lib/constants";
@@ -100,6 +102,7 @@ export async function POST(req: Request) {
       end,
       reason: f.reason,
       halfTimeNote: f.halftime,
+      workPlan: f.workplan,
       channel: meta.channel,
     });
 
@@ -212,6 +215,7 @@ export async function POST(req: Request) {
         remaining: summary.remaining,
         compRemaining: comp.remaining,
         serviceLabel: summary.serviceLabel,
+        period: modalPeriod(summary),
         channel: channelId,
       })
     );
@@ -228,17 +232,10 @@ export async function POST(req: Request) {
       return new Response("", { status: 200 });
     }
     const { summary, comp } = await leaveBalanceOf(emp);
-    const compLine =
-      comp.granted > 0
-        ? `\n• 대휴보상연차: 발생 ${comp.granted} · 사용 ${comp.used} · *잔여 ${comp.remaining}일*`
-        : "";
-    const next = summary.nextGrantDate
-      ? `\n• 다음 발생: ${ymd(summary.nextGrantDate)} (${summary.nextGrantDays}일)`
-      : "";
     await slackCall("chat.postEphemeral", {
       channel: channelId,
       user: userId,
-      text: `*${emp.name}님의 연차 현황* (근속 ${summary.serviceLabel})\n• 본래 연차: 발생 ${summary.granted} · 사용 ${summary.used} · *잔여 ${summary.remaining}일*${compLine}${next}`,
+      text: leaveBalanceText(emp.name, summary, comp),
     });
     return new Response("", { status: 200 });
   }
@@ -406,6 +403,7 @@ export async function POST(req: Request) {
           reason: reqRow.reason,
           department: reqRow.employee.department,
           days: reqRow.days,
+          workPlan: reqRow.workPlan,
         });
         if (eventId) {
           await prisma.leaveRequest.update({
@@ -445,6 +443,7 @@ export async function POST(req: Request) {
             days: reqRow.days,
             typeLabel,
             reason: reqRow.reason ?? "",
+            workPlan: reqRow.workPlan,
             by: userId,
             calendarSynced: !!eventId,
             deducted,

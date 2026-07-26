@@ -160,3 +160,66 @@ describe("countLeaveDays", () => {
     expect(countLeaveDays(d("2025-08-11"), d("2025-08-11"), { half: true })).toBe(0.5);
   });
 });
+
+describe("period — 이번 연차기간 기준 현황", () => {
+  it("장기근속자: 누계가 아니라 이번 기간 발생분만 보여준다", () => {
+    // 2021-01-01 입사 → 2026-07-26 기준 = 6년차 (2026-01-01 ~ 2026-12-31), 발생 17일
+    const s = summarizeLeave(d("2021-01-01"), d("2026-07-26"), []);
+    expect(s.granted).toBe(90); // 누계 11+15+15+16+16+17
+    expect(s.period.serviceYear).toBe(6);
+    expect(s.period.start.toISOString().slice(0, 10)).toBe("2026-01-01");
+    expect(s.period.end.toISOString().slice(0, 10)).toBe("2026-12-31");
+    expect(s.period.granted).toBe(17);
+    expect(s.period.used).toBe(0);
+    expect(s.period.remaining).toBe(17);
+    expect(s.period.carriedOver).toBe(0);
+  });
+
+  it("이번 기간 사용분만 집계 (지난 기간 사용은 제외)", () => {
+    const txns: LeaveTxn[] = [
+      { date: d("2025-05-02"), days: 3, type: "USE" }, // 5년차 기간
+      { date: d("2026-03-10"), days: 2, type: "USE" }, // 이번 기간
+      { date: d("2026-09-01"), days: 1, type: "USE" }, // 이번 기간(승인된 미래 휴가)
+    ];
+    const s = summarizeLeave(d("2021-01-01"), d("2026-07-26"), txns);
+    expect(s.used).toBe(6); // 누계
+    expect(s.period.used).toBe(3); // 이번 기간만
+    expect(s.period.granted).toBe(17);
+    expect(s.period.remaining).toBe(14);
+  });
+
+  it("발생 − 사용 = 잔여 가 이번 기간 안에서 맞아떨어진다", () => {
+    const txns: LeaveTxn[] = [{ date: d("2026-04-01"), days: 4.5, type: "USE" }];
+    const s = summarizeLeave(d("2021-01-01"), d("2026-07-26"), txns);
+    expect(s.period.granted + s.period.carriedOver - s.period.used).toBe(s.period.remaining);
+  });
+
+  it("입사 1년 미만: 기간은 입사일~1주년, 월 개근분과 남은 예정분", () => {
+    // 2026-03-01 입사, 2026-07-26 기준 → 4/1,5/1,6/1,7/1 = 4일 발생
+    const s = summarizeLeave(d("2026-03-01"), d("2026-07-26"), []);
+    expect(s.period.serviceYear).toBe(1);
+    expect(s.period.start.toISOString().slice(0, 10)).toBe("2026-03-01");
+    expect(s.period.end.toISOString().slice(0, 10)).toBe("2027-02-28");
+    expect(s.period.granted).toBe(4);
+    expect(s.period.scheduled).toBe(7); // 최대 11일까지 7일 더
+    expect(s.period.remaining).toBe(4);
+  });
+
+  it("입사기념일 직후에는 이전 기간 미사용분이 소멸되어 잔여가 새 발생분과 같다", () => {
+    const txns: LeaveTxn[] = [{ date: d("2025-06-01"), days: 2, type: "USE" }];
+    const s = summarizeLeave(d("2021-01-01"), d("2026-01-02"), txns);
+    expect(s.period.granted).toBe(17);
+    expect(s.period.used).toBe(0);
+    expect(s.period.remaining).toBe(17);
+    expect(s.expired).toBeGreaterThan(0); // 지난 기간 미사용분은 소멸
+  });
+
+  it("수동 조정(ADJUST)으로 넘어온 잔여는 이월로 잡힌다", () => {
+    // 2025-07-01 조정 +3일 → 2026-06-30 까지 유효, 이번 기간(2026-01-01~) 으로 이월
+    const txns: LeaveTxn[] = [{ date: d("2025-07-01"), days: 3, type: "ADJUST" }];
+    const s = summarizeLeave(d("2021-01-01"), d("2026-03-01"), txns);
+    expect(s.period.granted).toBe(17);
+    expect(s.period.carriedOver).toBe(3);
+    expect(s.period.remaining).toBe(20);
+  });
+});

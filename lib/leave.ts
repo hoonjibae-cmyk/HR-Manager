@@ -8,6 +8,7 @@
 //  - 발생 연차는 발생일로부터 1년간 사용, 미사용분은 소멸(수당 정산 대상).
 
 import {
+  addDays,
   addMonths,
   addYears,
   differenceInCalendarDays,
@@ -40,6 +41,22 @@ export interface Lot {
   expiredLost: number; // 소멸된 미사용분
 }
 
+/**
+ * '이번 연차기간' — 입사일 기준 1년 단위. 직원이 실제로 체감하는 단위는
+ * 입사 후 누계가 아니라 지금 쓸 수 있는 이 기간의 발생/사용/잔여다.
+ */
+export interface LeavePeriod {
+  start: Date; // 기간 시작 (입사기념일)
+  end: Date; // 기간 마지막 날 = 사용기한 (다음 발생일 −1일)
+  serviceYear: number; // 1 = 입사 1년차(1년 미만), 2 = 2년차 …
+  label: string; // "6년차"
+  granted: number; // 이 기간에 발생한 일수
+  carriedOver: number; // 이전 기간에서 넘어와 아직 유효한 잔여 (보통 0)
+  used: number; // 이 기간에 사용한 일수 (승인된 미래 휴가 포함)
+  remaining: number; // 지금 쓸 수 있는 잔여
+  scheduled: number; // 이 기간에 앞으로 더 발생할 예정 일수 (1년 미만 월 개근분)
+}
+
 export interface LeaveSummary {
   asOf: Date;
   hireDate: Date;
@@ -49,9 +66,28 @@ export interface LeaveSummary {
   used: number; // 사용 누계
   expired: number; // 소멸 누계
   remaining: number; // 현재 사용가능 잔여
+  /** 이번 연차기간 기준 현황 — 화면·슬랙은 이쪽을 우선 표시한다 */
+  period: LeavePeriod;
   lots: Lot[];
   nextGrantDate: Date | null;
   nextGrantDays: number | null;
+}
+
+/** asOf 가 속한 연차기간 [시작, 끝(exclusive)) — 입사일 기준 */
+export function currentLeavePeriod(
+  hireDate: Date,
+  asOf: Date
+): { start: Date; endExclusive: Date; serviceYear: number } {
+  const firstYearEnd = addYears(hireDate, 1);
+  if (isBefore(asOf, firstYearEnd)) {
+    return { start: hireDate, endExclusive: firstYearEnd, serviceYear: 1 };
+  }
+  const years = completedServiceYears(hireDate, asOf);
+  return {
+    start: addYears(hireDate, years),
+    endExclusive: addYears(hireDate, years + 1),
+    serviceYear: years + 1,
+  };
 }
 
 /** 근속연수(>=1)에 대한 연차 발생일수 */
@@ -73,6 +109,7 @@ function serviceLabel(hireDate: Date, asOf: Date): string {
   const years = Math.floor(total / 365);
   const months = Math.floor((total % 365) / 30);
   if (years <= 0 && months <= 0) return "입사 " + total + "일";
+  if (years <= 0) return `${months}개월`;
   return `${years}년 ${months}개월`;
 }
 
@@ -161,10 +198,17 @@ export function summarizeLeave(
     .map((t) => ({ date: t.date, days: Math.abs(t.days) }))
     .sort((a, b) => a.date.getTime() - b.date.getTime());
 
+  // 이번 연차기간 — lot/사용을 기간별로 나눠 집계하기 위해 먼저 구한다
+  const period = currentLeavePeriod(hireDate, asOf);
+  const inPeriod = (d: Date) =>
+    !isBefore(d, period.start) && isBefore(d, period.endExclusive);
+  const usedInThisPeriod: number[] = lots.map(() => 0); // lots 와 같은 인덱스
+
   // FIFO: 각 사용을 '사용시점에 유효한 가장 오래된 lot'에서 차감
   for (const use of uses) {
     let need = use.days;
-    for (const lot of lots) {
+    for (let i = 0; i < lots.length; i++) {
+      const lot = lots[i];
       if (need <= 0) break;
       // lot 발생 이전이거나 이미 소멸된 lot 은 사용 불가
       if (isAfter(lot.grantDate, use.date)) continue;
@@ -172,13 +216,15 @@ export function summarizeLeave(
       const take = Math.min(lot.remaining, need);
       lot.remaining -= take;
       lot.used += take;
+      if (inPeriod(use.date)) usedInThisPeriod[i] += take;
       need -= take;
     }
     // need>0 이면 초과사용(마이너스 잔여) — 마지막 lot 에서 차감 처리
     if (need > 0 && lots.length > 0) {
-      const last = lots[lots.length - 1];
-      last.remaining -= need;
-      last.used += need;
+      const last = lots.length - 1;
+      lots[last].remaining -= need;
+      lots[last].used += need;
+      if (inPeriod(use.date)) usedInThisPeriod[last] += need;
     }
   }
 
@@ -196,6 +242,24 @@ export function summarizeLeave(
   const remaining = lots
     .filter((l) => isAfter(l.expiryDate, asOf))
     .reduce((s, l) => s + l.remaining, 0);
+
+  // 이번 연차기간 집계
+  let periodGranted = 0;
+  let periodCarried = 0;
+  let periodUsed = 0;
+  lots.forEach((l, i) => {
+    periodUsed += usedInThisPeriod[i];
+    if (inPeriod(l.grantDate)) periodGranted += l.days;
+    else if (isAfter(l.expiryDate, period.start)) {
+      // 이전 기간 발생분이 아직 살아서 넘어온 경우 (기간 시작 시점의 잔여)
+      periodCarried += l.remaining + usedInThisPeriod[i] + l.expiredLost;
+    }
+  });
+  // 1년 미만은 매월 개근분이 앞으로 더 발생한다 (최대 11일)
+  const monthlyGranted = lots
+    .filter((l) => l.source === "MONTHLY")
+    .reduce((s, l) => s + l.days, 0);
+  const scheduled = period.serviceYear === 1 ? Math.max(0, 11 - monthlyGranted) : 0;
 
   // 다음 발생 예정
   const years = completedServiceYears(hireDate, asOf);
@@ -230,6 +294,17 @@ export function summarizeLeave(
     used,
     expired,
     remaining,
+    period: {
+      start: period.start,
+      end: addDays(period.endExclusive, -1),
+      serviceYear: period.serviceYear,
+      label: `${period.serviceYear}년차`,
+      granted: periodGranted,
+      carriedOver: periodCarried,
+      used: periodUsed,
+      remaining,
+      scheduled,
+    },
     lots,
     nextGrantDate,
     nextGrantDays,

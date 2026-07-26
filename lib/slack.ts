@@ -273,6 +273,7 @@ export function approvalBlocks(args: {
   days: number;
   reason: string;
   remaining: number;
+  workPlan?: string | null;
 }) {
   const range =
     args.days > 1 ? `${ymd(args.start)} ~ ${ymd(args.end)}` : ymd(args.start);
@@ -290,6 +291,14 @@ export function approvalBlocks(args: {
         { type: "mrkdwn", text: `*현재 잔여연차*\n${args.remaining}일` },
       ],
     },
+    ...(args.workPlan
+      ? [
+          {
+            type: "section",
+            text: { type: "mrkdwn", text: `*업무조치사항*\n${args.workPlan}` },
+          },
+        ]
+      : []),
     {
       type: "actions",
       block_id: `leave_${args.requestId}`,
@@ -389,12 +398,17 @@ export interface LeaveModalContext {
   compRemaining: number;
   serviceLabel: string;
   channel?: string;
+  /** 이번 연차기간 (있으면 누계 대신 이 기간 기준으로 안내) */
+  period?: { start: string; end: string; granted: number; used: number };
 }
 
 /** 기존 워크플로 '휴가신청서' 양식을 그대로 재현한 모달 */
 export function leaveModalView(ctx: LeaveModalContext) {
   const compLine =
     ctx.compRemaining > 0 ? ` · 대휴보상연차 *${ctx.compRemaining}일*` : "";
+  const periodLine = ctx.period
+    ? `이번 연차기간 ${ctx.period.start} ~ ${ctx.period.end}\n발생 ${ctx.period.granted} · 사용 ${ctx.period.used} · 잔여 *${ctx.remaining}일*${compLine}`
+    : `잔여 연차 *${ctx.remaining}일*${compLine}`;
   return {
     type: "modal",
     callback_id: "leave_request_submit",
@@ -407,7 +421,7 @@ export function leaveModalView(ctx: LeaveModalContext) {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*${ctx.empName}* 님 (근속 ${ctx.serviceLabel})\n잔여 연차 *${ctx.remaining}일*${compLine}`,
+          text: `*${ctx.empName}* 님 (근속 ${ctx.serviceLabel})\n${periodLine}`,
         },
       },
       { type: "divider" },
@@ -465,6 +479,22 @@ export function leaveModalView(ctx: LeaveModalContext) {
           placeholder: { type: "plain_text", text: "작성해 주세요." },
         },
       },
+      {
+        type: "input",
+        block_id: "workplan",
+        optional: true,
+        label: { type: "plain_text", text: "업무조치사항" },
+        hint: {
+          type: "plain_text",
+          text: "부재 중 수업·업무를 어떻게 처리하는지 적어 주세요. ex. 8/14 A반 → 김OO 선생님 대강 / 상담 일정 조정 완료",
+        },
+        element: {
+          type: "plain_text_input",
+          action_id: "v",
+          multiline: true,
+          placeholder: { type: "plain_text", text: "작성해 주세요. (해당 없으면 '없음')" },
+        },
+      },
     ],
   };
 }
@@ -476,6 +506,7 @@ export function readLeaveModal(view: any): {
   end: string | null;
   halftime: string;
   reason: string;
+  workplan: string;
 } {
   const v = view?.state?.values ?? {};
   return {
@@ -484,6 +515,7 @@ export function readLeaveModal(view: any): {
     end: v.end?.v?.selected_date ?? null,
     halftime: (v.halftime?.v?.value ?? "").trim(),
     reason: (v.reason?.v?.value ?? "").trim(),
+    workplan: (v.workplan?.v?.value ?? "").trim(),
   };
 }
 
@@ -604,6 +636,7 @@ export function recordBlocks(args: {
   calendarSynced?: boolean;
   deducted?: boolean;
   remaining?: number;
+  workPlan?: string | null;
 }) {
   const head = args.canceled
     ? `🚫 *휴가 취소 확정* — ${args.name}`
@@ -624,6 +657,14 @@ export function recordBlocks(args: {
         { type: "mrkdwn", text: `*사유*\n${args.reason || "-"}` },
       ],
     },
+    ...(args.workPlan && !args.canceled
+      ? [
+          {
+            type: "section",
+            text: { type: "mrkdwn", text: `*업무조치사항*\n${args.workPlan}` },
+          },
+        ]
+      : []),
     { type: "context", elements: [{ type: "mrkdwn", text: notes.join(" · ") }] },
   ];
 }

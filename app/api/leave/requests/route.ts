@@ -43,6 +43,7 @@ export async function POST(req: Request) {
       days,
       leaveType: b.leaveType || "ANNUAL",
       reason: b.reason || null,
+      workPlan: b.workPlan?.trim() || null,
       status: "PENDING",
       source: b.source || "WEB",
     },

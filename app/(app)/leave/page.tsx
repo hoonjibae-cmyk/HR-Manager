@@ -71,6 +71,7 @@ export default async function LeavePage({
     days: r.days,
     leaveType: r.leaveType,
     reason: r.reason,
+    workPlan: r.workPlan,
     source: r.source,
     employee: { name: r.employee.name, department: r.employee.department },
   }));
@@ -110,7 +111,8 @@ export default async function LeavePage({
             <tr>
               <th className="th" rowSpan={2}>직원</th>
               <th className="th" rowSpan={2}>근속</th>
-              <th className="th text-center border-l border-slate-200" colSpan={3}>본래 연차</th>
+              <th className="th" rowSpan={2}>이번 연차기간</th>
+              <th className="th text-center border-l border-slate-200" colSpan={3}>본래 연차 <span className="font-normal text-slate-400">(이번 기간)</span></th>
               <th className="th text-center border-l border-slate-200" colSpan={3}>대휴보상연차</th>
               <th className="th text-center border-l border-slate-200" colSpan={2}>기간 내 사용</th>
               <th className="th" rowSpan={2}></th>
@@ -134,9 +136,15 @@ export default async function LeavePage({
                   <div className="text-xs text-slate-400">{e.department} {e.position}</div>
                 </td>
                 <td className="td text-slate-500 text-xs">{s.serviceLabel}</td>
-                <td className="td text-right tnum border-l border-slate-100">{s.granted}</td>
-                <td className="td text-right tnum text-slate-500">{s.used}</td>
-                <td className="td text-right tnum font-bold text-brand-600">{s.remaining}</td>
+                <td className="td text-slate-500 text-xs tnum whitespace-nowrap">
+                  {fmt(s.period.start)} ~ {fmt(s.period.end)}
+                  <div className="text-slate-300">{s.period.label}</div>
+                </td>
+                <td className="td text-right tnum border-l border-slate-100">
+                  {s.period.granted + s.period.carriedOver}
+                </td>
+                <td className="td text-right tnum text-slate-500">{s.period.used}</td>
+                <td className="td text-right tnum font-bold text-brand-600">{s.period.remaining}</td>
                 <td className="td text-right tnum border-l border-slate-100">{c.granted}</td>
                 <td className="td text-right tnum text-slate-500">{c.used}</td>
                 <td className="td text-right tnum font-bold text-emerald-600">{c.remaining}</td>
@@ -150,7 +158,8 @@ export default async function LeavePage({
           </tbody>
         </table>
         <p className="text-xs text-slate-400 px-5 py-3 border-t border-slate-100">
-          · <b>본래 연차</b>: 근로기준법 §60 자동 산정(소멸 반영) &nbsp;
+          · <b>본래 연차</b>: 근로기준법 §60 자동 산정 — <b>이번 연차기간(입사일 기준 1년)</b> 의 발생·사용·잔여.
+          지난 기간 미사용분은 기간 종료일에 소멸되어 넘어오지 않는다 &nbsp;
           · <b>대휴보상연차</b>: 지정 휴일 근무 보상 등 — <b>"+대휴"</b> 버튼으로 운영자가 직접 부여/차감 &nbsp;
           · <b>기간 내 사용</b>: 위에서 지정한 기간에 사용한 일수 (연차/대휴 구분)
         </p>

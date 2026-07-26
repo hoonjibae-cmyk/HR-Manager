@@ -13,6 +13,7 @@ interface Req {
   days: number;
   leaveType: string;
   reason: string | null;
+  workPlan: string | null;
   source: string;
   employee: { name: string; department: string | null };
 }
@@ -46,6 +47,7 @@ export default function LeaveApprovals({ requests }: { requests: Req[] }) {
           <th className="th">일수</th>
           <th className="th">종류</th>
           <th className="th">사유</th>
+          <th className="th">업무조치사항</th>
           <th className="th">경로</th>
           <th className="th text-right">처리</th>
         </tr>
@@ -61,6 +63,7 @@ export default function LeaveApprovals({ requests }: { requests: Req[] }) {
             <td className="td tnum">{r.days}일</td>
             <td className="td">{LEAVE_TYPE_LABEL[r.leaveType] ?? r.leaveType}</td>
             <td className="td text-slate-500">{r.reason ?? "-"}</td>
+            <td className="td text-slate-500 whitespace-pre-line">{r.workPlan || "-"}</td>
             <td className="td"><Pill kind={r.source === "SLACK" ? "INCENTIVE" : "DRAFT"}>{r.source}</Pill></td>
             <td className="td text-right">
               <div className="flex gap-1 justify-end">

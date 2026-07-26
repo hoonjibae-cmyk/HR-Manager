@@ -1,16 +1,19 @@
-import { prisma } from "@/lib/db";
-import { countLeaveDays, summarizeLeave, summarizeComp, type LeaveTxn } from "@/lib/leave";
 import {
   verifySlackSignature,
   slackConfigured,
   findEmployeeBySlack,
   autoLinkEmployeeBySlack,
   parseLeaveText,
-  postMessage,
-  approvalBlocks,
   openView,
   leaveModalView,
 } from "@/lib/slack";
+import {
+  leaveBalanceOf,
+  leaveBalanceText,
+  modalPeriod,
+  submitLeaveRequest,
+  rangeLabel,
+} from "@/lib/leave-slack";
 
 export const dynamic = "force-dynamic";
 
@@ -53,38 +56,19 @@ export async function POST(req: Request) {
     );
   }
 
-  // 잔여연차 조회 (직원 셀프 조회) — 본래 연차 + 대휴보상연차
+  // 잔여연차 조회 (직원 셀프 조회) — 이번 연차기간 기준 + 대휴보상연차
   if (!text || /^(조회|잔여|현황|내연차|status|balance)$/i.test(text)) {
-    const txns = await prisma.leaveTransaction.findMany({ where: { employeeId: emp.id } });
-    const mapped = txns.map((t) => ({
-      date: t.date,
-      days: t.days,
-      type: t.type as any,
-      category: (t as any).category ?? "STATUTORY",
-    })) as LeaveTxn[];
-    const s = summarizeLeave(emp.hireDate, new Date(), mapped);
-    const c = summarizeComp(mapped);
-    const next = s.nextGrantDate
-      ? `\n• 다음 발생: ${s.nextGrantDate.toISOString().slice(0, 10)} (${s.nextGrantDays}일)`
-      : "";
-    const compLine = c.granted > 0 ? `\n• 대휴보상연차: 발생 ${c.granted} · 사용 ${c.used} · *잔여 ${c.remaining}일*` : "";
+    const { summary, comp } = await leaveBalanceOf(emp);
     return ephemeral(
-      `*${emp.name}님의 연차 현황* (근속 ${s.serviceLabel})\n• 본래 연차: 발생 ${s.granted} · 사용 ${s.used} · *잔여 ${s.remaining}일*${compLine}${next}\n\n_신청: \`/연차 8/14 사유\` · 대휴 사용: \`/연차 대휴 8/14\` · 도움말: \`/연차 help\`_`
+      leaveBalanceText(emp.name, summary, comp) +
+        "\n\n_신청: `/연차 신청` · 빠른 신청: `/연차 8/14 사유` · 도움말: `/연차 help`_"
     );
   }
 
   // `/연차 신청` → 휴가신청서 양식(모달) 열기
   if (/^(신청|양식|신청서|form)$/i.test(text)) {
     const triggerId = form.get("trigger_id") || "";
-    const txns2 = await prisma.leaveTransaction.findMany({ where: { employeeId: emp.id } });
-    const mapped2 = txns2.map((t) => ({
-      date: t.date,
-      days: t.days,
-      type: t.type as any,
-      category: (t as any).category ?? "STATUTORY",
-    })) as LeaveTxn[];
-    const s2 = summarizeLeave(emp.hireDate, new Date(), mapped2);
-    const c2 = summarizeComp(mapped2);
+    const { summary: s2, comp: c2 } = await leaveBalanceOf(emp);
     await openView(
       triggerId,
       leaveModalView({
@@ -92,6 +76,7 @@ export async function POST(req: Request) {
         remaining: s2.remaining,
         compRemaining: c2.remaining,
         serviceLabel: s2.serviceLabel,
+        period: modalPeriod(s2),
         channel: form.get("channel_id") || undefined,
       })
     );
@@ -107,71 +92,22 @@ export async function POST(req: Request) {
   const parsed = parseLeaveText(text);
   if (!parsed) return ephemeral("날짜를 인식하지 못했습니다. 예: `/연차 8/14 개인사유`");
 
-  const holidays = (await prisma.holiday.findMany()).map((h) => h.date);
-  const days = countLeaveDays(parsed.start, parsed.end, { half: parsed.half, holidays });
-  if (days <= 0) return ephemeral("신청 가능한 근무일이 없습니다. 날짜를 확인하세요.");
-
-  // 현재 잔여 (본래 연차 / 대휴 — 신청 종류에 맞는 풀)
-  const txns = await prisma.leaveTransaction.findMany({ where: { employeeId: emp.id } });
-  const mapped = txns.map((t) => ({
-    date: t.date,
-    days: t.days,
-    type: t.type as any,
-    category: (t as any).category ?? "STATUTORY",
-  })) as LeaveTxn[];
-  const summary = summarizeLeave(emp.hireDate, new Date(), mapped);
-  const comp = summarizeComp(mapped);
-  const isCompReq = parsed.leaveType === "COMP";
-  const poolRemaining = isCompReq ? comp.remaining : summary.remaining;
-  const poolLabel = isCompReq ? "대휴보상연차" : "연차";
-
-  if (isCompReq && comp.remaining < days) {
-    return ephemeral(
-      `❌ 대휴보상연차 잔여(${comp.remaining}일)가 신청일수(${days}일)보다 부족합니다. 관리자에게 문의하세요.`
-    );
-  }
-
-  const reqRow = await prisma.leaveRequest.create({
-    data: {
-      employeeId: emp.id,
-      startDate: parsed.start,
-      endDate: parsed.end,
-      days,
-      leaveType: parsed.leaveType,
-      reason: parsed.reason,
-      status: "PENDING",
-      source: "SLACK",
-    },
+  // 신청 생성·승인카드 게시는 모달과 동일한 경로를 탄다
+  const res = await submitLeaveRequest(emp, {
+    leaveType: parsed.leaveType,
+    start: parsed.start,
+    end: parsed.end,
+    reason: parsed.reason,
+    channel: form.get("channel_id") || undefined,
   });
-
-  // 관리자 채널에 승인 요청 게시
-  const channel = process.env.SLACK_APPROVAL_CHANNEL;
-  if (channel) {
-    const posted: any = await postMessage(
-      channel,
-      `${poolLabel} 신청: ${emp.name} ${days}일`,
-      approvalBlocks({
-        requestId: reqRow.id,
-        name: emp.name,
-        dept: emp.department ?? "",
-        start: parsed.start,
-        end: parsed.end,
-        days,
-        reason: (isCompReq ? "[대휴] " : "") + parsed.reason,
-        remaining: poolRemaining,
-      })
-    );
-    if (posted?.ok) {
-      await prisma.leaveRequest.update({
-        where: { id: reqRow.id },
-        data: { slackChannel: posted.channel, slackTs: posted.ts },
-      });
-    }
-  }
+  if (!res.ok) return ephemeral(`❌ ${res.error}`);
 
   return ephemeral(
-    `✅ ${poolLabel} 신청이 접수되었습니다.\n• 기간: ${parsed.start.toISOString().slice(0, 10)}${
-      days > 1 ? " ~ " + parsed.end.toISOString().slice(0, 10) : ""
-    } (${days}일)\n• 현재 ${poolLabel} 잔여: ${poolRemaining}일\n관리자 승인 후 반영됩니다.`
+    `✅ ${res.poolLabel} 신청이 접수되었습니다.\n• 기간: ${rangeLabel(
+      parsed.start,
+      parsed.end,
+      res.days!
+    )} (${res.days}일)\n• 현재 ${res.poolLabel} 잔여: ${res.remaining}일\n관리자 승인 후 반영됩니다.` +
+      `\n\n_업무조치사항까지 함께 적으려면 \`/연차 신청\` 으로 양식을 열어 주세요._`
   );
 }

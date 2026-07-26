@@ -117,17 +117,32 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
               <h2 className="font-bold text-slate-800">연차 현황</h2>
               <Link href="/leave" className="text-xs text-brand-600 font-semibold">관리 →</Link>
             </div>
+            <div className="text-xs text-slate-500 mb-2">
+              이번 연차기간 <b className="text-slate-700">{ymd(summary.period.start)} ~ {ymd(summary.period.end)}</b>{" "}
+              ({summary.period.label})
+            </div>
             <div className="grid grid-cols-3 gap-3 text-center">
-              <Metric label="발생" value={summary.granted} />
-              <Metric label="사용" value={summary.used} />
-              <Metric label="잔여" value={summary.remaining} accent="text-brand-600" />
+              <Metric
+                label="발생"
+                value={summary.period.granted + summary.period.carriedOver}
+              />
+              <Metric label="사용" value={summary.period.used} />
+              <Metric label="잔여" value={summary.period.remaining} accent="text-brand-600" />
             </div>
             <div className="text-xs text-slate-400 mt-3 space-y-0.5">
               <div>근속: {summary.serviceLabel}</div>
-              {summary.expired > 0 && <div>소멸: {summary.expired}일</div>}
+              {summary.period.carriedOver > 0 && <div>이월: {summary.period.carriedOver}일</div>}
+              {summary.period.scheduled > 0 && (
+                <div>추가 발생 예정: {summary.period.scheduled}일 (매월 개근 1일)</div>
+              )}
+              <div>사용기한: {ymd(summary.period.end)} (미사용분 소멸)</div>
               {summary.nextGrantDate && (
                 <div>다음 발생: {ymd(summary.nextGrantDate)} ({summary.nextGrantDays}일)</div>
               )}
+              <div className="pt-1 text-slate-300">
+                입사 후 누계: 발생 {summary.granted} · 사용 {summary.used}
+                {summary.expired > 0 && ` · 소멸 ${summary.expired}`}
+              </div>
             </div>
             {comp.granted > 0 && (
               <div className="mt-3 pt-3 border-t border-slate-100 text-sm flex items-center justify-between">

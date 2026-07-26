@@ -93,6 +93,7 @@ export interface LeaveEventInput {
   reason?: string | null;
   department?: string | null;
   days?: number;
+  workPlan?: string | null; // 업무조치사항
 }
 
 /** 캘린더 일정 본문 (테스트를 위해 분리) */
@@ -102,6 +103,7 @@ export function buildLeaveEvent(input: LeaveEventInput) {
     `직원: ${input.name}${input.department ? ` (${input.department})` : ""}`,
     `종류: ${input.typeLabel}${input.days ? ` · ${input.days}일` : ""}`,
     input.reason ? `사유: ${input.reason}` : "",
+    input.workPlan ? `업무조치사항: ${input.workPlan}` : "",
     "",
     "※ 유쌤에듀 HR 프로그램에서 자동 등록된 일정입니다.",
   ].filter(Boolean);

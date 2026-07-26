@@ -272,8 +272,9 @@ model LeaveRequest {
   startDate  DateTime
   endDate    DateTime
   days       Float    // 신청 일수 (0.5 반차 지원)
-  leaveType  String   @default("ANNUAL") // ANNUAL(연차) | HALF_AM | HALF_PM | SICK 등
+  leaveType  String   @default("ANNUAL") // ANNUAL(연차) | HALF(반차) | COMP | SICK | SPECIAL
   reason     String?
+  workPlan   String?  // 업무조치사항 (부재 중 수업·업무 처리 계획)
   status     String   @default("PENDING") // PENDING | APPROVED | REJECTED | CANCEL_PENDING | CANCELED
   source     String   @default("WEB") // WEB | SLACK
   slackChannel String?

@@ -8,7 +8,7 @@ interface Emp { id: number; name: string; department: string | null }
 export default function AddLeaveRequest({ employees }: { employees: Emp[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ employeeId: "", startDate: "", endDate: "", leaveType: "ANNUAL", reason: "" });
+  const [f, setF] = useState({ employeeId: "", startDate: "", endDate: "", leaveType: "ANNUAL", reason: "", workPlan: "" });
   const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -22,7 +22,7 @@ export default function AddLeaveRequest({ employees }: { employees: Emp[] }) {
     setBusy(false);
     if (res.ok) {
       setOpen(false);
-      setF({ employeeId: "", startDate: "", endDate: "", leaveType: "ANNUAL", reason: "" });
+      setF({ employeeId: "", startDate: "", endDate: "", leaveType: "ANNUAL", reason: "", workPlan: "" });
       router.refresh();
     } else alert("등록 실패");
   }
@@ -51,6 +51,10 @@ export default function AddLeaveRequest({ employees }: { employees: Emp[] }) {
         </select>
       </div>
       <div className="flex-1 min-w-[140px]"><label className="label">사유</label><input className="input" value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} /></div>
+      <div className="flex-1 min-w-[180px]">
+        <label className="label">업무조치사항</label>
+        <input className="input" placeholder="부재 중 수업·업무 처리 (ex. A반 → 김OO 대강)" value={f.workPlan} onChange={(e) => setF({ ...f, workPlan: e.target.value })} />
+      </div>
       <button className="btn-primary" disabled={busy}>{busy ? "등록 중…" : "등록"}</button>
       <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>취소</button>
     </form>

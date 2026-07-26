@@ -64,13 +64,14 @@ describe("leaveModalView — 휴가신청서 모달 구조", () => {
 
   it("기존 워크플로 양식과 동일한 항목을 가진다", () => {
     const ids = view.blocks.filter((b: any) => b.type === "input").map((b: any) => b.block_id);
-    expect(ids).toEqual(["kind", "start", "end", "halftime", "reason"]);
+    expect(ids).toEqual(["kind", "start", "end", "halftime", "reason", "workplan"]);
   });
 
-  it("종료일·반차시간은 선택 항목", () => {
+  it("종료일·반차시간·업무조치사항은 선택 항목", () => {
     const opt = (id: string) => view.blocks.find((b: any) => b.block_id === id)?.optional;
     expect(opt("end")).toBe(true);
     expect(opt("halftime")).toBe(true);
+    expect(opt("workplan")).toBe(true);
     expect(opt("kind")).toBeUndefined(); // 필수
   });
 
@@ -78,6 +79,19 @@ describe("leaveModalView — 휴가신청서 모달 구조", () => {
     view.blocks
       .filter((b: any) => b.type === "input")
       .forEach((b: any) => expect(b.element.action_id).toBe("v"));
+  });
+
+  it("이번 연차기간이 상단에 표시된다", () => {
+    const v: any = leaveModalView({
+      empName: "홍길동",
+      remaining: 12,
+      compRemaining: 0,
+      serviceLabel: "3년 2개월",
+      period: { start: "2026-01-01", end: "2026-12-31", granted: 16, used: 4 },
+    });
+    expect(v.blocks[0].text.text).toContain("2026-01-01 ~ 2026-12-31");
+    expect(v.blocks[0].text.text).toContain("발생 16 · 사용 4");
+    expect(v.blocks[0].text.text).toContain("잔여 *12일*");
   });
 
   it("상단에 이름·잔여 연차가 표시된다", () => {
@@ -119,6 +133,7 @@ describe("readLeaveModal — 제출값 파싱", () => {
           end: { v: { selected_date: null } },
           halftime: { v: { value: " 14시~18시 " } },
           reason: { v: { value: "병원 방문" } },
+          workplan: { v: { value: "8/14 A반 → 김OO 선생님 대강" } },
         },
       },
     };
@@ -128,6 +143,7 @@ describe("readLeaveModal — 제출값 파싱", () => {
       end: null,
       halftime: "14시~18시",
       reason: "병원 방문",
+      workplan: "8/14 A반 → 김OO 선생님 대강",
     });
   });
 
@@ -138,6 +154,7 @@ describe("readLeaveModal — 제출값 파싱", () => {
       end: null,
       halftime: "",
       reason: "",
+      workplan: "",
     });
   });
 });
