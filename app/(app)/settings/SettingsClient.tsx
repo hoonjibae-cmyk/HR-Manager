@@ -35,6 +35,25 @@ export default function SettingsClient() {
     alert(res.ok ? "테스트 메일 발송 성공" : `실패: ${j.error || "SMTP 설정 확인"}`);
   }
 
+  async function postLauncher() {
+    const channel = prompt(
+      "휴가신청 버튼을 게시할 슬랙 채널 ID를 입력하세요.\n(비워두면 승인 채널에 게시 · 봇을 먼저 채널에 초대해야 합니다)",
+      ""
+    );
+    if (channel === null) return;
+    const res = await fetch("/api/slack/launcher", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel: channel.trim() }),
+    });
+    const j = await res.json().catch(() => ({}));
+    alert(
+      res.ok
+        ? `게시 완료 (채널 ${j.channel})${j.pinned ? " · 상단 고정됨" : ""}`
+        : `실패: ${j.error || ""}`
+    );
+  }
+
   if (!data) return <div className="text-slate-400">불러오는 중…</div>;
 
   return (
@@ -53,7 +72,7 @@ export default function SettingsClient() {
         }}
       />
       <EmailLogCard logs={data.emailLogs ?? []} />
-      <IntegrationCard integrations={data.integrations} onTestEmail={testEmail} />
+      <IntegrationCard integrations={data.integrations} onTestEmail={testEmail} onPostLauncher={postLauncher} />
     </div>
   );
 }
@@ -306,7 +325,7 @@ function EmailLogCard({ logs }: { logs: any[] }) {
   );
 }
 
-function IntegrationCard({ integrations: g, onTestEmail }: any) {
+function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher }: any) {
   const envHint = g.serverless
     ? "Vercel → Settings → Environment Variables 에 추가 후 재배포"
     : ".env 파일에 추가 후 서버 재시작";
@@ -347,8 +366,13 @@ function IntegrationCard({ integrations: g, onTestEmail }: any) {
           }
         />
       </div>
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex flex-wrap gap-2">
         <button className="btn-outline" onClick={onTestEmail}>테스트 메일 발송</button>
+        {g.slack && (
+          <button className="btn-outline" onClick={onPostLauncher}>
+            슬랙 채널에 휴가신청 버튼 게시
+          </button>
+        )}
       </div>
       {!g.smtp && (
         <p className="text-xs text-amber-700 mt-3">

@@ -35,6 +35,7 @@ oauth_config:
       - chat:write.public # 봇 미초대 채널에도 게시
       - users:read # 신청자 식별
       - users:read.email # 이메일로 직원 카드 자동 연결 (슬랙 ID 수동 등록 불필요)
+      - pins:write # 채널 상단에 '휴가신청서 작성' 버튼 고정
 
 settings:
   interactivity:

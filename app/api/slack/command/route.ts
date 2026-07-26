@@ -8,6 +8,8 @@ import {
   parseLeaveText,
   postMessage,
   approvalBlocks,
+  openView,
+  leaveModalView,
 } from "@/lib/slack";
 
 export const dynamic = "force-dynamic";
@@ -69,9 +71,34 @@ export async function POST(req: Request) {
     );
   }
 
+  // `/연차 신청` → 휴가신청서 양식(모달) 열기
+  if (/^(신청|양식|신청서|form)$/i.test(text)) {
+    const triggerId = form.get("trigger_id") || "";
+    const txns2 = await prisma.leaveTransaction.findMany({ where: { employeeId: emp.id } });
+    const mapped2 = txns2.map((t) => ({
+      date: t.date,
+      days: t.days,
+      type: t.type as any,
+      category: (t as any).category ?? "STATUTORY",
+    })) as LeaveTxn[];
+    const s2 = summarizeLeave(emp.hireDate, new Date(), mapped2);
+    const c2 = summarizeComp(mapped2);
+    await openView(
+      triggerId,
+      leaveModalView({
+        empName: emp.name,
+        remaining: s2.remaining,
+        compRemaining: c2.remaining,
+        serviceLabel: s2.serviceLabel,
+        channel: form.get("channel_id") || undefined,
+      })
+    );
+    return new Response("", { status: 200 });
+  }
+
   if (/도움|help/i.test(text)) {
     return ephemeral(
-      "*연차 사용법*\n• 잔여 조회: `/연차` 또는 `/연차 조회`\n• 신청: `/연차 8/14 개인사유`\n• 기간: `/연차 8/14~8/16 가족여행`\n• 반차: `/연차 오후반차 8/14 병원`\n• 대휴(보상연차) 사용: `/연차 대휴 8/14`"
+      "*휴가 사용법*\n• 신청서 양식 열기: `/연차 신청`\n• 잔여 조회: `/연차` 또는 `/연차 조회`\n• 빠른 신청: `/연차 8/14 개인사유`\n• 기간: `/연차 8/14~8/16 가족여행`\n• 반차: `/연차 오후반차 8/14 병원`\n• 대휴(보상연차) 사용: `/연차 대휴 8/14`"
     );
   }
 

@@ -250,3 +250,143 @@ export function decidedBlocks(args: {
     },
   ];
 }
+
+/* ==================== 휴가신청서 모달 (채널 버튼 → 양식) ==================== */
+
+export async function openView(triggerId: string, view: any) {
+  return slackCall("views.open", { trigger_id: triggerId, view });
+}
+
+/** 채널 상단에 고정할 '휴가 신청' 버튼 메시지 */
+export function leaveLauncherBlocks(companyName = "유쌤에듀") {
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*🏖️ 휴가 신청*\n아래 버튼을 누르면 휴가신청서 양식이 열립니다.\n_이름과 잔여 연차는 자동으로 확인되며, 관리자 승인 시 ${companyName} HR 시스템에 바로 반영됩니다._`,
+      },
+    },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          style: "primary",
+          text: { type: "plain_text", text: "휴가신청서 작성", emoji: true },
+          action_id: "open_leave_modal",
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "내 잔여 연차 확인", emoji: true },
+          action_id: "check_leave_balance",
+        },
+      ],
+    },
+  ];
+}
+
+export interface LeaveModalContext {
+  empName: string;
+  remaining: number;
+  compRemaining: number;
+  serviceLabel: string;
+  channel?: string;
+}
+
+/** 기존 워크플로 '휴가신청서' 양식을 그대로 재현한 모달 */
+export function leaveModalView(ctx: LeaveModalContext) {
+  const compLine =
+    ctx.compRemaining > 0 ? ` · 대휴보상연차 *${ctx.compRemaining}일*` : "";
+  return {
+    type: "modal",
+    callback_id: "leave_request_submit",
+    private_metadata: JSON.stringify({ channel: ctx.channel ?? "" }),
+    title: { type: "plain_text", text: "휴가신청서" },
+    submit: { type: "plain_text", text: "제출" },
+    close: { type: "plain_text", text: "닫기" },
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*${ctx.empName}* 님 (근속 ${ctx.serviceLabel})\n잔여 연차 *${ctx.remaining}일*${compLine}`,
+        },
+      },
+      { type: "divider" },
+      {
+        type: "input",
+        block_id: "kind",
+        label: { type: "plain_text", text: "휴가종류" },
+        element: {
+          type: "static_select",
+          action_id: "v",
+          placeholder: { type: "plain_text", text: "옵션을 선택하세요." },
+          options: [
+            { text: { type: "plain_text", text: "연차" }, value: "ANNUAL" },
+            { text: { type: "plain_text", text: "오전반차" }, value: "HALF_AM" },
+            { text: { type: "plain_text", text: "오후반차" }, value: "HALF_PM" },
+            { text: { type: "plain_text", text: "대휴(보상연차)" }, value: "COMP" },
+            { text: { type: "plain_text", text: "병가" }, value: "SICK" },
+            { text: { type: "plain_text", text: "경조사" }, value: "SPECIAL" },
+          ],
+        },
+      },
+      {
+        type: "input",
+        block_id: "start",
+        label: { type: "plain_text", text: "휴가시작일" },
+        element: { type: "datepicker", action_id: "v" },
+      },
+      {
+        type: "input",
+        block_id: "end",
+        optional: true,
+        label: { type: "plain_text", text: "휴가종료일" },
+        hint: { type: "plain_text", text: "하루 짜리 연차 또는 반차의 경우 종료일은 기입하지 마세요." },
+        element: { type: "datepicker", action_id: "v" },
+      },
+      {
+        type: "input",
+        block_id: "halftime",
+        optional: true,
+        label: { type: "plain_text", text: "반차일 경우 사용시간" },
+        hint: { type: "plain_text", text: "ex. 3시~5시30분" },
+        element: {
+          type: "plain_text_input",
+          action_id: "v",
+          placeholder: { type: "plain_text", text: "작성해 주세요." },
+        },
+      },
+      {
+        type: "input",
+        block_id: "reason",
+        label: { type: "plain_text", text: "휴가사유" },
+        element: {
+          type: "plain_text_input",
+          action_id: "v",
+          multiline: true,
+          placeholder: { type: "plain_text", text: "작성해 주세요." },
+        },
+      },
+    ],
+  };
+}
+
+/** 모달 제출 값 추출 */
+export function readLeaveModal(view: any): {
+  kind: string;
+  start: string | null;
+  end: string | null;
+  halftime: string;
+  reason: string;
+} {
+  const v = view?.state?.values ?? {};
+  return {
+    kind: v.kind?.v?.selected_option?.value ?? "ANNUAL",
+    start: v.start?.v?.selected_date ?? null,
+    end: v.end?.v?.selected_date ?? null,
+    halftime: (v.halftime?.v?.value ?? "").trim(),
+    reason: (v.reason?.v?.value ?? "").trim(),
+  };
+}
