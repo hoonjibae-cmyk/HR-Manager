@@ -1,15 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
+import { templateKeyOf, closePrecedingContracts, refreshEmployeeCard } from "@/lib/contracts";
 
 export const dynamic = "force-dynamic";
 
-import { templateKeyOf } from "@/lib/contract-sync";
-
 /**
- * 신규 계약 추가 생성.
- * 기존 확정(ACTIVE) 계약서는 삭제하지 않고 EXPIRED 로 전환하여 이력·재발급을 유지한다.
- * 새 계약의 보수 조건은 직원 카드에도 동기화되어 이후 급여 산정에 반영된다.
+ * 신규 계약 생성 — 보수조건을 바꾸는 유일한 경로.
+ * 직전 계약은 '새 계약 시작일 −1일' 로 닫아 날짜 빈틈이 생기지 않게 한다(이력은 유지).
+ * 직원 카드는 계약이 아니라 '오늘 시점 지배 계약' 을 비추므로, 미래 시작 계약을 만들어도
+ * 발효일 전까지는 카드·급여에 반영되지 않는다.
  */
 export async function POST(req: Request) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -22,6 +22,26 @@ export async function POST(req: Request) {
   const emp = await prisma.employee.findUnique({ where: { id: employeeId } });
   if (!emp) return NextResponse.json({ error: "직원을 찾을 수 없습니다" }, { status: 404 });
 
+  const startDate = new Date(body.startDate);
+  if (startDate < emp.hireDate)
+    return NextResponse.json(
+      { error: "계약 시작일이 입사일보다 빠릅니다." },
+      { status: 400 }
+    );
+
+  const endDate = body.endDate ? new Date(body.endDate) : null;
+  if (endDate && endDate < startDate)
+    return NextResponse.json({ error: "계약 종료일이 시작일보다 빠릅니다." }, { status: 400 });
+
+  const dup = await prisma.contract.findFirst({
+    where: { employeeId, startDate, status: { not: "DRAFT" } },
+  });
+  if (dup)
+    return NextResponse.json(
+      { error: `같은 날(${body.startDate}) 시작하는 계약이 이미 있습니다. 기존 계약을 수정하세요.` },
+      { status: 400 }
+    );
+
   const payScheme = body.payScheme || emp.payScheme;
   const incomeType =
     body.incomeType === "EMPLOYEE" || body.incomeType === "FREELANCE"
@@ -32,62 +52,44 @@ export async function POST(req: Request) {
   const numOrNull = (v: any, fallback: number | null) =>
     v === undefined ? fallback : v === null || v === "" ? null : Number(v);
 
-  const baseWage = num(body.baseWage, emp.baseWage);
-  const positionAllow = num(body.positionAllow, emp.positionAllow);
-  const mealAllow = num(body.mealAllow, emp.mealAllow);
-  const carAllow = num(body.carAllow, emp.carAllow);
-  const incThreshold = numOrNull(body.incThreshold, emp.incThreshold);
-  const incPerStudent = numOrNull(body.incPerStudent, emp.incPerStudent);
-  const ratioPercent = numOrNull(body.ratioPercent, emp.ratioPercent);
-  const position = body.position !== undefined ? body.position || null : emp.position;
-  const duty = body.duty !== undefined ? body.duty || null : emp.duty;
-
   try {
-    const [, contract] = await prisma.$transaction([
-      // 기존 진행 중 계약 → 만료 처리 (문서/이력은 그대로 유지)
-      prisma.contract.updateMany({
-        where: { employeeId, status: "ACTIVE" },
-        data: { status: "EXPIRED" },
-      }),
-      prisma.contract.create({
-        data: {
-          employeeId,
-          stage: body.stage || "RENEWAL_1",
-          templateKey: templateKeyOf(payScheme),
-          startDate: new Date(body.startDate),
-          endDate: body.endDate ? new Date(body.endDate) : null,
-          isProbation: !!body.isProbation,
-          probationMonths: num(body.probationMonths, 2),
-          baseWage,
-          positionAllow,
-          mealAllow,
-          carAllow,
-          incThreshold,
-          incPerStudent,
-          ratioPercent,
-          status: "ACTIVE",
-          note: body.note || null,
-        },
-      }),
-      // 직원 카드 동기화 — 이후 급여 산정·문서에 새 조건 반영
-      prisma.employee.update({
-        where: { id: employeeId },
-        data: {
-          incomeType,
-          payScheme,
-          baseWage,
-          positionAllow,
-          mealAllow,
-          carAllow,
-          incThreshold,
-          incPerStudent,
-          ratioPercent,
-          position,
-          duty,
-        },
-      }),
-    ]);
-    return NextResponse.json(contract, { status: 201 });
+    // 1) 직전 계약 닫기 (빈틈·중복 방지)
+    const closed = await closePrecedingContracts(employeeId, startDate);
+
+    // 2) 새 계약
+    const contract = await prisma.contract.create({
+      data: {
+        employeeId,
+        stage: body.stage || "RENEWAL_1",
+        templateKey: templateKeyOf(payScheme),
+        incomeType,
+        startDate,
+        endDate,
+        isProbation: !!body.isProbation,
+        probationMonths: num(body.probationMonths, 2),
+        baseWage: num(body.baseWage, emp.baseWage),
+        positionAllow: num(body.positionAllow, emp.positionAllow),
+        mealAllow: num(body.mealAllow, emp.mealAllow),
+        carAllow: num(body.carAllow, emp.carAllow),
+        incThreshold: numOrNull(body.incThreshold, emp.incThreshold),
+        incPerStudent: numOrNull(body.incPerStudent, emp.incPerStudent),
+        ratioPercent: numOrNull(body.ratioPercent, emp.ratioPercent),
+        status: "ACTIVE",
+        note: body.note || null,
+      },
+    });
+
+    // 3) 직책·업무는 계약서 본문에 쓰이므로 카드에도 반영 (보수조건 아님)
+    const personal: any = {};
+    if (body.position !== undefined) personal.position = body.position || null;
+    if (body.duty !== undefined) personal.duty = body.duty || null;
+    if (Object.keys(personal).length)
+      await prisma.employee.update({ where: { id: employeeId }, data: personal });
+
+    // 4) 카드를 '오늘 시점 지배 계약' 으로 갱신
+    await refreshEmployeeCard(employeeId);
+
+    return NextResponse.json({ ...contract, closedContractIds: closed }, { status: 201 });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });
   }

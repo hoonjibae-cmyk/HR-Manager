@@ -5,7 +5,7 @@ import { leaveSummaryFor } from "@/lib/repo";
 import { PageHeader, Pill } from "@/components/ui";
 import DocButton from "@/components/DocButton";
 import NewContractForm from "@/components/NewContractForm";
-import ContractSyncNotice from "@/components/ContractSyncNotice";
+import ContractEditForm from "@/components/ContractEditForm";
 import {
   INCOME_TYPE_LABEL,
   PAY_SCHEME_LABEL,
@@ -15,7 +15,8 @@ import {
   DAY_KO,
 } from "@/lib/constants";
 import { won, wonUnit, ymd } from "@/lib/format";
-import { termMismatches, templateKeyOf } from "@/lib/contract-sync";
+import { governingContract, contractIssues, paySchemeOf } from "@/lib/contracts";
+import ContractIssueNotice from "@/components/ContractIssueNotice";
 
 export const dynamic = "force-dynamic";
 
@@ -34,31 +35,36 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
   const { summary, comp } = await leaveSummaryFor(id);
   const sched = parseSchedule(emp.schedule);
 
-  // 계약서·급여는 계약 스냅샷을 읽는다 — 카드와 어긋나면 경고해 반영을 유도
-  const activeContract = emp.contracts.find((c) => c.status === "ACTIVE") ?? null;
-  const mismatched = termMismatches(emp as any, activeContract as any);
-  if (activeContract && activeContract.templateKey !== templateKeyOf(emp.payScheme))
-    mismatched.push("payScheme" as any);
-  const fmtTerm = (f: string, v: any) =>
-    v == null
-      ? "미설정"
-      : f === "ratioPercent"
-      ? `${(Number(v) * 100).toFixed(1)}%`
-      : f === "incThreshold"
-      ? `${v}명`
-      : f === "payScheme"
-      ? PAY_SCHEME_LABEL[String(v)] ?? String(v)
-      : `${won(Number(v))}원`;
-  const mismatchDetail = mismatched.map((f) => ({
-    field: f as string,
-    card: fmtTerm(f as string, f === ("payScheme" as any) ? emp.payScheme : (emp as any)[f]),
-    contract: fmtTerm(
-      f as string,
-      f === ("payScheme" as any)
-        ? (activeContract as any)?.templateKey
-        : (activeContract as any)?.[f]
-    ),
-  }));
+  // 보수조건은 계약이 정한다 — 카드는 '오늘 시점 지배 계약' 을 비추는 읽기 전용 뷰
+  const now = new Date();
+  const gov = governingContract(emp.contracts, now);
+  const issues = contractIssues(emp, emp.contracts, now);
+  const terms = gov
+    ? {
+        payScheme: paySchemeOf(gov.templateKey),
+        baseWage: gov.baseWage,
+        positionAllow: gov.positionAllow,
+        mealAllow: gov.mealAllow,
+        carAllow: gov.carAllow,
+        incThreshold: gov.incThreshold,
+        incPerStudent: gov.incPerStudent,
+        ratioPercent: gov.ratioPercent,
+        incomeType: gov.incomeType ?? emp.incomeType,
+      }
+    : {
+        payScheme: emp.payScheme,
+        baseWage: emp.baseWage,
+        positionAllow: emp.positionAllow,
+        mealAllow: emp.mealAllow,
+        carAllow: emp.carAllow,
+        incThreshold: emp.incThreshold,
+        incPerStudent: emp.incPerStudent,
+        ratioPercent: emp.ratioPercent,
+        incomeType: emp.incomeType,
+      };
+  const upcoming = emp.contracts
+    .filter((c) => c.startDate > now)
+    .sort((a, b) => a.startDate.getTime() - b.startDate.getTime())[0];
 
   return (
     <div>
@@ -74,13 +80,9 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         }
       />
 
-      {mismatched.length > 0 && (
+      {issues.length > 0 && (
         <div className="mb-6">
-          <ContractSyncNotice
-            employeeId={id}
-            fields={mismatched as string[]}
-            detail={mismatchDetail}
-          />
+          <ContractIssueNotice messages={issues.map((i) => i.message)} />
         </div>
       )}
 
@@ -102,14 +104,26 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
           </div>
 
           <div className="card p-5">
-            <h2 className="font-bold text-slate-800 mb-3">임금</h2>
+            <div className="flex items-start justify-between mb-1">
+              <h2 className="font-bold text-slate-800">보수 (현재 계약 기준)</h2>
+              <a href="#contracts" className="text-xs text-brand-600 font-semibold whitespace-nowrap">
+                계약 관리 →
+              </a>
+            </div>
+            <p className="text-xs text-slate-400 mb-3">
+              {gov
+                ? `${ymd(gov.startDate)} ~ ${gov.endDate ? ymd(gov.endDate) : "기한 없음"} 계약 적용 중`
+                : "적용 중인 계약이 없어 직원 카드 값을 표시합니다"}
+            </p>
             <dl className="text-sm space-y-2">
-              {emp.payScheme === "RATIO" ? (
-                <Row k="위탁비율">{((emp.ratioPercent ?? 0) * 100).toFixed(1)}%</Row>
+              <Row k="세무/보험">{INCOME_TYPE_LABEL[terms.incomeType] ?? terms.incomeType}</Row>
+              <Row k="급여형태">{PAY_SCHEME_LABEL[terms.payScheme] ?? terms.payScheme}</Row>
+              {terms.payScheme === "RATIO" ? (
+                <Row k="위탁비율">{((terms.ratioPercent ?? 0) * 100).toFixed(1)}%</Row>
               ) : (
-                <Row k={emp.payScheme === "HOURLY" ? "시급" : "월 기본급"}>{wonUnit(emp.baseWage)}</Row>
+                <Row k={terms.payScheme === "HOURLY" ? "시급" : "월 기본급"}>{wonUnit(terms.baseWage)}</Row>
               )}
-              {emp.payScheme === "HOURLY" && (
+              {terms.payScheme === "HOURLY" && (
                 <Row k="휴게 30분">
                   {emp.breakPaid ? (
                     <span className="text-emerald-600">유급 (기록 그대로 인정)</span>
@@ -118,13 +132,21 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                   )}
                 </Row>
               )}
-              {emp.positionAllow > 0 && <Row k="직책수당">{wonUnit(emp.positionAllow)}</Row>}
-              {emp.mealAllow > 0 && <Row k="식대(비과세)">{wonUnit(emp.mealAllow)}</Row>}
-              {emp.carAllow > 0 && <Row k="차량유지비">{wonUnit(emp.carAllow)}</Row>}
-              {emp.payScheme === "INCENTIVE" && (
-                <Row k="인센티브">학생 {emp.incThreshold}명 초과 시 1명당 {won(emp.incPerStudent)}원</Row>
+              {terms.positionAllow > 0 && <Row k="직책수당">{wonUnit(terms.positionAllow)}</Row>}
+              {terms.mealAllow > 0 && <Row k="식대(비과세)">{wonUnit(terms.mealAllow)}</Row>}
+              {terms.carAllow > 0 && <Row k="차량유지비">{wonUnit(terms.carAllow)}</Row>}
+              {terms.payScheme === "INCENTIVE" && (
+                <Row k="인센티브">학생 {terms.incThreshold}명 초과 시 1명당 {won(terms.incPerStudent)}원</Row>
               )}
             </dl>
+            {upcoming && (
+              <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-3">
+                {ymd(upcoming.startDate)}부터 적용될 새 계약이 등록돼 있습니다. 발효일이 지나면 이 값이 자동으로 바뀝니다.
+              </p>
+            )}
+            <p className="text-[11px] text-slate-400 mt-3">
+              보수조건은 계약서가 기준입니다. 바꾸려면 아래 <b>계약 이력</b>에서 계약을 수정하거나 새로 작성하세요.
+            </p>
           </div>
 
           <div className="card p-5">
@@ -194,10 +216,14 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
           </div>
           )}
 
-          <div className="card p-5">
-            <div className="flex items-center justify-between mb-3">
+          <div className="card p-5" id="contracts">
+            <div className="flex items-center justify-between mb-1">
               <h2 className="font-bold text-slate-800">계약 이력</h2>
             </div>
+            <p className="text-xs text-slate-400 mb-3">
+              보수조건은 여기서만 바꿉니다. 새 계약을 만들면 직전 계약은 <b>시작일 하루 전</b>으로
+              자동 종료되어 기간이 빈틈없이 이어집니다.
+            </p>
             <div className="mb-3">
               <NewContractForm
                 emp={{
@@ -218,18 +244,59 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
             </div>
             <ul className="space-y-2">
               {emp.contracts.map((c) => (
-                <li key={c.id} className="border border-slate-100 rounded-lg p-3">
+                <li
+                  key={c.id}
+                  className={`border rounded-lg p-3 ${
+                    gov?.id === c.id ? "border-brand-300 bg-brand-50/40" : "border-slate-100"
+                  }`}
+                >
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-sm">{CONTRACT_STAGE_LABEL[c.stage]}</span>
+                    <span className="font-semibold text-sm">
+                      {CONTRACT_STAGE_LABEL[c.stage]}
+                      {gov?.id === c.id && (
+                        <span className="ml-2 pill bg-brand-100 text-brand-700">현재 적용</span>
+                      )}
+                      {c.startDate > now && (
+                        <span className="ml-2 pill bg-amber-100 text-amber-700">발효 예정</span>
+                      )}
+                    </span>
                     <Pill kind={c.status}>{c.status}</Pill>
                   </div>
                   <div className="text-xs text-slate-400 mt-1">
-                    {ymd(c.startDate)} ~ {c.endDate ? ymd(c.endDate) : "기한 미기재(공란)"}
+                    {ymd(c.startDate)} ~ {c.endDate ? ymd(c.endDate) : "기한 없음"}
                     {c.isProbation && " · 수습 2개월"}
                     {c.note ? ` · ${c.note}` : ""}
                   </div>
-                  <div className="mt-2">
+                  <div className="text-xs text-slate-500 mt-1 tnum">
+                    {PAY_SCHEME_LABEL[paySchemeOf(c.templateKey)]} ·{" "}
+                    {c.templateKey === "RATIO"
+                      ? `위탁 ${((c.ratioPercent ?? 0) * 100).toFixed(1)}%`
+                      : `${wonUnit(c.baseWage)}`}
+                    {c.mealAllow > 0 && ` · 식대 ${wonUnit(c.mealAllow)}`}
+                    {c.positionAllow > 0 && ` · 직책 ${wonUnit(c.positionAllow)}`}
+                  </div>
+                  <div className="mt-2 flex items-center gap-3">
                     <DocButton endpoint="/api/documents/contract" body={{ contractId: c.id }} label="계약서 발급" className="text-xs text-brand-600 font-semibold" />
+                    <ContractEditForm
+                      contract={{
+                        id: c.id,
+                        stage: c.stage,
+                        startDate: c.startDate.toISOString().slice(0, 10),
+                        endDate: c.endDate ? c.endDate.toISOString().slice(0, 10) : "",
+                        isProbation: c.isProbation,
+                        payScheme: paySchemeOf(c.templateKey),
+                        incomeType: c.incomeType ?? emp.incomeType,
+                        baseWage: c.baseWage,
+                        positionAllow: c.positionAllow,
+                        mealAllow: c.mealAllow,
+                        carAllow: c.carAllow,
+                        incThreshold: c.incThreshold,
+                        incPerStudent: c.incPerStudent,
+                        ratioPercent: c.ratioPercent,
+                        note: c.note ?? "",
+                      }}
+                      deletable={emp.contracts.length > 1}
+                    />
                   </div>
                 </li>
               ))}

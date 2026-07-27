@@ -4,6 +4,7 @@ import { PageHeader, Pill, Empty } from "@/components/ui";
 import SlackLinkButton from "@/components/SlackLinkButton";
 import { INCOME_TYPE_LABEL, PAY_SCHEME_LABEL } from "@/lib/constants";
 import { won, ymd } from "@/lib/format";
+import { governingContract, paySchemeOf, contractIssues } from "@/lib/contracts";
 
 export const dynamic = "force-dynamic";
 
@@ -20,10 +21,28 @@ export default async function EmployeesPage({
       { position: { contains: searchParams.q } },
     ];
 
-  const [emps, depts] = await Promise.all([
-    prisma.employee.findMany({ where, orderBy: { empNo: "asc" } }),
+  const [rows, depts] = await Promise.all([
+    prisma.employee.findMany({
+      where,
+      orderBy: { empNo: "asc" },
+      include: { contracts: { where: { status: { not: "DRAFT" } }, orderBy: { startDate: "asc" } } },
+    }),
     prisma.employee.groupBy({ by: ["department"] }),
   ]);
+
+  // 표시 조건은 '오늘 시점 지배 계약' 기준 (카드 값은 그 거울일 뿐)
+  const now = new Date();
+  const emps = rows.map((e) => {
+    const gov = governingContract(e.contracts, now);
+    return {
+      ...e,
+      payScheme: gov ? paySchemeOf(gov.templateKey) : e.payScheme,
+      incomeType: gov?.incomeType ?? e.incomeType,
+      baseWage: gov?.baseWage ?? e.baseWage,
+      ratioPercent: gov ? gov.ratioPercent : e.ratioPercent,
+      contractIssueCount: contractIssues(e, e.contracts, now).length,
+    };
+  });
 
   return (
     <div>
@@ -97,6 +116,9 @@ export default async function EmployeesPage({
                   <td className="td">
                     <div>{e.department}</div>
                     <div className="text-xs text-slate-400">{e.position}</div>
+                    {e.contractIssueCount > 0 && (
+                      <div className="text-[11px] text-amber-600 mt-0.5">계약 기간 확인 필요</div>
+                    )}
                   </td>
                   <td className="td">
                     <Pill kind={e.incomeType}>{INCOME_TYPE_LABEL[e.incomeType]}</Pill>

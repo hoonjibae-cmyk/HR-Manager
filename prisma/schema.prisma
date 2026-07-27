@@ -143,7 +143,8 @@ model Contract {
   probationMonths Int   @default(2) // 수습 2개월
   probationEndDate DateTime?
 
-  // 계약 시점 보수 스냅샷
+  // 계약 시점 보수 스냅샷 (직원 카드는 이 값을 비추는 거울일 뿐 — lib/contracts.ts)
+  incomeType    String? // EMPLOYEE(4대보험) | FREELANCE(사업소득 3.3%)
   baseWage      Int    @default(0)
   positionAllow Int    @default(0)
   mealAllow     Int    @default(0)

@@ -18,12 +18,23 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   HTML 을 만들고 `lib/pdf.ts` 가 puppeteer-core 로 PDF 렌더(Vercel=@sparticuz/chromium, 로컬=설치된 Chrome/Edge).
   한글폰트는 `assets/fonts/` 를 base64 임베드(`lib/fonts.ts`).
 - **DB 어댑터**: `lib/repo.ts` 가 Prisma 레코드 ↔ 엔진 입력/문서 입력 변환. 회사정보·요율·세액표 로딩.
+- **계약 = 보수조건의 단일 진실**: `lib/contracts.ts`. 급여 산정·계약서 발급·화면 표시 모두
+  `governingContract(contracts, asOf)` 로 그 시점 계약을 찾아 쓴다.
 - **서비스**: `lib/payroll-service.ts`(월 급여 upsert), `lib/leave-service.ts`(승인/조정),
   `lib/doc-service.ts`(PDF 생성+저장+기록), `lib/email.ts`, `lib/scheduler.ts`, `lib/slack.ts`.
 - **API**: `app/api/**` — 모두 `isAuthed()` 가드(슬랙/크론 제외, 자체 서명검증).
 - **화면**: `app/(app)/**` — 서버컴포넌트가 데이터 로드, `components/*Client.tsx` 가 상호작용.
 
 ## 규칙/주의
+- **보수조건은 계약(Contract)만 고친다.** 직원 카드(Employee)의 기본급·수당·위탁비율·인센티브·
+  급여형태·세무구분은 '오늘 시점 지배 계약' 을 비추는 거울일 뿐이라 직접 수정하지 않는다
+  (`PATCH /api/employees/[id]` 는 인적사항만 받고 보수 필드는 무시).
+  변경 경로는 둘: 신규 계약 작성(`POST /api/contracts`) 또는 기존 계약 수정(`PATCH /api/contracts/[id]`).
+  두 경로 모두 끝에 `refreshEmployeeCard()` 로 카드를 다시 맞춘다.
+- **계약 기간에 빈틈을 만들지 않는다.** 신규 계약 생성 시 `closePrecedingContracts()` 가 직전 계약을
+  '시작일 −1일' 로 닫는다. 입사일~오늘(퇴사자는 퇴사일)이 덮이지 않으면 `contractIssues()` 가
+  화면에 경고를 띄운다.
+- 미래 시작 계약을 만들어도 발효일 전까지는 카드·급여에 반영되지 않는다(지배 계약이 아직 이전 계약).
 - 이식성을 위해 Prisma **enum 대신 문자열** + `lib/constants.ts` 의 상수/라벨 사용.
 - DB는 Postgres. 스키마 변경 시 `npx prisma db push`(DIRECT_URL 사용). 서버리스 런타임은 pgbouncer(DATABASE_URL).
 - 서버리스(Vercel)에서는 파일 저장 대신 PDF를 버퍼로 스트리밍/첨부. 예약발송은 Vercel Cron → `/api/cron`.
@@ -38,6 +49,7 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 
 ## 자주 하는 작업
 - **계약서 문구 수정** → `lib/documents.ts` 의 `contractHtml`.
+- **직원 보수조건 변경** → 직원 상세 → 계약 이력 → *조건 수정*(오타 정정) 또는 *신규 계약 작성*(변경 발효일 지정).
 - **급여 항목 추가** → `lib/payroll.ts`(계산) + `schema.prisma`(PayrollRecord) + `lib/documents-pay.ts`(명세서 표시).
 - **연차 규칙 변경** → `lib/leave.ts`(`annualLeaveDays`, `generateGrants`) + 테스트.
 - **슬랙 명령 추가** → `app/api/slack/command/route.ts`.

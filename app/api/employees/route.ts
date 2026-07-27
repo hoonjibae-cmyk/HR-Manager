@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
+import { templateKeyOf } from "@/lib/contracts";
 
 export const dynamic = "force-dynamic";
 
@@ -62,14 +63,8 @@ export async function POST(req: Request) {
         data: {
           employeeId: emp.id,
           stage: body.contractStage || "SHORT_TERM_1",
-          templateKey:
-            emp.payScheme === "HOURLY"
-              ? "HOURLY"
-              : emp.payScheme === "RATIO"
-              ? "RATIO"
-              : emp.payScheme === "INCENTIVE"
-              ? "INCENTIVE"
-              : "MONTHLY",
+          templateKey: templateKeyOf(emp.payScheme),
+          incomeType: emp.incomeType,
           startDate: emp.hireDate,
           endDate: body.contractEnd ? new Date(body.contractEnd) : null,
           isProbation: body.isProbation ?? true,

@@ -71,12 +71,20 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     e.preventDefault();
     setSaving(true);
     setErr("");
-    const payload = {
-      ...f,
-      ratioPercent: f.ratioPercent !== "" ? Number(f.ratioPercent) / 100 : null,
-      schedule: JSON.stringify(schedule),
-      createContract: !editing,
-    };
+    // 보수조건은 계약이 정한다 — 수정 모드에서는 인적사항만 보낸다
+    const {
+      baseWage, positionAllow, mealAllow, carAllow,
+      incThreshold, incPerStudent, ratioPercent, payScheme, incomeType, contractEnd,
+      ...personal
+    } = f;
+    const payload = editing
+      ? { ...personal, schedule: JSON.stringify(schedule) }
+      : {
+          ...f,
+          ratioPercent: f.ratioPercent !== "" ? Number(f.ratioPercent) / 100 : null,
+          schedule: JSON.stringify(schedule),
+          createContract: true,
+        };
     const res = await fetch(
       editing ? `/api/employees/${initial.id}` : "/api/employees",
       {
@@ -141,6 +149,7 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
               <option value="0">퇴직</option>
             </select>
           </Field>
+          {!editing && (
           <Field label="세무/보험 구분">
             <select
               className="input"
@@ -154,40 +163,49 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
               {Object.entries(INCOME_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </Field>
+          )}
+          {!editing && (
           <Field label="급여형태">
             <select className="input" value={f.payScheme} onChange={(e) => set("payScheme", e.target.value)}>
               {Object.entries(PAY_SCHEME_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </Field>
-          <Field label="부양가족수(본인포함)"><input type="number" min={1} className="input" value={f.dependents} onChange={(e) => set("dependents", e.target.value)} /></Field>
-        </div>
-      </div>
-
-      {/* 임금 */}
-      <div className="card p-5">
-        <h2 className="font-bold text-slate-800 mb-4">임금 정보</h2>
-        <div className="grid md:grid-cols-3 gap-4">
-          {f.payScheme !== "RATIO" && (
-            <Field label={f.payScheme === "HOURLY" ? "시급 (원)" : "월 기본급 (원)"}>
-              <input type="number" className="input" value={f.baseWage} onChange={(e) => set("baseWage", e.target.value)} />
-            </Field>
           )}
+          <Field label="부양가족수(본인포함)"><input type="number" min={1} className="input" value={f.dependents} onChange={(e) => set("dependents", e.target.value)} /></Field>
           {f.payScheme === "HOURLY" && (
-            <div className="md:col-span-2">
-              <label className="label">휴게 30분 처리 (시간기록표 급여 산정)</label>
+            <Field label="휴게 30분 처리 (시간기록표)" full>
               <label className="flex items-center gap-2 text-sm border border-slate-200 rounded-lg px-3 py-2">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4"
-                  checked={f.breakPaid}
-                  onChange={(e) => set("breakPaid", e.target.checked)}
-                />
+                <input type="checkbox" className="w-4 h-4" checked={f.breakPaid} onChange={(e) => set("breakPaid", e.target.checked)} />
                 <span>
                   <b>휴게 30분 유급</b> — 시간기록표의 시간을 그대로 인정
                   <span className="text-slate-400"> (체크 해제 시: 근무일마다 30분씩 차감)</span>
                 </span>
               </label>
-            </div>
+            </Field>
+          )}
+        </div>
+      </div>
+
+      {/* 임금 — 등록 시에만 입력(초기 계약 조건). 수정은 계약 이력에서. */}
+      {editing ? (
+        <div className="card p-5">
+          <h2 className="font-bold text-slate-800 mb-2">보수 정보</h2>
+          <p className="text-sm text-slate-500">
+            기본급·수당·위탁비율·인센티브·급여형태·세무구분은 <b>계약서가 기준</b>이므로 여기서 수정하지 않습니다.
+          </p>
+          <p className="text-xs text-slate-400 mt-1">
+            직원 상세 화면의 <b>계약 이력</b>에서 계약을 수정하거나 새 계약을 작성하면 급여 산정과 계약서 발급에 함께 반영됩니다.
+          </p>
+        </div>
+      ) : (
+      <div className="card p-5">
+        <h2 className="font-bold text-slate-800 mb-1">임금 정보 <span className="text-xs font-normal text-slate-400">(초기 계약 조건)</span></h2>
+        <p className="text-xs text-slate-400 mb-4">입사일부터 적용되는 첫 계약의 조건으로 저장됩니다. 이후 변경은 계약 이력에서 합니다.</p>
+        <div className="grid md:grid-cols-3 gap-4">
+          {f.payScheme !== "RATIO" && (
+            <Field label={f.payScheme === "HOURLY" ? "시급 (원)" : "월 기본급 (원)"}>
+              <input type="number" className="input" value={f.baseWage} onChange={(e) => set("baseWage", e.target.value)} />
+            </Field>
           )}
           {isMonthly && (
             <>
@@ -207,6 +225,7 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           )}
         </div>
       </div>
+      )}
 
       {/* 근로시간표 */}
       <div className="card p-5">
