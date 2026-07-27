@@ -18,6 +18,10 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - **엔진(순수 함수, DB 무관, 테스트 있음)**: `lib/payroll.ts`(급여), `lib/leave.ts`(연차, 근로기준법 §60),
   `lib/overtime.ts`(보강 오버타임, 근로기준법 §56).
   UI/API 는 이 엔진을 호출만 한다. 계산 로직 변경은 여기서.
+- **학원 로고**: `Company.logo` 에 **data URI 로 담는다**(파일 아님) — 서버리스는 쓸 수 있는 파일 경로가
+  없고 재배포 없이 화면에서 바꿔야 하기 때문. 설정 화면(`components/LogoUpload.tsx`)이 브라우저에서
+  긴 변 320px 로 줄여 올리므로 원본 png 를 그대로 골라도 된다. 문서 머리글은 `logoImg(company)`,
+  화면은 사이드바·로그인에서 쓴다. 없으면 회사명만 나온다.
 - **문서→PDF**: `lib/documents.ts`(계약서/서약서/동의서), `lib/documents-pay.ts`(명세서/증명서) 가
   HTML 을 만들고 `lib/pdf.ts` 가 puppeteer-core 로 PDF 렌더(Vercel=@sparticuz/chromium, 로컬=설치된 Chrome/Edge).
   한글폰트는 `assets/fonts/` 를 base64 임베드(`lib/fonts.ts`).

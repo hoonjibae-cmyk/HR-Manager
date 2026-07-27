@@ -2,7 +2,7 @@
 
 import { won, wonUnit, ymd, ymdKo } from "./format";
 import { INCOME_TYPE_LABEL } from "./constants";
-import type { DocCompany, DocEmployee } from "./documents";
+import { logoImg, type DocCompany, type DocEmployee } from "./documents";
 import {
   summarizeIncentive,
   STUDENT_STATUS_LABEL,
@@ -59,8 +59,10 @@ function esc(s: any): string {
 
 function head(c: DocCompany, extra = ""): string {
   return `<div class="company-head">
-    <div><div class="cname">${esc(c.name)}</div>
-      <div class="cmeta">대표 ${esc(c.ceo)} · 사업자등록번호 ${esc(c.bizNo)}<br/>${esc(c.address)} · ${esc(c.phone)}</div></div>
+    <div class="cbrand">${logoImg(c)}
+      <div><div class="cname">${esc(c.name)}</div>
+        <div class="cmeta">대표 ${esc(c.ceo)} · 사업자등록번호 ${esc(c.bizNo)}<br/>${esc(c.address)} · ${esc(c.phone)}</div></div>
+    </div>
     <div style="text-align:right">${extra}</div>
   </div>`;
 }

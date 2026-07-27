@@ -12,6 +12,8 @@ export interface DocCompany {
   phone: string;
   address: string;
   payday?: number;
+  /** 학원 로고 (data URI). 없으면 문서 머리에 회사명만 나온다 */
+  logo?: string | null;
 }
 export interface DocEmployee {
   name: string;
@@ -76,10 +78,17 @@ function inlineSign(label: string): string {
   return `<p class="inline-sign">${esc(label)} : ${blank(12)} (인)</p>`;
 }
 
+/** 로고가 등록돼 있으면 회사명 왼쪽에 함께 찍는다 */
+export function logoImg(c: DocCompany): string {
+  return c.logo ? `<img class="clogo" src="${c.logo}" alt=""/>` : "";
+}
+
 function companyHead(c: DocCompany, tag?: string): string {
   return `<div class="company-head">
-    <div><div class="cname">${esc(c.name)}</div>
-      <div class="cmeta">대표 ${esc(c.ceo)} · 사업자등록번호 ${esc(c.bizNo)}<br/>${esc(c.address)} · ${esc(c.phone)}</div>
+    <div class="cbrand">${logoImg(c)}
+      <div><div class="cname">${esc(c.name)}</div>
+        <div class="cmeta">대표 ${esc(c.ceo)} · 사업자등록번호 ${esc(c.bizNo)}<br/>${esc(c.address)} · ${esc(c.phone)}</div>
+      </div>
     </div>
     ${tag ? `<div class="doc-tag">${esc(tag)}</div>` : ""}
   </div>`;

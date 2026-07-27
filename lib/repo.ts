@@ -24,6 +24,7 @@ export async function getCompany(): Promise<DocCompany & { payday: number }> {
       phone: "031-794-3306",
       address: "경기도 하남시 미사강변대로 216 한강트윈프라자2 3층",
       payday: 7,
+      logo: null,
     };
   }
   return {
@@ -35,6 +36,7 @@ export async function getCompany(): Promise<DocCompany & { payday: number }> {
     phone: c.phone,
     address: c.address,
     payday: c.payday,
+    logo: (c as any).logo ?? null,
   };
 }
 

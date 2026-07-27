@@ -14,12 +14,18 @@ const NAV = [
   { href: "/settings", label: "설정", icon: "⚙" },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ logo, companyName }: { logo?: string | null; companyName?: string }) {
   const path = usePathname();
   return (
     <aside className="w-60 shrink-0 bg-white border-r border-slate-200 flex flex-col">
       <div className="px-5 py-5 border-b border-slate-100">
-        <div className="text-lg font-extrabold text-brand-700">유쌤에듀 HR</div>
+        {logo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={logo} alt={companyName ?? "유쌤에듀"} className="h-9 w-auto max-w-[180px] object-contain mb-2" />
+        ) : null}
+        <div className="text-lg font-extrabold text-brand-700">
+          {logo ? "HR 관리" : "유쌤에듀 HR"}
+        </div>
         <div className="text-xs text-slate-400 mt-0.5">인사·급여·연차 관리</div>
       </div>
       <nav className="flex-1 p-3 space-y-1">

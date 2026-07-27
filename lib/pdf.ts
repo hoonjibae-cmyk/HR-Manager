@@ -250,6 +250,9 @@ export const DOC_CSS = `
 .doc-title{font-weight:800;font-size:19pt;text-align:center;letter-spacing:0.5em;margin:2px 0 4px;padding-right:0.5em;}
 .doc-sub{text-align:center;color:#64748b;font-size:9.5pt;margin-bottom:14px;}
 .company-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1f45f5;padding-bottom:6px;margin-bottom:14px;}
+.company-head .cbrand{display:flex;align-items:center;gap:10px;}
+/* 로고는 높이만 고정하고 가로는 비율대로 — 어떤 png 를 넣어도 머리글이 흐트러지지 않는다 */
+.company-head .clogo{height:30px;width:auto;max-width:150px;object-fit:contain;}
 .company-head .cname{font-size:15pt;font-weight:800;letter-spacing:-0.01em;}
 .company-head .cmeta{font-size:8.5pt;color:#64748b;line-height:1.55;margin-top:2px;}
 .company-head .doc-tag{font-size:8.5pt;color:#94a3b8;text-align:right;}
@@ -317,6 +320,7 @@ table.kv{page-break-inside:avoid;break-inside:avoid;}
 .compact .doc-title{font-size:14.5pt;margin:0 0 2px;}
 .compact .doc-sub{font-size:8.6pt;margin-bottom:8px;}
 .compact .company-head{margin-bottom:8px;padding-bottom:4px;}
+.compact .company-head .clogo{height:24px;max-width:120px;}
 .compact .company-head .cname{font-size:12.5pt;}
 .compact .company-head .cmeta{font-size:8pt;line-height:1.45;}
 .compact .clause{margin:4px 0;}
