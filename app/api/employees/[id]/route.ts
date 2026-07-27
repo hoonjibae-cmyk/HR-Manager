@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logActivity } from "@/lib/activity";
 import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
 import { CONTRACT_OWNED_FIELDS } from "@/lib/contracts";
@@ -42,6 +43,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
   try {
     const emp = await prisma.employee.update({ where: { id: Number(params.id) }, data });
+    await logActivity({
+      action: "EMPLOYEE_UPDATE",
+      employeeId: emp.id,
+      target: emp.name,
+      summary: `${emp.name}의 인적사항을 수정했습니다 (${Object.keys(data).join(", ")}).`,
+      meta: { changed: Object.keys(data) },
+    });
     return NextResponse.json({ ...emp, ignoredContractFields: ignored });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });
@@ -51,7 +59,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   try {
+    const gone = await prisma.employee.findUnique({ where: { id: Number(params.id) } });
     await prisma.employee.delete({ where: { id: Number(params.id) } });
+    await logActivity({
+      action: "EMPLOYEE_DELETE",
+      target: gone?.name,
+      summary: `직원 ${gone?.name ?? params.id}을(를) 삭제했습니다. (급여·계약·연차 기록 포함)`,
+    });
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });

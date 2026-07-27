@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { invalidateTaxCache } from "@/lib/repo";
 import { computeNextRun, formatKst } from "@/lib/scheduler";
 import { gcalConfigured } from "@/lib/gcal";
+import { logActivity } from "@/lib/activity";
 
 export const dynamic = "force-dynamic";
 
@@ -56,9 +57,21 @@ export async function GET() {
   });
 }
 
+const SECTION_LABEL: Record<string, string> = {
+  company: "회사 정보",
+  rates: "4대보험 요율",
+  schedule: "명세서 예약 발송",
+};
+
 export async function PATCH(req: Request) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { section, data } = await req.json();
+  await logActivity({
+    action: "SETTINGS_UPDATE",
+    target: SECTION_LABEL[section] ?? section,
+    summary: `설정을 변경했습니다 — ${SECTION_LABEL[section] ?? section}`,
+    meta: data,
+  });
 
   if (section === "company") {
     const c = await prisma.company.upsert({

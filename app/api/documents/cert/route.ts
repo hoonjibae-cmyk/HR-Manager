@@ -1,4 +1,5 @@
 import { isAuthed } from "@/lib/auth";
+import { logActivity } from "@/lib/activity";
 import { genCertificate, pdfResponse } from "@/lib/doc-service";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +12,7 @@ export async function POST(req: Request) {
     return new Response("invalid type", { status: 400 });
   try {
     const { pdf, filename } = await genCertificate(Number(employeeId), type, { purpose });
+    await logActivity({ action: "DOC_ISSUE", target: filename, summary: `증명서를 발급했습니다 — ${filename}` });
     return pdfResponse(pdf, filename);
   } catch (e: any) {
     return new Response(e.message, { status: 400 });

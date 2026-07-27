@@ -200,8 +200,10 @@ export async function runDueSchedules(
   });
   await prisma.auditLog.create({
     data: {
-      action: "SCHEDULED_SEND",
-      target: `${year}-${month}`,
+      action: "PAYSLIP_SEND_SCHEDULED",
+      actor: "CRON",
+      target: `${year}-${String(month).padStart(2, "0")}`,
+      summary: `예약 발송 실행 — ${year}년 ${month}월 명세서 (성공 ${(result as any).sent ?? 0} · 실패 ${(result as any).failed ?? 0})`,
       detail: JSON.stringify({ ...result, nextRunAt }),
     },
   });

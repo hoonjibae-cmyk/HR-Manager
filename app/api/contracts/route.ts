@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logActivity } from "@/lib/activity";
 import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
 import { templateKeyOf, closePrecedingContracts, refreshEmployeeCard } from "@/lib/contracts";
@@ -89,6 +90,15 @@ export async function POST(req: Request) {
     // 4) 카드를 '오늘 시점 지배 계약' 으로 갱신
     await refreshEmployeeCard(employeeId);
 
+    await logActivity({
+      action: "CONTRACT_CREATE",
+      employeeId,
+      target: emp.name,
+      summary:
+        `${emp.name}의 신규 계약을 작성했습니다 (${body.startDate} 시작).` +
+        (closed.length ? ` 직전 계약 ${closed.length}건을 자동 종료했습니다.` : ""),
+      meta: { contractId: contract.id, startDate: body.startDate, endDate: body.endDate ?? null },
+    });
     return NextResponse.json({ ...contract, closedContractIds: closed }, { status: 201 });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });

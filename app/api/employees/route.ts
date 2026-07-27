@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logActivity } from "@/lib/activity";
 import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
 import { templateKeyOf } from "@/lib/contracts";
@@ -80,6 +81,13 @@ export async function POST(req: Request) {
         },
       });
     }
+    await logActivity({
+      action: "EMPLOYEE_CREATE",
+      employeeId: emp.id,
+      target: emp.name,
+      summary: `직원 ${emp.name}(${emp.empNo})을 등록했습니다.`,
+      meta: { department: emp.department, hireDate: emp.hireDate },
+    });
     return NextResponse.json(emp, { status: 201 });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });

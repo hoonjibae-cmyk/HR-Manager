@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logActivity } from "@/lib/activity";
 import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { updateDeductions } from "@/lib/payroll-service";
@@ -27,6 +28,14 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
         patch.otherItems = body.otherItems;
       }
       const rec = await updateDeductions(Number(params.id), patch);
+      const emp = await prisma.employee.findUnique({ where: { id: rec.employeeId } });
+      await logActivity({
+        action: "PAYROLL_EDIT",
+        employeeId: rec.employeeId,
+        target: `${emp?.name ?? ""} ${rec.year}-${String(rec.month).padStart(2, "0")}`,
+        summary: `${emp?.name ?? "직원"}의 ${rec.year}년 ${rec.month}월 공제 내역을 수정했습니다. (실수령 ${rec.net.toLocaleString()}원)`,
+        meta: patch,
+      });
       return NextResponse.json(rec);
     }
 
@@ -34,6 +43,12 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       const rec = await prisma.payrollRecord.update({
         where: { id: Number(params.id) },
         data: { status: body.status },
+      });
+      await logActivity({
+        action: "PAYROLL_EDIT",
+        employeeId: rec.employeeId,
+        target: `${rec.year}-${String(rec.month).padStart(2, "0")}`,
+        summary: `급여 상태를 ${body.status} 로 변경했습니다.`,
       });
       return NextResponse.json(rec);
     }

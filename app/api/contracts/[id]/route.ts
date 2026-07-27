@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logActivity } from "@/lib/activity";
 import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
 import {
@@ -58,6 +59,14 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     // 시작일을 옮겼으면 앞 계약을 다시 닫아 빈틈을 막는다
     if (data.startDate) await closePrecedingContracts(cur.employeeId, start);
     await refreshEmployeeCard(cur.employeeId);
+    const emp = await prisma.employee.findUnique({ where: { id: cur.employeeId } });
+    await logActivity({
+      action: "CONTRACT_UPDATE",
+      employeeId: cur.employeeId,
+      target: emp?.name,
+      summary: `${emp?.name ?? "직원"}의 계약 조건을 수정했습니다 (${Object.keys(data).join(", ")}).`,
+      meta: { contractId: id, changed: data },
+    });
     return NextResponse.json({ ok: true, issues: await issuesFor(cur.employeeId) });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });
@@ -112,6 +121,14 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
       });
     }
     await refreshEmployeeCard(cur.employeeId);
+    const emp = await prisma.employee.findUnique({ where: { id: cur.employeeId } });
+    await logActivity({
+      action: "CONTRACT_DELETE",
+      employeeId: cur.employeeId,
+      target: emp?.name,
+      summary: `${emp?.name ?? "직원"}의 계약(${cur.startDate.toISOString().slice(0, 10)} 시작)을 삭제했습니다.`,
+      meta: { contractId: id },
+    });
     return NextResponse.json({ ok: true, issues: await issuesFor(cur.employeeId) });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });

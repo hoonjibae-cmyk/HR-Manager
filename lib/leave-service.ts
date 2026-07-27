@@ -10,7 +10,10 @@ export function deductsLeave(leaveType: string): boolean {
 
 /** 연차 신청 승인 → 사용 트랜잭션 생성 + 상태 변경 */
 export async function approveLeaveRequest(requestId: number, approver = "admin") {
-  const reqRow = await prisma.leaveRequest.findUnique({ where: { id: requestId } });
+  const reqRow = await prisma.leaveRequest.findUnique({
+    where: { id: requestId },
+    include: { employee: { select: { name: true } } },
+  });
   if (!reqRow) throw new Error("신청 없음");
   if (reqRow.status !== "PENDING") throw new Error("이미 처리된 신청입니다");
 
@@ -38,7 +41,15 @@ export async function approveLeaveRequest(requestId: number, approver = "admin")
       data: { status: "APPROVED", approverId: approver, decidedAt: new Date() },
     }),
     prisma.auditLog.create({
-      data: { actor: approver, action: "LEAVE_APPROVE", target: `req:${requestId}` },
+      data: {
+        actor: approver.startsWith("U") ? "SLACK" : approver,
+        actorName: approver,
+        action: "LEAVE_APPROVE",
+        target: reqRow.employee?.name ?? `req:${requestId}`,
+        employeeId: reqRow.employeeId,
+        summary: `${reqRow.employee?.name ?? "직원"}의 휴가 ${reqRow.days}일을 승인했습니다.`,
+        detail: JSON.stringify({ requestId, leaveType: reqRow.leaveType }),
+      },
     })
   );
   await prisma.$transaction(ops);
@@ -81,7 +92,15 @@ export async function approveLeaveCancel(requestId: number, approver = "admin") 
       data: { status: "CANCELED", cancelDecidedAt: new Date(), approverId: approver },
     }),
     prisma.auditLog.create({
-      data: { actor: approver, action: "LEAVE_CANCEL_APPROVE", target: `req:${requestId}` },
+      data: {
+        actor: approver.startsWith("U") ? "SLACK" : approver,
+        actorName: approver,
+        action: "LEAVE_CANCEL",
+        target: `req:${requestId}`,
+        employeeId: reqRow.employeeId,
+        summary: `휴가 취소를 승인했습니다 (${reqRow.days}일 복원).`,
+        detail: JSON.stringify({ requestId }),
+      },
     }),
   ]);
   return leaveSummaryFor(reqRow.employeeId);
@@ -98,7 +117,13 @@ export async function rejectLeaveCancel(requestId: number, approver = "admin") {
     data: { status: "APPROVED", cancelDecidedAt: new Date() },
   });
   await prisma.auditLog.create({
-    data: { actor: approver, action: "LEAVE_CANCEL_REJECT", target: `req:${requestId}` },
+    data: {
+      actor: approver.startsWith("U") ? "SLACK" : approver,
+      actorName: approver,
+      action: "LEAVE_CANCEL_REJECT",
+      target: `req:${requestId}`,
+      summary: "휴가 취소 신청을 반려했습니다 (기존 휴가 유지).",
+    },
   });
 }
 
@@ -115,7 +140,14 @@ export async function rejectLeaveRequest(
     data: { status: "REJECTED", approverId: approver, decidedAt: new Date(), decidedNote: note },
   });
   await prisma.auditLog.create({
-    data: { actor: approver, action: "LEAVE_REJECT", target: `req:${requestId}` },
+    data: {
+      actor: approver.startsWith("U") ? "SLACK" : approver,
+      actorName: approver,
+      action: "LEAVE_REJECT",
+      target: `req:${requestId}`,
+      employeeId: reqRow.employeeId,
+      summary: `휴가 신청(${reqRow.days}일)을 반려했습니다.${note ? ` 사유: ${note}` : ""}`,
+    },
   });
 }
 

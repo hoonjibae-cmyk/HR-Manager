@@ -9,6 +9,7 @@ const NAV = [
   { href: "/payroll", label: "급여 산정", icon: "₩" },
   { href: "/leave", label: "연차 관리", icon: "📅" },
   { href: "/documents", label: "문서 발급", icon: "📄" },
+  { href: "/activity", label: "작업 이력", icon: "🕘" },
   { href: "/settings", label: "설정", icon: "⚙" },
 ];
 

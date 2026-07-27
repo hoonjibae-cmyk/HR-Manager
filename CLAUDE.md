@@ -20,6 +20,8 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - **DB 어댑터**: `lib/repo.ts` 가 Prisma 레코드 ↔ 엔진 입력/문서 입력 변환. 회사정보·요율·세액표 로딩.
 - **계약 = 보수조건의 단일 진실**: `lib/contracts.ts`. 급여 산정·계약서 발급·화면 표시 모두
   `governingContract(contracts, asOf)` 로 그 시점 계약을 찾아 쓴다.
+- **작업 이력**: `lib/activity.ts` 의 `logActivity()` → `AuditLog`. 급여·명세서·계약·직원·문서처럼
+  되돌리기 어려운 작업은 여기에 한 줄 남긴다(화면: `/activity`). 기록 실패가 본 작업을 막지 않는다.
 - **서비스**: `lib/payroll-service.ts`(월 급여 upsert), `lib/leave-service.ts`(승인/조정),
   `lib/doc-service.ts`(PDF 생성+저장+기록), `lib/email.ts`, `lib/scheduler.ts`, `lib/slack.ts`.
 - **API**: `app/api/**` — 모두 `isAuthed()` 가드(슬랙/크론 제외, 자체 서명검증).
@@ -44,6 +46,8 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - 완전비율제(RATIO)는 연차·퇴직금 미적용 — 연차 화면/신청/슬랙에서 제외 유지.
 - 4대보험/세율은 하드코딩 금지 — `InsuranceRate`(설정 화면에서 수정). 세액표는 `TaxBracket`.
 - 계산식 변경 시 `lib/*.test.ts` 를 먼저 갱신하고 `npm test` 로 검증.
+- 관리자 로그인은 비밀번호 공유(`ADMIN_PASSWORD`) 방식이라 화면 작업의 '누가' 는 남지 않는다.
+  슬랙 경유 작업만 사용자까지 기록된다. 개인 구분이 필요해지면 계정 모델을 도입해야 한다.
 - 개인정보(주민번호 등)는 데모상 평문. 실제 운영은 암호화 권장.
 - `.env`, `*.db`, `storage/` 는 커밋 금지(.gitignore).
 

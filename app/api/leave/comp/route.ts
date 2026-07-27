@@ -31,7 +31,13 @@ export async function POST(req: Request) {
       "COMP"
     );
     await prisma.auditLog.create({
-      data: { action: "COMP_LEAVE_ADJUST", target: `emp:${emp.id}`, detail: JSON.stringify({ days, note: b.note }) },
+      data: {
+        action: "LEAVE_COMP_GRANT",
+        target: emp.name,
+        employeeId: emp.id,
+        summary: `${emp.name}에게 대휴보상연차 ${days}일을 ${days >= 0 ? "부여" : "차감"}했습니다.${b.note ? ` (${b.note})` : ""}`,
+        detail: JSON.stringify({ days, note: b.note }),
+      },
     });
     return NextResponse.json({ ok: true, comp });
   } catch (e: any) {

@@ -118,8 +118,9 @@ export async function POST(req: Request) {
   await runPayrollMonth(year, month, inputs, ids);
   await prisma.auditLog.create({
     data: {
-      action: "TIMESHEET_UPLOAD",
-      target: `${year}-${month}`,
+      action: "PAYROLL_TIMESHEET",
+      target: `${year}-${String(month).padStart(2, "0")}`,
+      summary: `${year}년 ${month}월 시간기록표를 반영해 ${matched.length}명의 급여를 다시 산정했습니다.`,
       detail: JSON.stringify({ matched: matched.length, unmatched, noRecords }),
     },
   });
