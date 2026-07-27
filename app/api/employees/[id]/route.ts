@@ -35,6 +35,10 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if ("resignDate" in body) data.resignDate = body.resignDate ? new Date(body.resignDate) : null;
   if ("active" in body) data.active = !!body.active;
   if ("breakPaid" in body) data.breakPaid = !!body.breakPaid;
+  // 연차 적용: null = 자동(주 15시간 기준), true/false = 계약상 강제
+  if ("leaveEligible" in body)
+    data.leaveEligible =
+      body.leaveEligible === true ? true : body.leaveEligible === false ? false : null;
   if ("schedule" in body)
     data.schedule = typeof body.schedule === "string" ? body.schedule : JSON.stringify(body.schedule);
 

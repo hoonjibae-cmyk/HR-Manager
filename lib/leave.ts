@@ -60,6 +60,8 @@ export interface LeavePeriod {
 export interface LeaveSummary {
   asOf: Date;
   hireDate: Date;
+  /** 법정 연차 발생 대상인가 (주 15시간 미만·계약상 미적용이면 false) */
+  eligible: boolean;
   serviceYears: number; // 완성 근속연수
   serviceLabel: string;
   granted: number; // 발생 누계 (asOf까지)
@@ -111,6 +113,26 @@ function serviceLabel(hireDate: Date, asOf: Date): string {
   if (years <= 0 && months <= 0) return "입사 " + total + "일";
   if (years <= 0) return `${months}개월`;
   return `${years}년 ${months}개월`;
+}
+
+/**
+ * 연차·주휴 적용 최소 소정근로시간 (근로기준법 제18조 제3항).
+ * 4주 평균 1주 소정근로시간이 15시간 미만인 초단시간근로자에게는
+ * 제55조(주휴)와 제60조(연차)가 적용되지 않는다.
+ */
+export const MIN_WEEKLY_HOURS_FOR_LEAVE = 15;
+
+/**
+ * 이 직원에게 법정 연차가 발생하는가.
+ * override 가 true/false 면 그대로 따르고(계약상 별도 정함), null/undefined 면
+ * 주 소정근로시간으로 판단한다.
+ */
+export function isLeaveEligible(
+  weeklyContractual: number,
+  override?: boolean | null
+): boolean {
+  if (override === true || override === false) return override;
+  return weeklyContractual >= MIN_WEEKLY_HOURS_FOR_LEAVE;
 }
 
 /**
@@ -184,13 +206,23 @@ function adjustLots(txns: LeaveTxn[]): Lot[] {
 export function summarizeLeave(
   hireDate: Date,
   asOf: Date,
-  txns: LeaveTxn[]
+  txns: LeaveTxn[],
+  opts: {
+    /**
+     * 법정 연차 발생 대상 여부. false 면 자동 발생분을 만들지 않는다
+     * (주 15시간 미만 초단시간근로자·계약상 연차 미적용).
+     * 관리자가 수동으로 부여한 분(ADJUST +)은 그대로 살린다.
+     */
+    eligible?: boolean;
+  } = {}
 ): LeaveSummary {
+  const eligible = opts.eligible !== false;
   // 대휴(COMP)는 별도 풀(summarizeComp)로 집계 — 본래 연차 계산에서 제외
   const statTxns = txns.filter((t) => !isComp(t));
-  const lots = [...generateGrants(hireDate, asOf), ...adjustLots(statTxns)].sort(
-    (a, b) => a.grantDate.getTime() - b.grantDate.getTime()
-  );
+  const lots = [
+    ...(eligible ? generateGrants(hireDate, asOf) : []),
+    ...adjustLots(statTxns),
+  ].sort((a, b) => a.grantDate.getTime() - b.grantDate.getTime());
 
   // 사용 이벤트(날짜순)
   const uses = statTxns
@@ -269,14 +301,17 @@ export function summarizeLeave(
   const monthlyGranted = lots
     .filter((l) => l.source === "MONTHLY")
     .reduce((s, l) => s + l.days, 0);
-  const scheduled = period.serviceYear === 1 ? Math.max(0, 11 - monthlyGranted) : 0;
+  const scheduled =
+    eligible && period.serviceYear === 1 ? Math.max(0, 11 - monthlyGranted) : 0;
 
   // 다음 발생 예정
   const years = completedServiceYears(hireDate, asOf);
   let nextGrantDate: Date | null = null;
   let nextGrantDays: number | null = null;
   const firstYearEnd = addYears(hireDate, 1);
-  if (isBefore(asOf, firstYearEnd)) {
+  if (!eligible) {
+    // 발생 대상이 아니면 예정도 없다
+  } else if (isBefore(asOf, firstYearEnd)) {
     // 1년 미만: 다음 달 개근 1일
     for (let m = 1; m <= 11; m++) {
       const g = addMonths(hireDate, m);
@@ -298,6 +333,7 @@ export function summarizeLeave(
   return {
     asOf,
     hireDate,
+    eligible,
     serviceYears: years,
     serviceLabel: serviceLabel(hireDate, asOf),
     granted,

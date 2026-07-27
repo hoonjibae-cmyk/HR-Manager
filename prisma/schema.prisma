@@ -100,6 +100,10 @@ model Employee {
   dependents      Int    @default(1) // 부양가족수(본인포함) — 간이세액표용
   nonTaxTotal     Int    @default(0) // 기타 비과세 총액(월)
 
+  // 연차 발생 대상 여부. null = 자동(주 소정근로시간 15시간 이상이면 발생, 근로기준법 §18③)
+  // true/false = 계약상 별도로 정한 경우 강제
+  leaveEligible   Boolean?
+
   // 시급제(HOURLY) 설정 — 시간기록표의 중간 휴게 30분을 급여에 포함할지
   // true: 기록표 시간 그대로 인정(휴게 유급) / false: 근무일마다 30분 차감(휴게 무급)
   breakPaid       Boolean @default(false)

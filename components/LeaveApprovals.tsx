@@ -35,6 +35,16 @@ export default function LeaveApprovals({ requests }: { requests: Req[] }) {
     else alert("처리 실패: " + (await res.json().catch(() => ({}))).error);
   }
 
+  /** 잘못 만든 신청 정리 — 승인 전 신청만 지울 수 있다 */
+  async function remove(id: number) {
+    if (!confirm("이 신청을 목록에서 지웁니다. 되돌릴 수 없습니다. 계속할까요?")) return;
+    setBusy(id);
+    const res = await fetch(`/api/leave/requests/${id}`, { method: "DELETE" });
+    setBusy(null);
+    if (res.ok) router.refresh();
+    else alert("삭제 실패: " + (await res.json().catch(() => ({}))).error);
+  }
+
   if (requests.length === 0)
     return <p className="text-sm text-slate-400 py-6 text-center">승인 대기 중인 연차 신청이 없습니다.</p>;
 
@@ -69,6 +79,7 @@ export default function LeaveApprovals({ requests }: { requests: Req[] }) {
               <div className="flex gap-1 justify-end">
                 <button className="btn-primary py-1 px-2.5 text-xs" onClick={() => decide(r.id, "approve")} disabled={busy === r.id}>승인</button>
                 <button className="btn-ghost py-1 px-2.5 text-xs" onClick={() => decide(r.id, "reject")} disabled={busy === r.id}>반려</button>
+                <button className="btn-ghost py-1 px-2.5 text-xs text-red-600" onClick={() => remove(r.id)} disabled={busy === r.id} title="잘못 만든 신청 정리">삭제</button>
               </div>
             </td>
           </tr>

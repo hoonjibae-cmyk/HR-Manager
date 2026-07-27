@@ -7,6 +7,7 @@ import {
   summarizeComp,
   usedInPeriod,
   countLeaveDays,
+  isLeaveEligible,
   type LeaveTxn,
 } from "./leave";
 
@@ -253,5 +254,60 @@ describe("발생분이 없는데 사용한 경우 — 사용 내역이 사라지
     expect(s.granted).toBe(1);
     expect(s.used).toBe(2);
     expect(s.remaining).toBe(-1);
+  });
+});
+
+describe("연차 발생 대상 판정 — 근로기준법 §18③ 초단시간근로자", () => {
+  it("주 15시간 미만은 미적용, 15시간 이상은 적용", () => {
+    expect(isLeaveEligible(9)).toBe(false);
+    expect(isLeaveEligible(14.9)).toBe(false);
+    expect(isLeaveEligible(15)).toBe(true);
+    expect(isLeaveEligible(32.5)).toBe(true);
+  });
+
+  it("계약상 별도로 정했으면 근로시간과 무관하게 그 값을 따른다", () => {
+    expect(isLeaveEligible(9, true)).toBe(true); // 주 9시간이어도 계약상 적용
+    expect(isLeaveEligible(40, false)).toBe(false); // 주 40시간이어도 계약상 미적용
+    expect(isLeaveEligible(40, null)).toBe(true); // null = 자동
+  });
+});
+
+describe("summarizeLeave — 미적용 직원", () => {
+  const hire = d("2023-03-01");
+  const asOf = d("2026-07-27");
+
+  it("법정 발생분이 하나도 생기지 않는다", () => {
+    const s = summarizeLeave(hire, asOf, [], { eligible: false });
+    expect(s.eligible).toBe(false);
+    expect(s.granted).toBe(0);
+    expect(s.remaining).toBe(0);
+    expect(s.period.granted).toBe(0);
+    expect(s.nextGrantDate).toBeNull();
+    expect(s.period.scheduled).toBe(0);
+  });
+
+  it("같은 조건이라도 적용 대상이면 발생한다", () => {
+    const s = summarizeLeave(hire, asOf, []);
+    expect(s.eligible).toBe(true);
+    expect(s.granted).toBeGreaterThan(0);
+  });
+
+  it("관리자가 직접 부여한 분은 미적용이어도 살아 있다", () => {
+    const txns: LeaveTxn[] = [
+      { date: d("2026-03-01"), days: 3, type: "ADJUST", note: "계약상 약정휴가" },
+      { date: d("2026-04-10"), days: -1, type: "USE" },
+    ];
+    const s = summarizeLeave(hire, asOf, txns, { eligible: false });
+    expect(s.granted).toBe(3);
+    expect(s.used).toBe(1);
+    expect(s.remaining).toBe(2);
+  });
+
+  it("미적용인데 사용만 있으면 마이너스로 드러난다", () => {
+    const txns: LeaveTxn[] = [{ date: d("2026-04-10"), days: -2, type: "USE" }];
+    const s = summarizeLeave(hire, asOf, txns, { eligible: false });
+    expect(s.granted).toBe(0);
+    expect(s.used).toBe(2);
+    expect(s.remaining).toBe(-2);
   });
 });

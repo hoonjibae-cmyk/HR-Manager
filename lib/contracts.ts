@@ -44,6 +44,7 @@ export const EMPLOYEE_EDITABLE_FIELDS = [
   "dependents",
   "nonTaxTotal",
   "breakPaid",
+  "leaveEligible",
   "schedule",
 ] as const;
 

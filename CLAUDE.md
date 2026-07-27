@@ -59,6 +59,12 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - 완전비율제(RATIO)에 **최저보장(ratioMinGuarantee)** 이 있으면 `max(매출×비율, 보장액)` 으로 지급한다
   (계약서 제5조 — 만근 조건 미충족 시에는 관리자가 조정).
 - 완전비율제(RATIO)는 연차·퇴직금 미적용 — 연차 화면/신청/슬랙에서 제외 유지.
+- **연차는 1주 소정근로시간 15시간 이상일 때만 발생**한다(근로기준법 §18③ 초단시간근로자 제외).
+  판정은 `isLeaveEligible(주소정시간, Employee.leaveEligible)` — 카드의 `leaveEligible` 이
+  null 이면 근로시간으로 자동, true/false 면 계약대로 강제. `summarizeLeave(..., {eligible})` 에 넘긴다.
+  미적용이어도 관리자가 직접 부여한 분(ADJUST +)은 살아 있다.
+- **연차 신청은 슬랙으로만 들어온다.** 관리자는 신청서를 만들지 않고 `/api/leave/adjust` 로 바로 반영한다
+  (연차 화면의 *+ 연차 반영*). 반영 시 당사자에게 슬랙 DM 을 보낼지 선택할 수 있고, 알림 실패가 반영을 되돌리지 않는다.
 - 4대보험/세율은 하드코딩 금지 — `InsuranceRate`(설정 화면에서 수정). 세액표는 `TaxBracket`.
 - 계산식 변경 시 `lib/*.test.ts` 를 먼저 갱신하고 `npm test` 로 검증.
 - 관리자 로그인은 비밀번호 공유(`ADMIN_PASSWORD`) 방식이라 화면 작업의 '누가' 는 남지 않는다.

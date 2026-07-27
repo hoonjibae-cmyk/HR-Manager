@@ -4,12 +4,15 @@ import {
   summarizeLeave,
   summarizeComp,
   usedInPeriod,
+  isLeaveEligible,
   type LeaveTxn,
 } from "@/lib/leave";
+import { computeWeeklyHours } from "@/lib/payroll";
+import { parseSchedule } from "@/lib/constants";
 import { PageHeader } from "@/components/ui";
 import LeaveApprovals from "@/components/LeaveApprovals";
-import AddLeaveRequest from "@/components/AddLeaveRequest";
 import LeaveImport from "@/components/LeaveImport";
+import LeaveAdjust from "@/components/LeaveAdjust";
 import CompGrantButton from "@/components/CompGrantButton";
 import { ymd } from "@/lib/format";
 
@@ -57,9 +60,14 @@ export default async function LeavePage({
 
   const rows = employees.map((e) => {
     const list = txnByEmp[e.id] ?? [];
+    // 주 소정근로시간 15시간 미만이면 법정 연차 미발생 (근로기준법 §18③).
+    // 계약상 별도로 정한 경우 Employee.leaveEligible 이 우선한다.
+    const { weeklyContractual } = computeWeeklyHours(parseSchedule(e.schedule));
+    const eligible = isLeaveEligible(weeklyContractual, (e as any).leaveEligible);
     return {
       e,
-      s: summarizeLeave(e.hireDate, now, list),
+      weeklyContractual,
+      s: summarizeLeave(e.hireDate, now, list, { eligible }),
       c: summarizeComp(list, now),
       p: usedInPeriod(list, from, to),
     };
@@ -87,7 +95,15 @@ export default async function LeavePage({
         action={
           <div className="flex items-center gap-2">
             <LeaveImport />
-            <AddLeaveRequest employees={employees.map((e) => ({ id: e.id, name: e.name, department: e.department }))} />
+            <LeaveAdjust
+              employees={rows.map(({ e, s }) => ({
+                id: e.id,
+                name: e.name,
+                department: e.department,
+                hasSlack: !!e.slackUserId,
+                eligible: s.eligible,
+              }))}
+            />
           </div>
         }
       />
@@ -135,11 +151,20 @@ export default async function LeavePage({
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ e, s, c, p }) => (
+            {rows.map(({ e, s, c, p, weeklyContractual }) => (
               <tr key={e.id} className="hover:bg-slate-50">
                 <td className="td">
                   <Link href={`/employees/${e.id}`} className="font-semibold text-brand-700 hover:underline">{e.name}</Link>
+                  {!s.eligible && (
+                    <span className="ml-2 pill bg-slate-100 text-slate-500">연차 미적용</span>
+                  )}
                   <div className="text-xs text-slate-400">{e.department} {e.position}</div>
+                  {!s.eligible && (
+                    <div className="text-[11px] text-slate-400">
+                      주 소정 {weeklyContractual.toFixed(1)}시간
+                      {(e as any).leaveEligible === false ? " · 계약상 미적용" : " · 15시간 미만"}
+                    </div>
+                  )}
                 </td>
                 <td className="td text-slate-500 text-xs">{s.serviceLabel}</td>
                 <td className="td text-slate-500 text-xs tnum whitespace-nowrap">
@@ -167,7 +192,9 @@ export default async function LeavePage({
           · <b>본래 연차</b>: 근로기준법 §60 자동 산정 — <b>이번 연차기간(입사일 기준 1년)</b> 의 발생·사용·잔여.
           지난 기간 미사용분은 기간 종료일에 소멸되어 넘어오지 않는다 &nbsp;
           · <b>대휴보상연차</b>: 지정 휴일 근무 보상 등 — <b>"+대휴"</b> 버튼으로 운영자가 직접 부여/차감 &nbsp;
-          · <b>기간 내 사용</b>: 위에서 지정한 기간에 사용한 일수 (연차/대휴 구분)
+          · <b>기간 내 사용</b>: 위에서 지정한 기간에 사용한 일수 (연차/대휴 구분) &nbsp;
+          · <b>연차 미적용</b>: 1주 소정근로시간이 15시간 미만인 초단시간근로자는 연차·주휴가 발생하지 않는다
+          (근로기준법 §18③). 직원 카드의 <b>연차 적용</b> 항목으로 계약에 맞춰 바꿀 수 있다.
         </p>
       </div>
     </div>

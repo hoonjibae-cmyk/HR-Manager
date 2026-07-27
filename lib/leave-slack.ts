@@ -37,6 +37,19 @@ export function leaveBalanceText(
   comp: CompSummary
 ): string {
   const p = summary.period;
+  if (!summary.eligible) {
+    // 주 15시간 미만 초단시간근로자·계약상 연차 미적용 (근로기준법 §18③)
+    const extra =
+      comp.remaining > 0 ? `\n• 대휴보상연차 잔여 *${comp.remaining}일* 은 사용할 수 있습니다.` : "";
+    return (
+      `*${name}님의 연차 현황* (근속 ${summary.serviceLabel})\n\n` +
+      `현재 계약 기준으로는 법정 연차가 발생하지 않습니다.\n` +
+      `(1주 소정근로시간 15시간 미만 — 근로기준법 제18조 제3항)` +
+      (p.remaining !== 0 ? `\n• 관리자가 별도로 부여한 잔여 *${p.remaining}일*` : "") +
+      extra +
+      `\n\n확인이 필요하면 관리자에게 문의해 주세요.`
+    );
+  }
   const lines = [
     `*${name}님의 연차 현황* (근속 ${summary.serviceLabel})`,
     ``,

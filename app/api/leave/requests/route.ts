@@ -20,33 +20,5 @@ export async function GET(req: Request) {
   return NextResponse.json(rows);
 }
 
-export async function POST(req: Request) {
-  if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const b = await req.json();
-  const target = await prisma.employee.findUnique({ where: { id: Number(b.employeeId) } });
-  if (target?.payScheme === "RATIO") {
-    return NextResponse.json(
-      { error: "완전비율제(위탁) 계약은 연차휴가 대상이 아닙니다." },
-      { status: 400 }
-    );
-  }
-  const start = new Date(b.startDate);
-  const end = new Date(b.endDate || b.startDate);
-  const half = isHalfDayLeave(b.leaveType);
-  const holidays = (await prisma.holiday.findMany()).map((h) => h.date);
-  const days = b.days ? Number(b.days) : countLeaveDays(start, end, { half, holidays });
-  const row = await prisma.leaveRequest.create({
-    data: {
-      employeeId: Number(b.employeeId),
-      startDate: start,
-      endDate: end,
-      days,
-      leaveType: b.leaveType || "ANNUAL",
-      reason: b.reason || null,
-      workPlan: b.workPlan?.trim() || null,
-      status: "PENDING",
-      source: b.source || "WEB",
-    },
-  });
-  return NextResponse.json(row, { status: 201 });
-}
+// 관리자용 '연차 신청 등록' 은 없앴다. 운영자가 직접 반영할 때는 신청서를 만들지 않고
+// /api/leave/adjust 로 바로 기록한다. 직원 신청은 슬랙 흐름으로만 들어온다.

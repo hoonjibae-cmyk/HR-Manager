@@ -49,6 +49,9 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     payScheme: initial?.payScheme ?? "MONTHLY",
     baseWage: initial?.baseWage ?? 0,
     breakPaid: initial?.breakPaid ?? false,
+    // null = 자동(주 소정근로시간 15시간 기준). 폼에서는 ""/"1"/"0" 로 다룬다
+    leaveEligible:
+      initial?.leaveEligible === true ? "1" : initial?.leaveEligible === false ? "0" : "",
     positionAllow: initial?.positionAllow ?? 0,
     // 신규 등록 기본값: 4대보험 직원은 식대 20만원 포함
     mealAllow: initial ? initial.mealAllow ?? 0 : 200000,
@@ -77,10 +80,14 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
       incThreshold, incPerStudent, ratioPercent, payScheme, incomeType, contractEnd,
       ...personal
     } = f;
+    // "" = 자동 판정(null), "1"/"0" = 강제
+    const leaveEligible =
+      f.leaveEligible === "1" ? true : f.leaveEligible === "0" ? false : null;
     const payload = editing
-      ? { ...personal, schedule: JSON.stringify(schedule) }
+      ? { ...personal, leaveEligible, schedule: JSON.stringify(schedule) }
       : {
           ...f,
+          leaveEligible,
           ratioPercent: f.ratioPercent !== "" ? Number(f.ratioPercent) / 100 : null,
           schedule: JSON.stringify(schedule),
           createContract: true,
@@ -172,6 +179,22 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           </Field>
           )}
           <Field label="부양가족수(본인포함)"><input type="number" min={1} className="input" value={f.dependents} onChange={(e) => set("dependents", e.target.value)} /></Field>
+          <Field label="연차 적용">
+            <select
+              className="input"
+              value={f.leaveEligible}
+              onChange={(e) => set("leaveEligible", e.target.value)}
+            >
+              <option value="">자동 — 주 15시간 이상이면 발생</option>
+              <option value="1">적용 — 항상 발생</option>
+              <option value="0">미적용 — 발생시키지 않음</option>
+            </select>
+            <p className="text-[11px] text-slate-400 mt-1">
+              1주 소정근로시간이 15시간 미만이면 연차·주휴가 발생하지 않습니다 (근로기준법 §18③).
+              계약에서 달리 정했다면 여기서 바꾸세요.
+            </p>
+          </Field>
+
           {f.payScheme === "HOURLY" && (
             <Field label="휴게 30분 처리 (시간기록표)" full>
               <label className="flex items-center gap-2 text-sm border border-slate-200 rounded-lg px-3 py-2">

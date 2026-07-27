@@ -2,12 +2,13 @@
 import { prisma } from "./db";
 import {
   computePayroll,
+  computeWeeklyHours,
   type EmployeePayInput,
   type InsuranceRates,
   type TaxBracketRow,
   type MonthlyInput,
 } from "./payroll";
-import { summarizeLeave, summarizeComp, type LeaveTxn } from "./leave";
+import { summarizeLeave, summarizeComp, isLeaveEligible, type LeaveTxn } from "./leave";
 import { parseSchedule } from "./constants";
 import type { DocCompany, DocEmployee, DocContract } from "./documents";
 
@@ -163,10 +164,15 @@ export async function leaveSummaryFor(employeeId: number, asOf: Date = new Date(
     category: (t as any).category ?? "STATUTORY",
     note: t.note ?? undefined,
   }));
+  // 주 소정근로시간이 15시간 미만이면 법정 연차가 발생하지 않는다(근로기준법 §18③).
+  // 계약상 별도로 정한 경우 Employee.leaveEligible 로 덮어쓴다.
+  const { weeklyContractual } = computeWeeklyHours(parseSchedule(emp.schedule));
+  const eligible = isLeaveEligible(weeklyContractual, (emp as any).leaveEligible);
   return {
     emp,
-    summary: summarizeLeave(emp.hireDate, asOf, leaveTxns),
+    summary: summarizeLeave(emp.hireDate, asOf, leaveTxns, { eligible }),
     comp: summarizeComp(leaveTxns, asOf),
+    weeklyContractual,
   };
 }
 
