@@ -471,14 +471,18 @@ model OvertimePolicy {
   id Int @id @default(1)
 
   // 가산 배수
-  overtimeMultiplier    Float   @default(1.5) // 연장근로 (평일 소정 외·토요일)
-  holidayMultiplier     Float   @default(1.5) // 휴일근로 (일요일·공휴일) 8시간 이내
-  holidayOverMultiplier Float   @default(2.0) // 휴일근로 8시간 초과분
-  holidayOverAfterHours Float   @default(8)
-  nightMultiplier       Float   @default(0.5) // 야간(22~06) 가산
-  nightStartHour        Int     @default(22)
-  nightEndHour          Int     @default(6)
-  countNight            Boolean @default(true)
+  // 평일 소정 외·토요일은 주 40시간 안쪽이라 법정 가산 대상이 아니다(법내연장 ×1.0).
+  // 가산은 휴일근로에만 붙는다 — 1일 8시간·주 40시간 초과분까지 가산하려면 아래 스위치를 켠다.
+  extraMultiplier        Float   @default(1.0) // 법내연장 (평일 소정 외·토요일)
+  overtimeMultiplier     Float   @default(1.5) // 법정연장 (1일 8h·주 40h 초과분)
+  applyStatutoryOvertime Boolean @default(false) // 켜면 초과분을 법정 가산으로 올린다
+  holidayMultiplier      Float   @default(1.5) // 휴일근로 (일요일·공휴일) 8시간 이내
+  holidayOverMultiplier  Float   @default(2.0) // 휴일근로 8시간 초과분
+  holidayOverAfterHours  Float   @default(8)
+  nightMultiplier        Float   @default(0.5) // 야간(22~06) 가산
+  nightStartHour         Int     @default(22)
+  nightEndHour           Int     @default(6)
+  countNight             Boolean @default(false) // 야간 가산 — 기본 꺼짐
 
   // 내신의무보강 상한 (ExamPeriod.capHours 가 있으면 그쪽 우선)
   mandatoryCapHours Float @default(10)

@@ -4,7 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 export interface OtPolicyRow {
+  extraMultiplier: number;
   overtimeMultiplier: number;
+  applyStatutoryOvertime: boolean;
   holidayMultiplier: number;
   holidayOverMultiplier: number;
   holidayOverAfterHours: number;
@@ -128,17 +130,19 @@ export default function MakeupPolicyPanel({
           <div>
             <h2 className="font-bold text-slate-800 text-lg">오버타임 수당 지급 조건</h2>
             <p className="text-xs text-slate-500 mt-1">
-              여기서 정한 조건으로 보강 실근무가 수당으로 환산됩니다. 법정 기준(연장·휴일 1.5배,
-              휴일 8시간 초과 2배, 야간 +0.5)보다 낮추면 경고가 표시됩니다.
+              여기서 정한 조건으로 보강 실근무가 수당으로 환산됩니다. 평일 소정근로시간 밖과
+              토요일 근무는 주 40시간 안쪽이라 <b>가산이 붙지 않습니다(×1.0)</b> — 가산은
+              휴일근로(일요일·공휴일)에만 붙습니다.
             </p>
           </div>
-          <button className="btn-ghost" onClick={() => setOpen(false)}>
+          <button className="btn-ghost whitespace-nowrap" onClick={() => setOpen(false)}>
             닫기
           </button>
         </div>
 
         <div className="grid md:grid-cols-3 gap-3 mb-4">
-          {numField("연장근로 배수", "overtimeMultiplier", "0.1", "평일 소정 외·토요일")}
+          {numField("연장근로 배수", "extraMultiplier", "0.1", "평일 소정 외·토요일 — 가산 없음")}
+          {numField("법정 연장 배수", "overtimeMultiplier", "0.1", "1일 8h·주 40h 초과분")}
           {numField("휴일근로 배수", "holidayMultiplier", "0.1", "일요일·공휴일")}
           {numField("휴일 초과 배수", "holidayOverMultiplier", "0.1", "1일 8시간 초과분")}
           {numField("휴일 초과 기준시간", "holidayOverAfterHours", "1")}
@@ -150,7 +154,12 @@ export default function MakeupPolicyPanel({
         </div>
 
         <div className="border-t border-slate-100 pt-3 mb-4 space-y-2">
-          {check("야간(22~06시) 가산을 산정한다", "countNight", "끄면 야간 가산이 붙지 않습니다 (법정 기준 미달)")}
+          {check(
+            "1일 8시간·주 40시간 초과분에 법정 가산을 적용한다",
+            "applyStatutoryOvertime",
+            "끄면 평일 소정 외·토요일 근무는 시간에 관계없이 가산 없이 지급합니다 (기본값)"
+          )}
+          {check("야간(22~06시) 가산을 산정한다", "countNight", "기본 꺼짐 — 켜면 22~06시 근무에 +0.5 가 더 붙습니다")}
           <div className="text-xs font-bold text-slate-500 pt-2">보강 종류별 수당 반영 기본값</div>
           <div className="grid sm:grid-cols-2 gap-2">
             {check("직전보강", "immediateDefault")}

@@ -157,7 +157,8 @@ export function payslipHtml(args: {
   let holidayNote = "";
   // 보강 오버타임 — 첨부 내역서를 보기 전에도 몇 시간이 어떤 구분으로 잡혔는지 명세서 1장에서 알 수 있게
   const otParts = [
-    (p.overtimeHours ?? 0) > 0 ? `연장 ${p.overtimeHours}시간` : "",
+    (p.extraHours ?? 0) > 0 ? `연장 ${p.extraHours}시간` : "",
+    (p.overtimeHours ?? 0) > 0 ? `연장(법정가산) ${p.overtimeHours}시간` : "",
     (p.holidayHours ?? 0) > 0 ? `휴일 ${p.holidayHours}시간` : "",
     (p.holidayOverHours ?? 0) > 0 ? `휴일 8시간초과 ${p.holidayOverHours}시간` : "",
     (p.nightHours ?? 0) > 0 ? `야간 ${p.nightHours}시간(가산)` : "",
@@ -307,7 +308,7 @@ export function payslipHtml(args: {
   ${basisBlock}
   <div class="clause" style="margin-top:10px">
     ${isHourly ? `<div class="small">· 기본급 = 기본 근로시간 × 시급</div>` : ""}
-    <div class="small">· 추가근로수당(법내연장) = 추가근로시간 × 통상시급 &nbsp; · 연장근로수당(법정초과) = 연장근로시간 × 통상시급 × 1.5</div>
+    <div class="small">· 추가근로수당(연장) = 연장근로시간 × 통상시급 <span class="muted">(주 40시간 이내 — 가산 없음)</span> &nbsp; · 연장근로수당(법정초과) = 1일 8시간·주 40시간 초과시간 × 통상시급 × 1.5</div>
     <div class="small">· 휴일근로수당 = 휴일근로시간 × 통상시급 × 1.5 <span class="muted">(1일 8시간 초과분은 × 2.0)</span> &nbsp; · 야간근로수당 = 야간근로시간 × 통상시급 × 0.5</div>
     ${holidayNote}
     ${isFree
@@ -521,7 +522,13 @@ export function overtimeDetailHtml(args: {
   const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
   const dow = (d: string) => WEEK_KO[new Date(`${d}T00:00:00Z`).getUTCDay()];
   const kindOf = (l: OvertimeDetailLine) =>
-    l.kind === "HOLIDAY" ? (l.over ? "휴일(8h초과)" : "휴일근로") : "연장근로";
+    l.kind === "HOLIDAY"
+      ? l.over
+        ? "휴일(8h초과)"
+        : "휴일근로"
+      : l.kind === "OVERTIME"
+      ? "연장(법정가산)"
+      : "연장근로";
 
   const rowHtml = (l: OvertimeDetailLine) => {
     const amount = Math.round(l.countedHours * hourlyWage * l.multiplier);
@@ -550,7 +557,11 @@ export function overtimeDetailHtml(args: {
   <p style="text-align:center" class="muted">${args.year}년 ${args.month}월 · ${esc(e.name)} ${esc(e.position ?? "선생님")}</p>
 
   <table class="kv">
-    <tr><th>통상시급</th><td>${wonUnit(hourlyWage)}</td><th>연장근로</th><td>${num(sumH((l) => l.kind === "OVERTIME"))}시간</td></tr>
+    <tr><th>통상시급</th><td>${wonUnit(hourlyWage)}</td><th>연장근로</th><td>${num(sumH((l) => l.kind === "EXTRA"))}시간 <span class="muted">(가산 없음)</span>${
+      sumH((l) => l.kind === "OVERTIME") > 0
+        ? ` · 법정가산 ${num(sumH((l) => l.kind === "OVERTIME"))}시간`
+        : ""
+    }</td></tr>
     <tr><th>휴일근로</th><td>${num(sumH((l) => l.kind === "HOLIDAY" && !l.over))}시간 <span class="muted">(8시간 초과 ${num(sumH((l) => !!l.over))}시간)</span></td><th>야간근로</th><td>${num(sumH((l) => l.night))}시간 <span class="muted">(가산 +0.5)</span></td></tr>
     <tr><th>수당 합계</th><td colspan="3"><b>${wonUnit(total)}</b></td></tr>
   </table>
@@ -582,9 +593,10 @@ export function overtimeDetailHtml(args: {
   }
 
   <div class="clause" style="margin-top:8px">
-    <div class="small">· <b>연장근로</b>: 평일 소정근로시간 밖 또는 토요일 근무 — 통상시급 ×1.5</div>
+    <div class="small">· <b>연장근로</b>: 평일 소정근로시간 밖 또는 토요일 근무 — 주 소정근로가 40시간 미만이라
+      법정 가산 대상이 아니며 통상시급 ×1.0 으로 지급합니다 (1일 8시간·주 40시간을 넘는 부분은 ×1.5).</div>
     <div class="small">· <b>휴일근로</b>: 일요일·공휴일 근무 — 8시간까지 ×1.5, 초과분 ×2.0 (근로기준법 §56②)</div>
-    <div class="small">· <b>야간근로</b>: 22시~06시 사이 근무에 +0.5 가산 (근로기준법 §56③)</div>
+    <div class="small">· <b>야간근로</b>: 22시~06시 사이 근무에 +0.5 가산 (해당 항목이 있을 때만 표시)</div>
     <div class="small">· 소정근로시간 안에서 진행된 보강은 월 급여에 이미 포함되어 별도 수당이 발생하지 않습니다.</div>
     <div class="small">· 내신의무보강은 내신 기간별 인정 상한이 있으며, 수당이 큰 근무부터 상한을 채웁니다.</div>
     <div class="small">· 본 내역서는 급여명세서의 <b>연장·휴일·야간근로수당</b> 항목 산출 근거로 첨부됩니다.</div>

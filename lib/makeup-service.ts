@@ -154,6 +154,7 @@ export async function overtimeForMonth(
       ...full,
       lines: full.lines.filter((l) => inMonth(l.date)),
       excluded: full.excluded.filter((l) => inMonth(l.date)),
+      extraHours: 0,
       overtimeHours: 0,
       holidayHours: 0,
       holidayOverHours: 0,
@@ -165,6 +166,7 @@ export async function overtimeForMonth(
     };
     const sum = (f: (l: (typeof result.lines)[number]) => boolean) =>
       Math.round(result.lines.filter(f).reduce((a, l) => a + l.countedHours, 0) * 1000) / 1000;
+    result.extraHours = sum((l) => l.kind === "EXTRA");
     result.overtimeHours = sum((l) => l.kind === "OVERTIME");
     result.holidayHours = sum((l) => l.kind === "HOLIDAY" && !l.over);
     result.holidayOverHours = sum((l) => l.kind === "HOLIDAY" && !!l.over);
@@ -173,6 +175,7 @@ export async function overtimeForMonth(
     const excludedByScheme = emp.payScheme === "RATIO";
     const hourlyWage = excludedByScheme ? 0 : hourlyWageOf(emp, segMap.get(employeeId));
     if (excludedByScheme) {
+      result.extraHours = 0;
       result.overtimeHours = 0;
       result.holidayHours = 0;
       result.holidayOverHours = 0;
@@ -240,6 +243,7 @@ export async function overtimeInputsFor(
   Map<
     number,
     {
+      extraHours: number;
       overtimeHours: number;
       holidayHours: number;
       holidayOverHours: number;
@@ -255,6 +259,7 @@ export async function overtimeInputsFor(
   for (const r of rows) {
     if (r.excludedByScheme) continue;
     map.set(r.employeeId, {
+      extraHours: r.result.extraHours,
       overtimeHours: r.result.overtimeHours,
       holidayHours: r.result.holidayHours,
       holidayOverHours: r.result.holidayOverHours,

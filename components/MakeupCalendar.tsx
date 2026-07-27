@@ -19,6 +19,7 @@ export interface MakeupTotal {
   hourlyWage: number;
   amount: number;
   result: {
+    extraHours: number;
     overtimeHours: number;
     holidayHours: number;
     holidayOverHours: number;
@@ -33,7 +34,8 @@ function chipTone(r: MakeupRow): string {
   if (r.needsDecision) return "bg-amber-100 text-amber-800";
   if (r.status !== "CONFIRMED") return "bg-slate-100 text-slate-600";
   if (r.kind?.includes("HOLIDAY")) return "bg-rose-100 text-rose-800";
-  if (r.kind?.includes("OVERTIME")) return "bg-indigo-100 text-indigo-800";
+  if (r.kind?.includes("EXTRA") || r.kind?.includes("OVERTIME"))
+    return "bg-indigo-100 text-indigo-800";
   return "bg-emerald-100 text-emerald-800"; // 확정됐지만 수당 대상 아님
 }
 
@@ -234,7 +236,7 @@ export default function MakeupCalendar({
 
       <div className="flex flex-wrap gap-3 text-[11px] text-slate-500 mb-6">
         <span className="pill bg-slate-100 text-slate-600">신청됨(미확인)</span>
-        <span className="pill bg-indigo-100 text-indigo-800">연장근로</span>
+        <span className="pill bg-indigo-100 text-indigo-800">연장근로(가산 없음)</span>
         <span className="pill bg-rose-100 text-rose-800">휴일근로</span>
         <span className="pill bg-emerald-100 text-emerald-800">확정·수당 없음</span>
         <span className="pill bg-amber-100 text-amber-800">수당 판단 필요 ⚠</span>
@@ -262,7 +264,14 @@ export default function MakeupCalendar({
                 <tr>
                   <th className="th">직원</th>
                   <th className="th text-right">통상시급</th>
-                  <th className="th text-right">연장</th>
+                  <th className="th text-right">
+                    연장
+                    <div className="text-[10px] font-normal text-slate-400">가산없음</div>
+                  </th>
+                  <th className="th text-right">
+                    연장
+                    <div className="text-[10px] font-normal text-slate-400">법정가산</div>
+                  </th>
                   <th className="th text-right">휴일</th>
                   <th className="th text-right">휴일(8h초과)</th>
                   <th className="th text-right">야간</th>
@@ -288,6 +297,7 @@ export default function MakeupCalendar({
                       )}
                     </td>
                     <td className="td text-right tnum text-slate-500">{won(t.hourlyWage)}</td>
+                    <td className="td text-right tnum">{t.result.extraHours || "-"}</td>
                     <td className="td text-right tnum">{t.result.overtimeHours || "-"}</td>
                     <td className="td text-right tnum">{t.result.holidayHours || "-"}</td>
                     <td className="td text-right tnum">{t.result.holidayOverHours || "-"}</td>

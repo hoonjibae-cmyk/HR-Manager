@@ -359,6 +359,7 @@ export async function runPayrollMonth(
     // 오버타임(보강 실근무 확정분) — 명시적으로 넘긴 값이 있으면 그쪽을 존중한다
     const ot = otMap.get(emp.id);
     if (ot) {
+      if (mInput.extraHours === undefined) mInput.extraHours = ot.extraHours;
       if (mInput.overtimeHours === undefined) mInput.overtimeHours = ot.overtimeHours;
       if (mInput.holidayHours === undefined) mInput.holidayHours = ot.holidayHours;
       if (mInput.holidayOverHours === undefined) mInput.holidayOverHours = ot.holidayOverHours;
@@ -485,6 +486,7 @@ export async function runPayrollMonth(
         // 보강 오버타임 산정 내역 — 명세서 첨부 '오버타임 산정 내역서' 가 이걸 그대로 쓴다
         overtime: ot?.detail?.length
           ? {
+              extraHours: ot.extraHours,
               overtimeHours: ot.overtimeHours,
               holidayHours: ot.holidayHours,
               holidayOverHours: ot.holidayOverHours,

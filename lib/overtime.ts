@@ -1,7 +1,11 @@
 // 보강·초과근무 → 오버타임 수당 산정 엔진 (순수 함수, DB 무관)
 //
 // 산정 규칙 (관리자가 정한 지급 조건 + 근로기준법 §56)
-//  1. 평일 소정근로시간 밖 또는 토요일 근무분 → **연장근로** (×1.5)
+//  1. 평일 소정근로시간 밖 또는 토요일 근무분 → **연장근로, 가산 없음(×1.0)**.
+//     이 학원은 주 소정근로가 37.5시간(14~22시·휴게 0.5)이라 주 40시간 안쪽의 추가근로는
+//     법정 가산 대상이 아니다(법내연장). 가산은 휴일근로에만 붙는다.
+//     주 40시간·1일 8시간을 넘는 부분까지 법정 가산(×1.5)하려면
+//     정책의 applyStatutoryOvertime 을 켠다(기본 꺼짐).
 //  2. 일요일·공휴일 근무분 → **휴일근로** (8시간 이내 ×1.5, 초과분 ×2.0)
 //  3. 소정근로시간 안에서 이뤄진 보강은 수당 대상이 아니다 (이미 월급에 들어 있다)
 //  4. 완전비율제(위탁)는 근로기준법 적용 대상이 아니므로 제외 — 호출부에서 걸러 낸다
@@ -10,7 +14,7 @@
 //     - 내신의무보강: 내신기간당 상한(기본 10시간)까지만. **수당이 큰 쪽부터** 채운다
 //       (예: 토 7h·일 7h → 일요일 7h 전부 + 토요일 3h)
 //     - 결시보강: 기본 미반영. 관리자가 payEligible 로 건건이 켠다
-//  야간(22~06)은 위 구분과 별개로 +0.5 가 붙는다 (근로기준법 §56③).
+//  야간(22~06) 가산(+0.5)은 **기본 꺼짐** — 필요하면 정책의 countNight 를 켠다.
 //
 // 시각 표기: 이 엔진이 받는 Date 는 **KST 벽시계 값이 UTC 필드에 담긴 것**이다
 // (앱 전체가 같은 규칙 — ymd()·달력·공휴일 모두 getUTC* 를 쓴다).
@@ -20,7 +24,12 @@ import type { ScheduleDay } from "./constants";
 /* ───────────── 입력 ───────────── */
 
 export interface OtPolicy {
+  /** 법내연장 — 평일 소정 외·토요일. 주 40시간 안쪽이라 가산이 붙지 않는다 */
+  extraMultiplier: number;
+  /** 법정연장 — 1일 8시간·주 40시간을 넘는 부분 (applyStatutoryOvertime 이 켜져 있을 때만) */
   overtimeMultiplier: number;
+  /** 켜면 1일 8시간·주 40시간 초과분을 법정 가산(×1.5)으로 올린다. 기본 꺼짐 */
+  applyStatutoryOvertime: boolean;
   holidayMultiplier: number;
   holidayOverMultiplier: number;
   holidayOverAfterHours: number;
@@ -37,14 +46,16 @@ export interface OtPolicy {
 }
 
 export const DEFAULT_OT_POLICY: OtPolicy = {
+  extraMultiplier: 1.0,
   overtimeMultiplier: 1.5,
+  applyStatutoryOvertime: false,
   holidayMultiplier: 1.5,
   holidayOverMultiplier: 2.0,
   holidayOverAfterHours: 8,
   nightMultiplier: 0.5,
   nightStartHour: 22,
   nightEndHour: 6,
-  countNight: true,
+  countNight: false,
   mandatoryCapHours: 10,
   roundingMinutes: 0,
   immediateDefault: true,
@@ -86,7 +97,8 @@ export interface OtInput {
 
 /* ───────────── 출력 ───────────── */
 
-export type OtKind = "OVERTIME" | "HOLIDAY" | "NONE";
+/** EXTRA=법내연장(가산 없음) · OVERTIME=법정연장(가산) · HOLIDAY=휴일근로 */
+export type OtKind = "EXTRA" | "OVERTIME" | "HOLIDAY" | "NONE";
 
 /** 산정 결과 한 줄 — 명세서 첨부 내역서와 화면이 같은 줄을 쓴다 */
 export interface OtLine {
@@ -112,6 +124,7 @@ export interface OtLine {
 
 export interface OtResult {
   /** 급여 엔진에 넣을 월 집계 */
+  extraHours: number;
   overtimeHours: number;
   holidayHours: number;
   holidayOverHours: number;
@@ -278,16 +291,124 @@ function sessionLines(s: OtSession, holidays: Set<string>, schedule: ScheduleDay
     const nightParts = nights.map((n) => intersect(seg, n)).filter(Boolean) as Range[];
     let rest: Range[] = [seg];
     for (const n of nightParts) rest = rest.flatMap((r) => subtract(r, n));
-    for (const n of nightParts) out.push(mk(n, isHoliday ? "HOLIDAY" : "OVERTIME", true));
-    for (const r of rest) out.push(mk(r, isHoliday ? "HOLIDAY" : "OVERTIME", false));
+    // 평일 소정 외·토요일은 '법내연장'(EXTRA) — 가산 없음. 법정 가산은 뒤에서 따로 올린다
+    for (const n of nightParts) out.push(mk(n, isHoliday ? "HOLIDAY" : "EXTRA", true));
+    for (const r of rest) out.push(mk(r, isHoliday ? "HOLIDAY" : "EXTRA", false));
   }
   return out.filter((l) => l.hours > 0).sort((a, b) => a.timeLabel.localeCompare(b.timeLabel));
 }
 
 /** 줄 하나의 값어치 — 상한을 채울 때 '수당이 큰 쪽부터' 고르는 기준 */
-function lineValue(l: OtLine, p: OtPolicy, holidayOver: boolean): number {
-  const base = l.kind === "HOLIDAY" ? (holidayOver ? p.holidayOverMultiplier : p.holidayMultiplier) : p.overtimeMultiplier;
-  return base + (l.night ? p.nightMultiplier : 0);
+function baseMultiplier(kind: OtKind, over: boolean, p: OtPolicy): number {
+  if (kind === "HOLIDAY") return over ? p.holidayOverMultiplier : p.holidayMultiplier;
+  if (kind === "OVERTIME") return p.overtimeMultiplier;
+  return p.extraMultiplier;
+}
+
+function lineValue(l: OtLine, p: OtPolicy): number {
+  return baseMultiplier(l.kind, !!l.over, p) + (l.night && p.countNight ? p.nightMultiplier : 0);
+}
+
+/** 스케줄상 그 요일의 소정근로시간 (휴게 제외) */
+function scheduledHoursOf(schedule: ScheduleDay[], dow: number): number {
+  const d = schedule.find((x) => x.day === DOW_KEY[dow]);
+  if (!d?.work) return 0;
+  let ws = hhmmToMin(d.start);
+  let we = hhmmToMin(d.end);
+  if (we <= ws) we += 1440;
+  return Math.max((we - ws) / 60 - (d.breakH || 0), 0);
+}
+
+/** "09:00~16:00" 을 앞쪽 keptHours 지점에서 둘로 나눈 라벨 */
+function splitLabel(label: string, keptHours: number): [string, string] {
+  const [a, b] = label.split("~");
+  const cut = hhmmToMin(a) + Math.round(keptHours * 60);
+  return [`${a}~${minToHHMM(cut)}`, `${minToHHMM(cut)}~${b}`];
+}
+
+/** 그 날짜가 속한 주의 월요일 (근로기준법상 1주 단위) */
+function weekKey(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  const shift = (d.getUTCDay() + 6) % 7; // 월=0
+  d.setUTCDate(d.getUTCDate() - shift);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * 1일 8시간·주 40시간을 넘는 부분을 법내연장(EXTRA) → 법정연장(OVERTIME) 으로 올린다.
+ * 넘긴 건 '나중에 한 근로' 이므로 시간순으로 뒤쪽부터 올린다.
+ * 휴일근로(일요일·공휴일)는 연장근로시간에 산입하지 않으므로 여기서 제외한다.
+ */
+function promoteStatutory(lines: OtLine[], schedule: ScheduleDay[], p: OtPolicy): OtLine[] {
+  const extras = lines.filter((l) => l.kind === "EXTRA");
+  if (!extras.length) return lines;
+
+  // 뒤쪽(늦은 시각)부터 need 만큼 EXTRA 를 OVERTIME 으로 바꾼다. 경계에 걸치면 쪼갠다
+  const promote = (pool: OtLine[], need: number, reason: string) => {
+    let left = roundHours(need, 0);
+    for (let i = pool.length - 1; i >= 0 && left > 1e-9; i--) {
+      const l = pool[i];
+      if (l.kind !== "EXTRA") continue;
+      const take = Math.min(l.hours, left);
+      left -= take;
+      const idx = lines.indexOf(l);
+      if (take >= l.hours - 1e-9) {
+        lines[idx] = { ...l, kind: "OVERTIME", reason: l.reason ?? reason };
+        pool[i] = lines[idx];
+      } else {
+        // 한 줄의 뒷부분만 넘긴 경우 — 시간대 표시도 잘린 지점에 맞춘다
+        const [earlyLabel, lateLabel] = splitLabel(l.timeLabel, l.hours - take);
+        const kept: OtLine = { ...l, hours: roundHours(l.hours - take, 0), timeLabel: earlyLabel };
+        const up: OtLine = {
+          ...l,
+          kind: "OVERTIME",
+          hours: roundHours(take, 0),
+          timeLabel: lateLabel,
+          reason,
+        };
+        lines.splice(idx, 1, kept, up);
+        pool[i] = kept;
+      }
+    }
+  };
+
+  // 1) 1일 8시간 초과 — 소정근로시간에 보강을 얹은 하루 총량 기준
+  const byDate = new Map<string, OtLine[]>();
+  for (const l of extras) (byDate.get(l.date) ?? byDate.set(l.date, []).get(l.date)!).push(l);
+  const dailyPromoted = new Map<string, number>();
+  for (const [date, group] of byDate) {
+    const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
+    const worked = group.reduce((a, l) => a + l.hours, 0);
+    const excess = Math.min(Math.max(scheduledHoursOf(schedule, dow) + worked - 8, 0), worked);
+    if (excess > 0) {
+      promote(group, excess, "1일 8시간 초과");
+      dailyPromoted.set(date, excess);
+    }
+  }
+
+  // 2) 주 40시간 초과 — 이미 일 8시간으로 올린 몫은 빼고 계산한다(이중 산입 방지)
+  const byWeek = new Map<string, string[]>();
+  for (const date of byDate.keys()) {
+    const k = weekKey(date);
+    (byWeek.get(k) ?? byWeek.set(k, []).get(k)!).push(date);
+  }
+  for (const [wk, dates] of byWeek) {
+    // 그 주의 소정근로시간 총합 (보강이 없는 날도 포함)
+    let scheduled = 0;
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(`${wk}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + i);
+      scheduled += scheduledHoursOf(schedule, d.getUTCDay());
+    }
+    const pool = lines
+      .filter((l) => l.kind === "EXTRA" && dates.includes(l.date))
+      .sort((a, b) => (a.date + a.timeLabel).localeCompare(b.date + b.timeLabel));
+    const worked = pool.reduce((a, l) => a + l.hours, 0);
+    const alreadyUp = dates.reduce((a, d) => a + (dailyPromoted.get(d) ?? 0), 0);
+    const excess = Math.min(Math.max(scheduled + worked + alreadyUp - 40, 0) - alreadyUp, worked);
+    if (excess > 0) promote(pool, excess, "주 40시간 초과");
+  }
+  return lines;
 }
 
 /**
@@ -359,6 +480,11 @@ export function computeOvertime(input: OtInput): OtResult {
     }
   }
 
+  // 3-2) 법정 가산 승격 (정책이 켜져 있을 때만) — 1일 8시간·주 40시간 초과분
+  const leveled = p.applyStatutoryOvertime
+    ? promoteStatutory(graded, input.schedule, p)
+    : graded;
+
   // 4) 내신의무보강 상한 — 기간별로 '수당이 큰 쪽부터' 채운다
   const capBuckets = new Map<string, number>(); // 버킷키 → 남은 시간
   const bucketName = new Map<string, string>();
@@ -383,11 +509,11 @@ export function computeOvertime(input: OtInput): OtResult {
     return key;
   };
 
-  const mandatory = graded.filter((l) => l.category === "MANDATORY");
-  const others = graded.filter((l) => l.category !== "MANDATORY");
+  const mandatory = leveled.filter((l) => l.category === "MANDATORY");
+  const others = leveled.filter((l) => l.category !== "MANDATORY");
   // 값어치 큰 순 → 같으면 휴일 먼저 → 같으면 이른 날짜부터 (뒤늦은 신청이 앞선 달의 확정분을 밀어내지 않도록)
   mandatory.sort((a, b) => {
-    const d = lineValue(b, p, !!b.over) - lineValue(a, p, !!a.over);
+    const d = lineValue(b, p) - lineValue(a, p);
     if (d !== 0) return d;
     if (a.kind !== b.kind) return a.kind === "HOLIDAY" ? -1 : 1;
     return (a.date + a.timeLabel).localeCompare(b.date + b.timeLabel);
@@ -395,9 +521,7 @@ export function computeOvertime(input: OtInput): OtResult {
 
   const lines: OtLine[] = [];
   const finish = (l: OtLine, counted: number, reason?: string) => {
-    const mult =
-      (l.kind === "HOLIDAY" ? (l.over ? p.holidayOverMultiplier : p.holidayMultiplier) : p.overtimeMultiplier) +
-      (l.night ? p.nightMultiplier : 0);
+    const mult = lineValue(l, p);
     const row: OtLine = {
       ...l,
       countedHours: roundHours(counted, 0),
@@ -436,10 +560,11 @@ export function computeOvertime(input: OtInput): OtResult {
     );
 
   return {
+    extraHours: sum((l) => l.kind === "EXTRA"),
     overtimeHours: sum((l) => l.kind === "OVERTIME"),
     holidayHours: sum((l) => l.kind === "HOLIDAY" && !l.over),
     holidayOverHours: sum((l) => l.kind === "HOLIDAY" && !!l.over),
-    nightHours: sum((l) => l.night),
+    nightHours: p.countNight ? sum((l) => l.night) : 0,
     lines,
     excluded,
     pendingDecision,
@@ -450,7 +575,8 @@ export function computeOvertime(input: OtInput): OtResult {
 export function overtimeAmount(r: OtResult, hourlyWage: number, policy?: Partial<OtPolicy>): number {
   const p = { ...DEFAULT_OT_POLICY, ...(policy ?? {}) };
   return Math.round(
-    r.overtimeHours * hourlyWage * p.overtimeMultiplier +
+    r.extraHours * hourlyWage * p.extraMultiplier +
+      r.overtimeHours * hourlyWage * p.overtimeMultiplier +
       r.holidayHours * hourlyWage * p.holidayMultiplier +
       r.holidayOverHours * hourlyWage * p.holidayOverMultiplier +
       r.nightHours * hourlyWage * p.nightMultiplier

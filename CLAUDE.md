@@ -95,8 +95,13 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - **보강계획 사전신청 = 오버타임 수당의 원장**(`MakeupSession`). 직원이 슬랙으로 등록하고(승인 절차 없음)
   관리자가 **실근무 시각을 확정(CONFIRMED)** 해야 비로소 수당이 생긴다. PLANNED 는 0원.
   산정은 `computeOvertime()`(lib/overtime.ts, 순수 함수) 하나가 전담한다:
-  ① 평일 소정근로시간 밖·토요일 → **연장**(×1.5) ② 일요일·공휴일 → **휴일**(8시간까지 ×1.5, 초과 ×2.0)
-  ③ 소정근로시간 안은 대상 아님(월급에 이미 포함) ④ 완전비율제는 제외 ⑤ 22~06시는 +0.5 야간 가산.
+  ① 평일 소정근로시간 밖·토요일 → **연장, 가산 없음(×1.0)** ② 일요일·공휴일 → **휴일**(8시간까지 ×1.5, 초과 ×2.0)
+  ③ 소정근로시간 안은 대상 아님(월급에 이미 포함) ④ 완전비율제는 제외.
+  **연장에 1.5배를 붙이지 않는다** — 이 학원은 주 소정근로가 37.5시간(14~22시·휴게 0.5)이라
+  주 40시간 안쪽의 추가근로는 법정 가산 대상이 아니다(법내연장). 가산은 휴일근로에만 붙는다.
+  1일 8시간·주 40시간 초과분까지 ×1.5 로 올리려면 `applyStatutoryOvertime` 을 켠다(**기본 꺼짐**,
+  켜면 그 주의 늦은 시각부터 승격되고 휴일근로시간은 산입하지 않는다).
+  **야간(22~06시) +0.5 가산도 기본 꺼짐**(`countNight`) — 지시가 없으면 붙이지 않는다.
   **소정근로시간은 `Employee.schedule` 에서 뺀다** — 시간표가 비어 있으면 전부 연장으로 잡히므로
   화면이 '근로시간표 없음' 경고를 띄운다.
   **내신의무보강은 내신 기간(`ExamPeriod`)당 상한(기본 10시간)** 까지만 인정하고,
@@ -104,7 +109,7 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   분기(연 4회)로 대신 묶어 상한이 새지 않게 한다. **결시보강은 기본 미반영** — `payEligible` 로 건건이 켠다.
   지급 조건은 `OvertimePolicy`(단일 행) 에 있고 화면(보강·오버타임 → 수당 지급 조건)에서 고친다.
 - **오버타임은 급여 산정에 자동으로 실린다.** `runPayrollMonth()` 가 `overtimeInputsFor()` 로
-  그 달 확정분을 읽어 `overtimeHours/holidayHours/holidayOverHours/nightHours` 를 채운다
+  그 달 확정분을 읽어 `extraHours(법내연장 ×1.0)/overtimeHours(법정연장 ×1.5)/holidayHours/holidayOverHours/nightHours` 를 채운다
   (명시적으로 넘긴 값이 있으면 그쪽 우선). 산정 줄은 `breakdown.overtime` 에 남고
   명세서에 「보강 오버타임 산정 내역서」로 첨부된다(`overtimeDetailHtml`).
   내신 상한은 **내신 기간 전체** 기준이라 기간이 달을 걸치면 뒤 달 신청이 앞 달 배분을 바꿀 수 있다 —

@@ -7,6 +7,7 @@ import { getOvertimePolicy } from "@/lib/makeup-service";
 export const dynamic = "force-dynamic";
 
 const NUM = [
+  "extraMultiplier",
   "overtimeMultiplier",
   "holidayMultiplier",
   "holidayOverMultiplier",
@@ -19,6 +20,7 @@ const NUM = [
 ] as const;
 const BOOL = [
   "countNight",
+  "applyStatutoryOvertime",
   "immediateDefault",
   "mandatoryDefault",
   "absenceDefault",
@@ -41,12 +43,15 @@ export async function PATCH(req: Request) {
   await getOvertimePolicy(); // 없으면 만들어 둔다
   const row = await prisma.overtimePolicy.update({ where: { id: 1 }, data });
 
+  // 법내연장(×1.0)과 야간 미산정은 이 학원의 방침이라 경고 대상이 아니다.
+  // 다만 '법정 초과분 가산' 을 켜 놓고 배수를 1.5 아래로 내리면 법정 기준에 못 미친다.
   const warn: string[] = [];
-  if (row.overtimeMultiplier < 1.5) warn.push("연장근로 가산이 법정 1.5배보다 낮습니다.");
+  if (row.applyStatutoryOvertime && row.overtimeMultiplier < 1.5)
+    warn.push("법정 연장근로 가산이 1.5배보다 낮습니다.");
   if (row.holidayMultiplier < 1.5) warn.push("휴일근로 가산이 법정 1.5배보다 낮습니다.");
   if (row.holidayOverMultiplier < 2) warn.push("휴일 8시간 초과 가산이 법정 2배보다 낮습니다.");
-  if (row.nightMultiplier < 0.5 || !row.countNight)
-    warn.push("야간근로 가산(+0.5)이 법정 기준에 못 미칩니다.");
+  if (row.countNight && row.nightMultiplier < 0.5)
+    warn.push("야간근로 가산이 법정 0.5배보다 낮습니다.");
 
   await logActivity({
     action: "SETTINGS_UPDATE",
