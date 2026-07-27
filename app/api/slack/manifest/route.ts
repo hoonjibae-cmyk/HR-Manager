@@ -1,5 +1,4 @@
 import { isAuthed } from "@/lib/auth";
-import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -22,16 +21,17 @@ export async function GET(req: Request) {
   if (!(await isAuthed())) return new Response("unauthorized", { status: 401 });
 
   const origin = publicOrigin(req);
-  const company = await prisma.company.findFirst({ where: { id: 1 } });
-  const name = company?.name ?? "유쌤에듀";
+  // 앱 이름은 이미 슬랙에 만들어 둔 앱과 같아야 한다 — 회사명에서 만들어내면
+  // ("주식회사 …") 붙여넣는 순간 앱 이름이 바뀌므로 고정값을 쓴다.
+  const appName = process.env.SLACK_APP_NAME || "유쌤에듀 HR";
 
-  const yaml = `# ${name} HR — 슬랙 앱 매니페스트
+  const yaml = `# ${appName} — 슬랙 앱 매니페스트
 # 이 배포 주소(${origin})가 이미 채워져 있습니다. 그대로 복사해서
 # https://api.slack.com/apps → 앱 선택 → App Manifest → YAML 에 붙여넣고 저장하세요.
 # 저장 시 슬랙이 아래 request_url 들을 실제로 호출해 검증하므로 배포가 끝난 뒤 진행합니다.
 
 display_information:
-  name: ${name} HR
+  name: ${appName}
   description: 연차 신청·승인 및 급여명세서 발송 알림
   background_color: "#1f45f5"
 
