@@ -54,6 +54,21 @@ export default function SettingsClient() {
     );
   }
 
+  async function testGcal() {
+    const res = await fetch("/api/gcal/test", { method: "POST" });
+    const j = await res.json().catch(() => ({}));
+    const lines = (j.steps ?? []).map(
+      (st: any) => `${st.ok ? "✅" : "❌"} ${st.name}${st.detail ? ` — ${st.detail}` : ""}`
+    );
+    alert(
+      (j.ok
+        ? `구글 캘린더 연결 성공\n캘린더: ${j.calendarName ?? ""}\n\n`
+        : "구글 캘린더 연결 실패\n\n") +
+        lines.join("\n") +
+        (j.hint ? `\n\n${j.hint}` : "")
+    );
+  }
+
   async function copyManifest() {
     const res = await fetch("/api/slack/manifest");
     if (!res.ok) return alert("매니페스트를 불러오지 못했습니다.");
@@ -92,6 +107,7 @@ export default function SettingsClient() {
         onTestEmail={testEmail}
         onPostLauncher={postLauncher}
         onCopyManifest={copyManifest}
+        onTestGcal={testGcal}
       />
     </div>
   );
@@ -345,7 +361,7 @@ function EmailLogCard({ logs }: { logs: any[] }) {
   );
 }
 
-function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyManifest }: any) {
+function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyManifest, onTestGcal }: any) {
   const envHint = g.serverless
     ? "Vercel → Settings → Environment Variables 에 추가 후 재배포"
     : ".env 파일에 추가 후 서버 재시작";
@@ -404,6 +420,9 @@ function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyM
         )}
         <button className="btn-outline" onClick={onCopyManifest}>
           슬랙 앱 매니페스트 복사
+        </button>
+        <button className="btn-outline" onClick={onTestGcal}>
+          구글 캘린더 연결 테스트
         </button>
       </div>
       {!g.smtp && (
