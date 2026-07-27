@@ -424,6 +424,44 @@ describe("computePayroll — 시급제 주휴수당", () => {
   });
 });
 
+describe("computePayroll — 완전비율제 최저보장", () => {
+  const emp: EmployeePayInput = {
+    incomeType: "FREELANCE",
+    payScheme: "RATIO",
+    baseWage: 0,
+    positionAllow: 0,
+    mealAllow: 0,
+    carAllow: 0,
+    dependents: 1,
+    schedule: fullTime,
+    ratioPercent: 0.4,
+    ratioMinGuarantee: 5_000_000,
+  };
+
+  it("수수료가 보장액에 못 미치면 보장액을 지급한다", () => {
+    const r = computePayroll(emp, { classRevenue: 10_000_000 }, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.baseP).toBe(5_000_000); // 1000만 × 40% = 400만 → 보장 500만
+    expect(r.notes.some((n) => n.includes("최저보장 적용"))).toBe(true);
+  });
+
+  it("수수료가 보장액을 넘으면 수수료 그대로", () => {
+    const r = computePayroll(emp, { classRevenue: 20_000_000 }, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.baseP).toBe(8_000_000); // 2000만 × 40%
+  });
+
+  it("보장액이 없으면 종전대로 매출 × 비율", () => {
+    const noFloor = { ...emp, ratioMinGuarantee: null };
+    const r = computePayroll(noFloor, { classRevenue: 10_000_000 }, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.baseP).toBe(4_000_000);
+    expect(r.notes.some((n) => n.includes("최저보장"))).toBe(false);
+  });
+
+  it("보장액 적용분도 사업소득 3.3% 원천징수 대상", () => {
+    const r = computePayroll(emp, { classRevenue: 10_000_000 }, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.incomeTaxD).toBe(floor10(5_000_000 * 0.03));
+  });
+});
+
 describe("blendWageTerms — 월중 계약 갱신 일할가중", () => {
   it("기본급 300만 → 400만, 16일 변경(30일 월) = 350만", () => {
     const b = blendWageTerms([

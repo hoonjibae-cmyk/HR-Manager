@@ -32,6 +32,7 @@ export interface ImportRow {
   incThreshold: number | null;
   incPerStudent: number | null;
   ratioPercent: number | null; // 0~1
+  ratioMinGuarantee: number | null;
   contractStart: string; // 기본값 = 입사일
   contractEnd?: string;
   errors: string[]; // 이 행의 문제 (있으면 등록 제외)
@@ -61,6 +62,12 @@ export const IMPORT_COLUMNS: Array<{ key: string; header: string; alias: string[
   { key: "incThreshold", header: "인센티브 기준인원", alias: ["기준인원", "기준 학생수"] },
   { key: "incPerStudent", header: "인센티브 기준금액", alias: ["기준금액", "1명당 금액"] },
   { key: "ratioPercent", header: "위탁비율", alias: ["비율", "위탁 비율(%)", "수수료율"], note: "예: 50%" },
+  {
+    key: "ratioMinGuarantee",
+    header: "위탁 최저보장",
+    alias: ["최저보장", "최저보장액", "보장금액"],
+    note: "완전비율제 계약에 최저보장 조항이 있을 때만",
+  },
   { key: "dependents", header: "부양가족수", alias: ["부양가족", "가족수"], note: "본인포함, 기본 1" },
   { key: "rrn", header: "주민등록번호", alias: ["주민번호"] },
   { key: "birth", header: "생년월일", alias: ["생일"] },
@@ -266,6 +273,10 @@ export function parseEmployeeWorkbook(buf: Buffer | Uint8Array): ParseResult {
       incThreshold: incThresholdRaw === "" ? null : toAmount(incThresholdRaw) || null,
       incPerStudent: incPerStudentRaw === "" ? null : toAmount(incPerStudentRaw) || null,
       ratioPercent,
+      ratioMinGuarantee:
+        String(get("ratioMinGuarantee") ?? "").trim() === ""
+          ? null
+          : toAmount(get("ratioMinGuarantee")) || null,
       contractStart,
       contractEnd,
       errors,

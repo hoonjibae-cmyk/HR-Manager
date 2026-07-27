@@ -20,6 +20,7 @@ interface EmpSnapshot {
   incThreshold: number | null;
   incPerStudent: number | null;
   ratioPercent: number | null; // 0~1
+  ratioMinGuarantee?: number | null;
   position: string | null;
   duty: string | null;
 }
@@ -45,6 +46,7 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
     incThreshold: emp.incThreshold ?? "",
     incPerStudent: emp.incPerStudent ?? "",
     ratioPercent: emp.ratioPercent != null ? emp.ratioPercent * 100 : "",
+    ratioMinGuarantee: emp.ratioMinGuarantee ?? "",
     position: emp.position ?? "",
     duty: emp.duty ?? "",
     note: "",
@@ -73,6 +75,7 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
         incThreshold: f.incThreshold === "" ? null : Number(f.incThreshold),
         incPerStudent: f.incPerStudent === "" ? null : Number(f.incPerStudent),
         ratioPercent: f.ratioPercent === "" ? null : Number(f.ratioPercent) / 100,
+        ratioMinGuarantee: f.ratioMinGuarantee === "" ? null : Number(f.ratioMinGuarantee),
         position: f.position,
         duty: f.duty,
         note: f.note || null,
@@ -179,7 +182,10 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
           </>
         )}
         {f.payScheme === "RATIO" && (
-          <L label="위탁 비율 (%)"><input type="number" step="0.1" className="input" value={f.ratioPercent} onChange={(e) => set("ratioPercent", e.target.value)} /></L>
+          <>
+            <L label="위탁 비율 (%)"><input type="number" step="0.1" className="input" value={f.ratioPercent} onChange={(e) => set("ratioPercent", e.target.value)} /></L>
+            <L label="위탁 최저보장 (월, 원)"><input type="number" className="input" placeholder="없으면 비움" value={f.ratioMinGuarantee} onChange={(e) => set("ratioMinGuarantee", e.target.value)} /></L>
+          </>
         )}
         <L label="직책"><input className="input" value={f.position} onChange={(e) => set("position", e.target.value)} /></L>
         <L label="업무내용"><input className="input" value={f.duty} onChange={(e) => set("duty", e.target.value)} /></L>

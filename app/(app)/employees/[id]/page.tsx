@@ -120,7 +120,12 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
               <Row k="세무/보험">{INCOME_TYPE_LABEL[terms.incomeType] ?? terms.incomeType}</Row>
               <Row k="급여형태">{PAY_SCHEME_LABEL[terms.payScheme] ?? terms.payScheme}</Row>
               {terms.payScheme === "RATIO" ? (
-                <Row k="위탁비율">{((terms.ratioPercent ?? 0) * 100).toFixed(1)}%</Row>
+                <>
+                  <Row k="위탁비율">{((terms.ratioPercent ?? 0) * 100).toFixed(1)}%</Row>
+                  {gov?.ratioMinGuarantee ? (
+                    <Row k="최저보장(월)">{wonUnit(gov.ratioMinGuarantee)}</Row>
+                  ) : null}
+                </>
               ) : (
                 <Row k={terms.payScheme === "HOURLY" ? "시급" : "월 급여 총액"}>{wonUnit(terms.baseWage)}</Row>
               )}
@@ -260,6 +265,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                   incThreshold: emp.incThreshold,
                   incPerStudent: emp.incPerStudent,
                   ratioPercent: emp.ratioPercent,
+                  ratioMinGuarantee: emp.ratioMinGuarantee,
                   position: emp.position,
                   duty: emp.duty,
                 }}
@@ -316,6 +322,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                         incThreshold: c.incThreshold,
                         incPerStudent: c.incPerStudent,
                         ratioPercent: c.ratioPercent,
+                        ratioMinGuarantee: c.ratioMinGuarantee,
                         note: c.note ?? "",
                       }}
                       deletable={emp.contracts.length > 1}

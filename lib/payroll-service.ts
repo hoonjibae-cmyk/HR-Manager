@@ -101,6 +101,7 @@ export async function wageSegmentsFor(
         mealAllow: c.mealAllow,
         carAllow: c.carAllow,
         ratioPercent: c.ratioPercent,
+        ratioMinGuarantee: c.ratioMinGuarantee,
       });
     }
     if (segs.length || future)
@@ -160,6 +161,7 @@ export function applyMidMonthBlend(
     payInput.mealAllow = s.mealAllow;
     payInput.carAllow = s.carAllow;
     if (s.ratioPercent != null) payInput.ratioPercent = s.ratioPercent;
+    if (s.ratioMinGuarantee != null) payInput.ratioMinGuarantee = s.ratioMinGuarantee;
   };
 
   if (segs.length >= 2) {

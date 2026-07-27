@@ -51,6 +51,8 @@ export interface EmployeePayInput {
   incPerStudent?: number | null;
   // 비율제
   ratioPercent?: number | null;
+  /** 위탁 최저보장액(월) — 만근 시 수수료가 이에 못 미쳐도 보장 (계약서 제5조) */
+  ratioMinGuarantee?: number | null;
 }
 
 /** 인센티브 퇴직유보금 요율 — 확인서 기준 '인센티브 원천액의 8.3%'(= 1/12) */
@@ -66,6 +68,7 @@ export interface WageSegment {
   mealAllow: number;
   carAllow: number;
   ratioPercent?: number | null;
+  ratioMinGuarantee?: number | null;
 }
 
 export interface BlendedWage {
@@ -275,10 +278,17 @@ export function computePayroll(
   } else if (emp.payScheme === "RATIO") {
     const rev = month.classRevenue ?? 0;
     const pct = emp.ratioPercent ?? 0;
-    baseP = round0(rev * pct);
-    notes.push(
-      `비율제: 매출 ${rev.toLocaleString()}원 × ${(pct * 100).toFixed(1)}%`
-    );
+    const fee = round0(rev * pct);
+    const floor = emp.ratioMinGuarantee ?? 0;
+    baseP = Math.max(fee, floor);
+    notes.push(`비율제: 매출 ${rev.toLocaleString()}원 × ${(pct * 100).toFixed(1)}%`);
+    if (floor > 0) {
+      notes.push(
+        baseP > fee
+          ? `최저보장 적용: 산출 수수료 ${fee.toLocaleString()}원 → 보장액 ${floor.toLocaleString()}원 (만근 조건 충족 시)`
+          : `최저보장 ${floor.toLocaleString()}원 — 산출 수수료가 이를 넘어 그대로 지급`
+      );
+    }
   } else {
     // MONTHLY / INCENTIVE — 포괄임금.
     // baseWage 는 '월 지급 총액'이며 식대·차량유지비(비과세)가 그 안에 포함돼 있다.

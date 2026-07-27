@@ -5,6 +5,16 @@ import { parseEmployeeWorkbook, buildTemplateWorkbook } from "@/lib/employee-imp
 import { templateKeyOf } from "@/lib/contracts";
 import { logActivity } from "@/lib/activity";
 
+/** 학원 표준 근로시간표 (월~금 15:00~22:00, 휴게 30분).
+ *  비워 두면 통상시급이 0이 되어 연장·야간·연차수당이 계산되지 않는다. */
+const DEFAULT_SCHEDULE = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((day) => ({
+  day,
+  work: day !== "sat" && day !== "sun",
+  start: "15:00",
+  end: "22:00",
+  breakH: 0.5,
+}));
+
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
@@ -117,6 +127,8 @@ export async function POST(req: Request) {
         incThreshold: r.incThreshold,
         incPerStudent: r.incPerStudent,
         ratioPercent: r.ratioPercent,
+        ratioMinGuarantee: r.ratioMinGuarantee,
+        schedule: JSON.stringify(DEFAULT_SCHEDULE),
       },
     });
     // 보수조건의 단일 진실은 계약이므로 초기 계약을 함께 만든다
@@ -137,6 +149,7 @@ export async function POST(req: Request) {
         incThreshold: r.incThreshold,
         incPerStudent: r.incPerStudent,
         ratioPercent: r.ratioPercent,
+        ratioMinGuarantee: r.ratioMinGuarantee,
         status: "ACTIVE",
         note: "명단 일괄 등록",
       },

@@ -19,6 +19,7 @@ export interface ContractSnapshot {
   incThreshold: number | null;
   incPerStudent: number | null;
   ratioPercent: number | null; // 0~1
+  ratioMinGuarantee: number | null;
   note: string;
 }
 
@@ -39,6 +40,7 @@ export default function ContractEditForm({
     incThreshold: contract.incThreshold ?? "",
     incPerStudent: contract.incPerStudent ?? "",
     ratioPercent: contract.ratioPercent != null ? contract.ratioPercent * 100 : "",
+    ratioMinGuarantee: contract.ratioMinGuarantee ?? "",
   });
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
 
@@ -63,6 +65,7 @@ export default function ContractEditForm({
         incThreshold: f.incThreshold === "" ? null : Number(f.incThreshold),
         incPerStudent: f.incPerStudent === "" ? null : Number(f.incPerStudent),
         ratioPercent: f.ratioPercent === "" ? null : Number(f.ratioPercent) / 100,
+        ratioMinGuarantee: f.ratioMinGuarantee === "" ? null : Number(f.ratioMinGuarantee),
         note: f.note || null,
       }),
     });
@@ -140,9 +143,14 @@ export default function ContractEditForm({
           </L>
         )}
         {f.payScheme === "RATIO" && (
-          <L label="위탁 비율 (%)">
-            <input type="number" step="0.1" className="input" value={f.ratioPercent} onChange={(e) => set("ratioPercent", e.target.value)} />
-          </L>
+          <>
+            <L label="위탁 비율 (%)">
+              <input type="number" step="0.1" className="input" value={f.ratioPercent} onChange={(e) => set("ratioPercent", e.target.value)} />
+            </L>
+            <L label="위탁 최저보장 (월, 원)">
+              <input type="number" className="input" placeholder="없으면 비움" value={f.ratioMinGuarantee} onChange={(e) => set("ratioMinGuarantee", e.target.value)} />
+            </L>
+          </>
         )}
         {isMonthly && (
           <>

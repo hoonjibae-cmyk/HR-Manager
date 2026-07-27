@@ -110,6 +110,7 @@ model Employee {
 
   // 비율제(RATIO) 설정
   ratioPercent    Float? // 담당 반 매출액의 % (예: 0.5 = 50%)
+  ratioMinGuarantee Int?  // 위탁 최저보장액(월) — 만근 시 수수료가 이 금액에 못 미쳐도 보장
 
   // 주간 근로시간표: JSON [{day:"mon",work:true,start:"15:00",end:"22:00",breakH:0.5}, ...]
   schedule    String   @default("[]")
@@ -152,6 +153,7 @@ model Contract {
   incThreshold  Int?
   incPerStudent Int?
   ratioPercent  Float?
+  ratioMinGuarantee Int? // 위탁 최저보장액(월)
 
   status      String   @default("ACTIVE") // ACTIVE | EXPIRED | TERMINATED | DRAFT
   pdfPath     String?

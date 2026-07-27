@@ -130,6 +130,7 @@ describe("mirrorFromContract — 카드에 비출 값", () => {
       incThreshold: null,
       incPerStudent: null,
       ratioPercent: 0.4,
+      ratioMinGuarantee: null,
     });
   });
 

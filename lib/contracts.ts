@@ -16,6 +16,7 @@ export const CONTRACT_TERM_FIELDS = [
   "mealAllow",
   "carAllow",
   "ratioPercent",
+  "ratioMinGuarantee",
   "incThreshold",
   "incPerStudent",
 ] as const;
@@ -90,6 +91,7 @@ export interface ContractLike {
   incThreshold: number | null;
   incPerStudent: number | null;
   ratioPercent: number | null;
+  ratioMinGuarantee?: number | null;
 }
 
 const DAY = 86400000;
@@ -228,6 +230,7 @@ export function mirrorFromContract(c: ContractLike): Record<string, any> {
     incThreshold: c.incThreshold ?? null,
     incPerStudent: c.incPerStudent ?? null,
     ratioPercent: c.ratioPercent ?? null,
+    ratioMinGuarantee: c.ratioMinGuarantee ?? null,
   };
 }
 

@@ -75,6 +75,7 @@ export async function POST(req: Request) {
         incThreshold: numOrNull(body.incThreshold, emp.incThreshold),
         incPerStudent: numOrNull(body.incPerStudent, emp.incPerStudent),
         ratioPercent: numOrNull(body.ratioPercent, emp.ratioPercent),
+        ratioMinGuarantee: numOrNull(body.ratioMinGuarantee, emp.ratioMinGuarantee),
         status: "ACTIVE",
         note: body.note || null,
       },
