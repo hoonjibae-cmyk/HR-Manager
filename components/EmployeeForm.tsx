@@ -203,15 +203,20 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
         <p className="text-xs text-slate-400 mb-4">입사일부터 적용되는 첫 계약의 조건으로 저장됩니다. 이후 변경은 계약 이력에서 합니다.</p>
         <div className="grid md:grid-cols-3 gap-4">
           {f.payScheme !== "RATIO" && (
-            <Field label={f.payScheme === "HOURLY" ? "시급 (원)" : "월 기본급 (원)"}>
+            <Field label={f.payScheme === "HOURLY" ? "시급 (원)" : "월 급여 총액 (원)"}>
               <input type="number" className="input" value={f.baseWage} onChange={(e) => set("baseWage", e.target.value)} />
+              {f.payScheme !== "HOURLY" && (
+                <p className="text-[11px] text-slate-400 mt-1">
+                  식대·차량유지비를 <b>포함한</b> 금액. 예) 400만 입력 + 식대 20만 → 총 지급액 400만(그 중 20만 비과세)
+                </p>
+              )}
             </Field>
           )}
           {isMonthly && (
             <>
-              <Field label="직책수당 (월)"><input type="number" className="input" value={f.positionAllow} onChange={(e) => set("positionAllow", e.target.value)} /></Field>
-              <Field label="식대 (비과세)"><input type="number" className="input" value={f.mealAllow} onChange={(e) => set("mealAllow", e.target.value)} /></Field>
-              <Field label="차량유지비 (비과세)"><input type="number" className="input" value={f.carAllow} onChange={(e) => set("carAllow", e.target.value)} /></Field>
+              <Field label="직책수당 (월 · 총액에 가산)"><input type="number" className="input" value={f.positionAllow} onChange={(e) => set("positionAllow", e.target.value)} /></Field>
+              <Field label="식대 (비과세 · 총액에 포함)"><input type="number" className="input" value={f.mealAllow} onChange={(e) => set("mealAllow", e.target.value)} /></Field>
+              <Field label="차량유지비 (비과세 · 총액에 포함)"><input type="number" className="input" value={f.carAllow} onChange={(e) => set("carAllow", e.target.value)} /></Field>
             </>
           )}
           {f.payScheme === "INCENTIVE" && (

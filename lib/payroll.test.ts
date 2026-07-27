@@ -132,12 +132,60 @@ describe("computePayroll — 월급제 4대보험", () => {
     expect(r.net).toBe(r.gross - r.totalDeduct);
   });
 
-  it("식대 비과세는 과세표준에서 제외된다", () => {
-    const withMeal = { ...emp, mealAllow: 200_000, baseWage: 2_800_000 };
+  it("식대는 기본급 총액 안에 포함되고, 과세표준에서만 빠진다", () => {
+    // 계약 총액 300만 · 그 중 식대 20만 비과세
+    const withMeal = { ...emp, baseWage: 3_000_000, mealAllow: 200_000 };
     const r = computePayroll(withMeal, {}, DEFAULT_RATES_2025, smallTaxTable);
-    expect(r.gross).toBe(3_000_000); // 2.8M + 식대 0.2M
+    expect(r.baseP).toBe(2_800_000); // 명세서의 기본급 = 총액 − 비과세
+    expect(r.mealP).toBe(200_000);
+    expect(r.gross).toBe(3_000_000); // 총 지급액은 계약 총액 그대로 (더해지지 않음)
     expect(r.taxableGross).toBe(2_800_000); // 식대 제외
     expect(r.pensionD).toBe(floor10(2_800_000 * 0.045));
+  });
+
+  it("식대를 올려도 총 지급액은 그대로, 과세표준만 줄어든다", () => {
+    const base = { ...emp, baseWage: 4_000_000, mealAllow: 0 };
+    const withMeal = { ...base, mealAllow: 200_000 };
+    const a = computePayroll(base, {}, DEFAULT_RATES_2025, smallTaxTable);
+    const b = computePayroll(withMeal, {}, DEFAULT_RATES_2025, smallTaxTable);
+    expect(a.gross).toBe(4_000_000);
+    expect(b.gross).toBe(4_000_000); // 420만이 되지 않는다
+    expect(b.baseP).toBe(3_800_000);
+    expect(b.taxableGross).toBe(a.taxableGross - 200_000);
+    expect(b.net).toBeGreaterThan(a.net); // 세금·보험료가 줄어 실수령은 늘어난다
+  });
+
+  it("차량유지비도 같은 방식으로 총액에 포함된다", () => {
+    const r = computePayroll(
+      { ...emp, baseWage: 4_000_000, mealAllow: 200_000, carAllow: 200_000 },
+      {},
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.baseP).toBe(3_600_000);
+    expect(r.gross).toBe(4_000_000);
+    expect(r.taxableGross).toBe(3_600_000);
+  });
+
+  it("직책수당은 총액에 더해지는 별도 항목이다", () => {
+    const r = computePayroll(
+      { ...emp, baseWage: 4_000_000, mealAllow: 200_000, positionAllow: 300_000 },
+      {},
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.gross).toBe(4_300_000);
+  });
+
+  it("비과세가 기본급보다 크면 0으로 막고 경고를 남긴다", () => {
+    const r = computePayroll(
+      { ...emp, baseWage: 150_000, mealAllow: 200_000 },
+      {},
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.baseP).toBe(0);
+    expect(r.notes.some((n) => n.includes("보다 큽니다"))).toBe(true);
   });
 });
 
@@ -308,9 +356,12 @@ describe("computePayroll — 일할계산 (월중 입·퇴사)", () => {
       schedule: fullTime,
     };
     const r = computePayroll(emp, { prorationRatio: 0.5 }, DEFAULT_RATES_2025, smallTaxTable);
-    expect(r.baseP).toBe(1_500_000);
+    // 기본급 300만 안에 식대 20만이 포함 → 과세 기본급 280만, 절반이면 140만
+    expect(r.baseP).toBe(1_400_000);
     expect(r.positionP).toBe(150_000);
     expect(r.mealP).toBe(100_000);
+    // 합계는 계약 총액(300만+직책 30만)의 절반 그대로
+    expect(r.gross).toBe(1_650_000);
   });
 
   it("시급제: 추정근로시간·주휴수당에 재직비율 적용", () => {
@@ -438,8 +489,10 @@ describe("blendWageTerms — 월중 계약 갱신 일할가중", () => {
       schedule: fullTime,
     };
     const r = computePayroll(emp, {}, DEFAULT_RATES_2025, smallTaxTable);
-    expect(r.baseP).toBe(3_500_000);
-    expect(r.gross).toBe(3_500_000 + 200_000);
+    // 총액 350만 안에 식대 20만 포함 → 과세 기본급 330만 + 식대 20만 = 350만
+    expect(r.baseP).toBe(3_300_000);
+    expect(r.mealP).toBe(200_000);
+    expect(r.gross).toBe(3_500_000);
   });
 });
 

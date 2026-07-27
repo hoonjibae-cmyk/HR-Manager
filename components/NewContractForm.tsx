@@ -161,7 +161,7 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
 
       <div className="grid grid-cols-2 gap-3">
         {f.payScheme !== "RATIO" && (
-          <L label={f.payScheme === "HOURLY" ? "시급 (원)" : "월 기본급 (원)"}>
+          <L label={f.payScheme === "HOURLY" ? "시급 (원)" : "월 급여 총액 (원)"}>
             <input type="number" className="input" value={f.baseWage} onChange={(e) => set("baseWage", e.target.value)} />
           </L>
         )}

@@ -219,14 +219,17 @@ export function contractHtml(args: {
     <p class="sub">⑤ "을"의 임금은 매월 초일부터 말일까지 기산하여, 익월 ${payday}일에 "을"의 통장으로 법정 공제액을 공제한 후 지급한다. (휴일 전일 당일 지급)</p>
     <p class="sub">⑥ "을"의 퇴직 시 근속기간 중 1주 평균 근로시간이 15시간 이상인 주가 1년 이상인 경우 퇴직급여보장법에 따른 법정 퇴직금을 지급한다.</p></div>`;
   } else {
-    const totalWage = ct.baseWage + ct.positionAllow + ct.mealAllow + ct.carAllow;
+    // 식대·차량유지비(비과세)는 기본급 총액 '안에' 포함된 금액이라 따로 더하지 않는다.
+    const totalWage = ct.baseWage + ct.positionAllow;
+    const taxableBase = Math.max(ct.baseWage - ct.mealAllow - ct.carAllow, 0);
     const incRef = isIncentive
       ? `<p class="sub">⑦ "을"의 인센티브 산정·지급 및 퇴직유보금에 관한 세부 사항은 별지 「인센티브 산정 계약서」에 따른다.</p>`
       : "";
     wageClause = `<div class="clause"><h3>제 4조 (임금)</h3>
     <p class="sub">① "을"의 급여 산정 및 지급은 <b>${wonUnit(totalWage)}</b>을 기준급여로 하여 아래와 같은 임금 항목으로 포괄하여 지급한다.</p>
-    <table class="kv"><tr><th>기본급</th><td>${wonUnit(ct.baseWage)}</td><th>직책수당</th><td>${wonUnit(ct.positionAllow)}</td></tr>
+    <table class="kv"><tr><th>기본급</th><td>${wonUnit(taxableBase)}</td><th>직책수당</th><td>${wonUnit(ct.positionAllow)}</td></tr>
     <tr><th>식대(비과세)</th><td>${wonUnit(ct.mealAllow)}</td><th>차량유지비(비과세)</th><td>${wonUnit(ct.carAllow)}</td></tr></table>
+    <p class="footnote">※ 식대·차량유지비는 위 기본급 총액 ${wonUnit(ct.baseWage)} 에 포함된 금액이며, 소득세법상 비과세 항목으로 구분하여 지급한다.</p>
     <p class="sub">② 위 급여는 제2, 3조에 따라 책정된 임금이며, 이에 관한 사항이 변경 시 변경된 업무, 직책, 근무장소 및 근로시간 등에 따라 급여가 변경됨에 동의한다.</p>
     <p class="sub">③ "을"의 임금은 매월 초일부터 말일까지 기산하여, 익월 ${payday}일에 "을"의 통장으로 법정 공제액을 공제한 후 지급한다. (휴일 전일 당일 지급)</p>
     <p class="sub">④ "을"의 퇴직 시 근속기간 중 1주 평균 근로시간이 15시간 이상인 주가 1년 이상인 경우 퇴직급여보장법에 따른 법정 퇴직금을 지급한다.</p>

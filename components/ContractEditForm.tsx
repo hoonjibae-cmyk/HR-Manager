@@ -135,7 +135,7 @@ export default function ContractEditForm({
           </select>
         </L>
         {f.payScheme !== "RATIO" && (
-          <L label={f.payScheme === "HOURLY" ? "시급 (원)" : "월 기본급 (원)"}>
+          <L label={f.payScheme === "HOURLY" ? "시급 (원)" : "월 급여 총액 (원)"}>
             <input type="number" className="input" value={f.baseWage} onChange={(e) => set("baseWage", e.target.value)} />
           </L>
         )}
@@ -147,8 +147,8 @@ export default function ContractEditForm({
         {isMonthly && (
           <>
             <L label="직책수당"><input type="number" className="input" value={f.positionAllow} onChange={(e) => set("positionAllow", e.target.value)} /></L>
-            <L label="식대(비과세)"><input type="number" className="input" value={f.mealAllow} onChange={(e) => set("mealAllow", e.target.value)} /></L>
-            <L label="차량유지비"><input type="number" className="input" value={f.carAllow} onChange={(e) => set("carAllow", e.target.value)} /></L>
+            <L label="식대(비과세·총액 포함)"><input type="number" className="input" value={f.mealAllow} onChange={(e) => set("mealAllow", e.target.value)} /></L>
+            <L label="차량유지비(비과세·총액 포함)"><input type="number" className="input" value={f.carAllow} onChange={(e) => set("carAllow", e.target.value)} /></L>
           </>
         )}
         {f.payScheme === "INCENTIVE" && (

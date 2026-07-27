@@ -62,6 +62,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         ratioPercent: emp.ratioPercent,
         incomeType: emp.incomeType,
       };
+  const isMonthlyScheme = terms.payScheme === "MONTHLY" || terms.payScheme === "INCENTIVE";
   const upcoming = emp.contracts
     .filter((c) => c.startDate > now)
     .sort((a, b) => a.startDate.getTime() - b.startDate.getTime())[0];
@@ -121,7 +122,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
               {terms.payScheme === "RATIO" ? (
                 <Row k="위탁비율">{((terms.ratioPercent ?? 0) * 100).toFixed(1)}%</Row>
               ) : (
-                <Row k={terms.payScheme === "HOURLY" ? "시급" : "월 기본급"}>{wonUnit(terms.baseWage)}</Row>
+                <Row k={terms.payScheme === "HOURLY" ? "시급" : "월 급여 총액"}>{wonUnit(terms.baseWage)}</Row>
               )}
               {terms.payScheme === "HOURLY" && (
                 <Row k="휴게 30분">
@@ -132,9 +133,31 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                   )}
                 </Row>
               )}
-              {terms.positionAllow > 0 && <Row k="직책수당">{wonUnit(terms.positionAllow)}</Row>}
-              {terms.mealAllow > 0 && <Row k="식대(비과세)">{wonUnit(terms.mealAllow)}</Row>}
-              {terms.carAllow > 0 && <Row k="차량유지비">{wonUnit(terms.carAllow)}</Row>}
+              {isMonthlyScheme && (terms.mealAllow > 0 || terms.carAllow > 0) && (
+                <Row k="└ 과세 기본급">
+                  <span className="text-slate-500">
+                    {wonUnit(Math.max(terms.baseWage - terms.mealAllow - terms.carAllow, 0))}
+                  </span>
+                </Row>
+              )}
+              {terms.mealAllow > 0 && (
+                <Row k={isMonthlyScheme ? "└ 식대(비과세)" : "식대(비과세)"}>
+                  <span className="text-slate-500">{wonUnit(terms.mealAllow)}</span>
+                </Row>
+              )}
+              {terms.carAllow > 0 && (
+                <Row k={isMonthlyScheme ? "└ 차량유지비(비과세)" : "차량유지비(비과세)"}>
+                  <span className="text-slate-500">{wonUnit(terms.carAllow)}</span>
+                </Row>
+              )}
+              {terms.positionAllow > 0 && (
+                <Row k="직책수당 (별도 가산)">{wonUnit(terms.positionAllow)}</Row>
+              )}
+              {isMonthlyScheme && (
+                <Row k="총 지급액">
+                  <b>{wonUnit(terms.baseWage + terms.positionAllow)}</b>
+                </Row>
+              )}
               {terms.payScheme === "INCENTIVE" && (
                 <Row k="인센티브">학생 {terms.incThreshold}명 초과 시 1명당 {won(terms.incPerStudent)}원</Row>
               )}

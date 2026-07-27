@@ -280,8 +280,23 @@ export function computePayroll(
       `비율제: 매출 ${rev.toLocaleString()}원 × ${(pct * 100).toFixed(1)}%`
     );
   } else {
-    // MONTHLY / INCENTIVE — 포괄임금(월 기본급 고정, 월중 입/퇴사 시 일할)
-    baseP = round0(emp.baseWage * prorate);
+    // MONTHLY / INCENTIVE — 포괄임금.
+    // baseWage 는 '월 지급 총액'이며 식대·차량유지비(비과세)가 그 안에 포함돼 있다.
+    // 명세서에는 과세 대상분만 기본급으로 싣고 비과세분은 아래에서 따로 표시한다.
+    // (합계는 그대로 baseWage — 비과세 항목을 떼어내 세금만 줄이는 구조)
+    const inclusiveNonTax = (emp.mealAllow || 0) + (emp.carAllow || 0);
+    if (inclusiveNonTax > emp.baseWage) {
+      notes.push(
+        `식대·차량유지비 합계(${inclusiveNonTax.toLocaleString()}원)가 기본급(${emp.baseWage.toLocaleString()}원)보다 큽니다 — 계약 조건을 확인하세요.`
+      );
+    } else if (inclusiveNonTax > 0) {
+      notes.push(
+        `기본급 ${emp.baseWage.toLocaleString()}원에 비과세 ${inclusiveNonTax.toLocaleString()}원(식대·차량유지비)이 포함되어 있어, 과세 대상 기본급은 ${(
+          emp.baseWage - inclusiveNonTax
+        ).toLocaleString()}원입니다.`
+      );
+    }
+    baseP = round0(Math.max(emp.baseWage - inclusiveNonTax, 0) * prorate);
   }
 
   // --- 인센티브 ---
@@ -313,6 +328,8 @@ export function computePayroll(
   const holidayP = round0(holH * hourlyWage * 1.5);
 
   // --- 수당 (월 정액 수당은 일할 적용) ---
+  // 식대·차량유지비는 월급제/인센티브에서는 기본급에서 이미 빼 두었으므로 여기서 더해도
+  // 합계는 계약 총액 그대로다. 시급제·비율제는 기본급 개념이 달라 별도 가산으로 둔다.
   const positionP = round0((emp.positionAllow || 0) * prorate);
   const mealP = round0((emp.mealAllow || 0) * prorate);
   const carP = round0((emp.carAllow || 0) * prorate);
