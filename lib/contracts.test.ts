@@ -5,6 +5,8 @@ import {
   mirrorFromContract,
   templateKeyOf,
   paySchemeOf,
+  effectiveContractStatus,
+  planContractTimeline,
 } from "./contracts";
 
 const d = (s: string) => new Date(s + "T00:00:00Z");
@@ -147,5 +149,93 @@ describe("templateKey ↔ payScheme", () => {
     for (const s of ["MONTHLY", "HOURLY", "RATIO", "INCENTIVE"])
       expect(paySchemeOf(templateKeyOf(s))).toBe(s);
     expect(paySchemeOf("REGULAR")).toBe("MONTHLY"); // 옛 서식 키
+  });
+});
+
+describe("effectiveContractStatus — 저장된 status 가 뒤처져도 화면은 사실대로", () => {
+  const today = d("2026-07-27");
+  it("종료일이 지났으면 EXPIRED", () => {
+    expect(effectiveContractStatus({ endDate: d("2025-10-31"), status: "ACTIVE" }, today)).toBe("EXPIRED");
+  });
+  it("아직 유효하면 ACTIVE", () => {
+    expect(effectiveContractStatus({ endDate: d("2026-12-31"), status: "ACTIVE" }, today)).toBe("ACTIVE");
+    expect(effectiveContractStatus({ endDate: null, status: "ACTIVE" }, today)).toBe("ACTIVE");
+  });
+  it("종료일 당일은 아직 유효", () => {
+    expect(effectiveContractStatus({ endDate: d("2026-07-27"), status: "ACTIVE" }, today)).toBe("ACTIVE");
+  });
+  it("사람이 정한 상태는 날짜로 뒤집지 않는다", () => {
+    expect(effectiveContractStatus({ endDate: d("2020-01-01"), status: "DRAFT" }, today)).toBe("DRAFT");
+    expect(effectiveContractStatus({ endDate: null, status: "TERMINATED" }, today)).toBe("TERMINATED");
+  });
+});
+
+describe("planContractTimeline — 계약 이력 정리", () => {
+  const today = d("2026-07-27");
+  const c = (id: number, start: string, end: string | null, status = "ACTIVE") => ({
+    id, startDate: d(start), endDate: end ? d(end) : null, status,
+  });
+
+  it("기한 없는 계약을 새 계약이 덮으면 그 전날로 닫고 EXPIRED", () => {
+    const fixes = planContractTimeline([c(1, "2024-01-01", null), c(2, "2025-03-01", null)], today);
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0].id).toBe(1);
+    expect(fixes[0].endDate!.toISOString().slice(0, 10)).toBe("2025-02-28");
+    expect(fixes[0].status).toBe("EXPIRED");
+  });
+
+  it("종료일이 이미 지났는데 ACTIVE 로 남아 있으면 EXPIRED 로 내린다", () => {
+    // 종료일을 손댈 필요가 없어 예전에는 상태가 그대로 남았다
+    const fixes = planContractTimeline([c(1, "2021-11-02", "2022-11-01"), c(2, "2022-12-01", null)], today);
+    expect(fixes).toEqual([{ id: 1, status: "EXPIRED" }]);
+  });
+
+  it("과거 날짜로 나중에 끼워 넣은 계약도 뒤 계약에 맞춰 닫힌다", () => {
+    // 2024 계약을 먼저 만들고 2023 계약을 나중에 추가한 경우
+    const fixes = planContractTimeline(
+      [c(9, "2024-11-01", "2025-10-31"), c(7, "2023-11-01", "2025-10-31")],
+      today
+    );
+    const f7 = fixes.find((f) => f.id === 7)!;
+    expect(f7.endDate!.toISOString().slice(0, 10)).toBe("2024-10-31");
+    expect(f7.status).toBe("EXPIRED");
+    // 마지막 계약도 종료일이 지났으므로 EXPIRED
+    expect(fixes.find((f) => f.id === 9)).toEqual({ id: 9, status: "EXPIRED" });
+  });
+
+  it("마지막 계약이 유효하면 ACTIVE 로 되살린다", () => {
+    const fixes = planContractTimeline([c(1, "2026-01-01", null, "EXPIRED")], today);
+    expect(fixes).toEqual([{ id: 1, status: "ACTIVE" }]);
+  });
+
+  it("이미 맞으면 아무것도 바꾸지 않는다", () => {
+    const list = [c(1, "2024-01-01", "2025-02-28", "EXPIRED"), c(2, "2025-03-01", null, "ACTIVE")];
+    expect(planContractTimeline(list, today)).toEqual([]);
+  });
+
+  it("종료일을 늘리지는 않는다 — 빈 기간은 사람이 판단할 몫", () => {
+    const list = [c(1, "2024-01-01", "2024-06-30", "EXPIRED"), c(2, "2025-03-01", null)];
+    expect(planContractTimeline(list, today)).toEqual([]);
+  });
+
+  it("TERMINATED 는 건드리지 않는다", () => {
+    const fixes = planContractTimeline([c(1, "2024-01-01", null, "TERMINATED"), c(2, "2025-03-01", null)], today);
+    expect(fixes[0].id).toBe(1);
+    expect(fixes[0].endDate!.toISOString().slice(0, 10)).toBe("2025-02-28");
+    expect("status" in fixes[0]).toBe(false); // 상태는 그대로 둔다
+  });
+
+  it("DRAFT 는 이력에서 제외한다", () => {
+    const list = [c(1, "2024-01-01", null), c(2, "2025-03-01", null, "DRAFT")];
+    const fixes = planContractTimeline(list, today);
+    expect(fixes).toEqual([]); // 초안은 앞 계약을 닫지 않는다
+  });
+
+  it("미래 시작 계약이 있어도 현재 계약을 미리 닫아 둔다", () => {
+    const list = [c(1, "2025-03-01", null), c(2, "2026-09-01", null)];
+    const fixes = planContractTimeline(list, today);
+    // 2026-08-31 로 닫히지만 아직 지나지 않았으므로 ACTIVE 유지
+    expect(fixes[0].endDate!.toISOString().slice(0, 10)).toBe("2026-08-31");
+    expect(fixes[0].status).toBeUndefined();
   });
 });

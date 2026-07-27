@@ -10,6 +10,7 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - `npm run seed` / `npm run db:reset` — 시딩 / DB 초기화+재시딩
 - `npm run db:clear-employees` — 직원 데이터 전체 삭제 미리보기 (실제 삭제는 `CONFIRM=DELETE` 필요).
   설정(회사·요율·세액표·공휴일)은 남긴다.
+- `npm run db:fix-contracts` — 계약 이력 앞뒤 맞추기 미리보기 (실제 반영은 `APPLY=1`). 멱등.
 - `npx tsc --noEmit` — 타입 체크
 - 로그인 비밀번호: `.env` 의 `ADMIN_PASSWORD` (기본 `yoossam2025`)
 
@@ -35,9 +36,14 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   (`PATCH /api/employees/[id]` 는 인적사항만 받고 보수 필드는 무시).
   변경 경로는 둘: 신규 계약 작성(`POST /api/contracts`) 또는 기존 계약 수정(`PATCH /api/contracts/[id]`).
   두 경로 모두 끝에 `refreshEmployeeCard()` 로 카드를 다시 맞춘다.
-- **계약 기간에 빈틈을 만들지 않는다.** 신규 계약 생성 시 `closePrecedingContracts()` 가 직전 계약을
-  '시작일 −1일' 로 닫는다. 입사일~오늘(퇴사자는 퇴사일)이 덮이지 않으면 `contractIssues()` 가
-  화면에 경고를 띄운다.
+- **계약 기간에 빈틈을 만들지 않는다.** 계약을 만들거나 고치거나 지운 뒤에는 반드시
+  `normalizeContractTimeline(employeeId)` 로 그 직원의 이력 전체를 다시 맞춘다 —
+  뒤 계약이 시작하면 앞 계약을 '그 전날' 로 닫고, 종료일이 지난 계약은 EXPIRED 로 내린다
+  (`planContractTimeline()` 이 순수 함수, 테스트 있음). 신규 계약 하나만 보고 직전 것을 닫는
+  방식으로는 이미 끝난 계약의 상태나 과거 날짜로 끼워 넣은 계약이 정리되지 않았다.
+  **종료일을 늘리지는 않는다** — 덮이지 않은 빈 기간은 `contractIssues()` 가 화면에 경고로 띄우고
+  사람이 판단한다. 화면 표시는 저장된 status 가 아니라 `effectiveContractStatus(c, now)` 를 쓴다
+  (시간이 지나면 저장값이 뒤처지므로). 기존 데이터는 `npm run db:fix-contracts` 로 한 번 훑는다.
 - 미래 시작 계약을 만들어도 발효일 전까지는 카드·급여에 반영되지 않는다(지배 계약이 아직 이전 계약).
 - 이식성을 위해 Prisma **enum 대신 문자열** + `lib/constants.ts` 의 상수/라벨 사용.
 - DB는 Postgres. 스키마 변경 시 `npx prisma db push`(DIRECT_URL 사용). 서버리스 런타임은 pgbouncer(DATABASE_URL).

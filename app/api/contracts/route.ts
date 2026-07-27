@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { logActivity } from "@/lib/activity";
 import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
-import { templateKeyOf, closePrecedingContracts, refreshEmployeeCard } from "@/lib/contracts";
+import { templateKeyOf, normalizeContractTimeline, refreshEmployeeCard } from "@/lib/contracts";
 
 export const dynamic = "force-dynamic";
 
@@ -54,10 +54,7 @@ export async function POST(req: Request) {
     v === undefined ? fallback : v === null || v === "" ? null : Number(v);
 
   try {
-    // 1) 직전 계약 닫기 (빈틈·중복 방지)
-    const closed = await closePrecedingContracts(employeeId, startDate);
-
-    // 2) 새 계약
+    // 1) 새 계약
     const contract = await prisma.contract.create({
       data: {
         employeeId,
@@ -83,6 +80,11 @@ export async function POST(req: Request) {
         note: body.note || null,
       },
     });
+
+    // 2) 이력 전체를 다시 맞춘다 — 앞 계약을 '새 계약 시작일 −1일' 로 닫고,
+    //    끝난 계약은 EXPIRED 로 내린다 (과거 날짜로 끼워 넣은 계약도 함께 정리)
+    const fixes = await normalizeContractTimeline(employeeId);
+    const closed = fixes.filter((f) => f.endDate !== undefined).map((f) => f.id);
 
     // 3) 직책·업무는 계약서 본문에 쓰이므로 카드에도 반영 (보수조건 아님)
     const personal: any = {};

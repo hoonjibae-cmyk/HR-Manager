@@ -263,27 +263,95 @@ export async function refreshEmployeeCard(employeeId: number, asOf: Date = new D
 }
 
 /**
- * 새 계약 시작일에 맞춰 직전 계약의 종료일을 닫는다 (빈틈·중복 방지).
- * 반환: 닫은 계약 id 목록
+ * 계약의 '지금 실제 상태'.
+ * 저장된 status 는 마지막으로 손댄 시점의 값이라 시간이 지나면 뒤처진다
+ * (어제 끝난 계약이 화면에 ACTIVE 로 남는다). 화면은 항상 이 값을 쓴다.
  */
-export async function closePrecedingContracts(employeeId: number, newStart: Date) {
-  const cutoff = addDays(newStart, -1);
-  const prior = await prisma.contract.findMany({
-    where: {
-      employeeId,
-      status: { not: "DRAFT" },
-      startDate: { lt: dayStart(newStart) },
-    },
-  });
-  const closed: number[] = [];
-  for (const c of prior) {
-    const needsClose = !c.endDate || dayStart(c.endDate).getTime() > cutoff.getTime();
-    if (!needsClose) continue;
-    await prisma.contract.update({
-      where: { id: c.id },
-      data: { endDate: cutoff, status: "EXPIRED" },
-    });
-    closed.push(c.id);
+export function effectiveContractStatus(
+  c: { endDate: Date | null; status: string },
+  asOf: Date = new Date()
+): string {
+  // 사람이 명시적으로 정한 상태는 날짜로 뒤집지 않는다
+  if (c.status === "DRAFT" || c.status === "TERMINATED") return c.status;
+  if (c.endDate && dayStart(c.endDate).getTime() < dayStart(asOf).getTime()) return "EXPIRED";
+  return "ACTIVE";
+}
+
+export interface TimelineFix {
+  id: number;
+  /** 다음 계약이 덮는 만큼 잘라낸 종료일 */
+  endDate?: Date;
+  /** 날짜에 맞춰 다시 매긴 상태 */
+  status?: string;
+}
+
+/**
+ * 계약 이력을 앞뒤가 맞게 정리한다 (순수 함수 — DB 무관).
+ *
+ *  1) 뒤 계약이 시작하면 앞 계약은 그 전날로 닫는다. 종료일이 비어 있어도 닫는다.
+ *  2) 종료일이 지난 계약은 EXPIRED, 아직 유효하면 ACTIVE.
+ *
+ * 종료일을 늘리지는 않는다 — 덮이지 않은 빈 기간은 contractIssues() 가 알리고
+ * 사람이 판단할 몫이다. 여기서 임의로 늘리면 없던 계약기간이 생겨버린다.
+ */
+export function planContractTimeline<
+  T extends { id: number; startDate: Date; endDate: Date | null; status: string }
+>(contracts: T[], asOf: Date = new Date()): TimelineFix[] {
+  const list = [...contracts]
+    .filter((c) => c.status !== "DRAFT")
+    .sort(
+      (a, b) =>
+        dayStart(a.startDate).getTime() - dayStart(b.startDate).getTime() || a.id - b.id
+    );
+  const today = dayStart(asOf).getTime();
+  const fixes: TimelineFix[] = [];
+
+  for (let i = 0; i < list.length; i++) {
+    const c = list[i];
+    const next = list[i + 1];
+    const fix: TimelineFix = { id: c.id };
+    let endDate = c.endDate;
+
+    if (next) {
+      const cutoff = addDays(next.startDate, -1);
+      if (!endDate || dayStart(endDate).getTime() > cutoff.getTime()) {
+        endDate = cutoff;
+        fix.endDate = cutoff;
+      }
+    }
+
+    const shouldBe =
+      c.status === "TERMINATED"
+        ? "TERMINATED"
+        : endDate && dayStart(endDate).getTime() < today
+        ? "EXPIRED"
+        : "ACTIVE";
+    if (shouldBe !== c.status) fix.status = shouldBe;
+
+    if (fix.endDate !== undefined || fix.status !== undefined) fixes.push(fix);
   }
-  return closed;
+  return fixes;
+}
+
+/**
+ * 위 계획을 실제로 적용한다. 계약을 만들거나 고치거나 지운 뒤에 호출한다.
+ *
+ * 신규 계약 하나만 보고 직전 계약을 닫는 방식으로는 부족했다 —
+ *  · 이미 끝난 계약은 종료일을 손댈 필요가 없어 상태가 ACTIVE 로 남았고,
+ *  · 과거 날짜로 계약을 나중에 끼워 넣으면 그 뒤 계약과의 관계가 정리되지 않았다.
+ * 그래서 매번 그 직원의 이력 전체를 다시 맞춘다.
+ */
+export async function normalizeContractTimeline(
+  employeeId: number,
+  asOf: Date = new Date()
+): Promise<TimelineFix[]> {
+  const list = await prisma.contract.findMany({
+    where: { employeeId, status: { not: "DRAFT" } },
+    orderBy: [{ startDate: "asc" }, { id: "asc" }],
+  });
+  const fixes = planContractTimeline(list, asOf);
+  for (const { id, ...data } of fixes) {
+    await prisma.contract.update({ where: { id }, data });
+  }
+  return fixes;
 }

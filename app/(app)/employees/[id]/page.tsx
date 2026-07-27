@@ -15,7 +15,12 @@ import {
   DAY_KO,
 } from "@/lib/constants";
 import { won, wonUnit, ymd } from "@/lib/format";
-import { governingContract, contractIssues, paySchemeOf } from "@/lib/contracts";
+import {
+  governingContract,
+  contractIssues,
+  paySchemeOf,
+  effectiveContractStatus,
+} from "@/lib/contracts";
 import ContractIssueNotice from "@/components/ContractIssueNotice";
 
 export const dynamic = "force-dynamic";
@@ -292,7 +297,11 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                         <span className="ml-2 pill bg-amber-100 text-amber-700">발효 예정</span>
                       )}
                     </span>
-                    <Pill kind={c.status}>{c.status}</Pill>
+                    {(() => {
+                      // 저장된 status 가 아니라 '오늘 기준 실제 상태' 를 보여준다
+                      const st = effectiveContractStatus(c, now);
+                      return <Pill kind={st}>{st}</Pill>;
+                    })()}
                   </div>
                   <div className="text-xs text-slate-400 mt-1">
                     {ymd(c.startDate)} ~ {c.endDate ? ymd(c.endDate) : "기한 없음"}

@@ -12,6 +12,7 @@
     "db:push": "prisma db push",
     "db:reset": "prisma db push --force-reset && npm run seed",
     "db:clear-employees": "tsx scripts/clear-employees.ts",
+    "db:fix-contracts": "tsx scripts/fix-contracts.ts",
     "db:studio": "prisma studio",
     "test": "vitest run",
     "test:watch": "vitest",

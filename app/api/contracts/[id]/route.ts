@@ -6,8 +6,7 @@ import {
   templateKeyOf,
   refreshEmployeeCard,
   contractIssues,
-  closePrecedingContracts,
-  addDays,
+  normalizeContractTimeline,
 } from "@/lib/contracts";
 
 export const dynamic = "force-dynamic";
@@ -64,8 +63,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
   try {
     await prisma.contract.update({ where: { id }, data });
-    // 시작일을 옮겼으면 앞 계약을 다시 닫아 빈틈을 막는다
-    if (data.startDate) await closePrecedingContracts(cur.employeeId, start);
+    // 날짜를 옮겼으면 앞뒤 계약과의 관계가 달라진다 — 이력 전체를 다시 맞춘다
+    await normalizeContractTimeline(cur.employeeId);
     await refreshEmployeeCard(cur.employeeId);
     const emp = await prisma.employee.findUnique({ where: { id: cur.employeeId } });
     await logActivity({
@@ -111,23 +110,14 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
     });
     await prisma.contract.delete({ where: { id } });
     if (prev) {
-      // 삭제로 생긴 공백을 직전 계약이 이어받는다
-      const next = await prisma.contract.findFirst({
-        where: {
-          employeeId: cur.employeeId,
-          status: { not: "DRAFT" },
-          startDate: { gt: prev.startDate },
-        },
-        orderBy: { startDate: "asc" },
-      });
+      // 삭제로 생긴 공백을 직전 계약이 이어받는다.
+      // (뒤에 다른 계약이 남아 있으면 아래 normalize 가 다시 그 전날로 닫는다)
       await prisma.contract.update({
         where: { id: prev.id },
-        data: {
-          endDate: next ? addDays(next.startDate, -1) : cur.endDate,
-          status: next ? "EXPIRED" : "ACTIVE",
-        },
+        data: { endDate: cur.endDate },
       });
     }
+    await normalizeContractTimeline(cur.employeeId);
     await refreshEmployeeCard(cur.employeeId);
     const emp = await prisma.employee.findUnique({ where: { id: cur.employeeId } });
     await logActivity({

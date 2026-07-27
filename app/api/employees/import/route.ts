@@ -8,7 +8,7 @@ import {
   planFill,
   FILL_FIELDS,
 } from "@/lib/employee-import";
-import { templateKeyOf } from "@/lib/contracts";
+import { templateKeyOf, normalizeContractTimeline } from "@/lib/contracts";
 import { logActivity } from "@/lib/activity";
 
 /** 학원 표준 근로시간표 (월~금 15:00~22:00, 휴게 30분).
@@ -249,6 +249,8 @@ export async function POST(req: Request) {
         note: "명단 일괄 등록",
       },
     });
+    // 계약기간이 이미 지난 채로 등록되는 경우가 있어 상태를 날짜에 맞춘다
+    await normalizeContractTimeline(emp.id);
     created.push(emp.name);
   }
 
