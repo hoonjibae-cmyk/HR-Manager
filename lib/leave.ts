@@ -204,6 +204,10 @@ export function summarizeLeave(
     !isBefore(d, period.start) && isBefore(d, period.endExclusive);
   const usedInThisPeriod: number[] = lots.map(() => 0); // lots 와 같은 인덱스
 
+  // 부여분이 하나도 없을 때의 사용분 (lot 에 실을 수 없어 따로 센다)
+  let overdraft = 0;
+  let overdraftInPeriod = 0;
+
   // FIFO: 각 사용을 '사용시점에 유효한 가장 오래된 lot'에서 차감
   for (const use of uses) {
     let need = use.days;
@@ -225,6 +229,11 @@ export function summarizeLeave(
       lots[last].remaining -= need;
       lots[last].used += need;
       if (inPeriod(use.date)) usedInThisPeriod[last] += need;
+    } else if (need > 0) {
+      // 발생분(lot)이 하나도 없는데 사용한 경우 — 입사 직후 선사용 등.
+      // 여기서 버리면 사용 내역이 통째로 사라지므로 따로 모아 둔다.
+      overdraft += need;
+      if (inPeriod(use.date)) overdraftInPeriod += need;
     }
   }
 
@@ -237,16 +246,17 @@ export function summarizeLeave(
   }
 
   const granted = lots.reduce((s, l) => s + l.days, 0);
-  const used = lots.reduce((s, l) => s + l.used, 0);
+  const used = lots.reduce((s, l) => s + l.used, 0) + overdraft;
   const expired = lots.reduce((s, l) => s + l.expiredLost, 0);
-  const remaining = lots
-    .filter((l) => isAfter(l.expiryDate, asOf))
-    .reduce((s, l) => s + l.remaining, 0);
+  const remaining =
+    lots
+      .filter((l) => isAfter(l.expiryDate, asOf))
+      .reduce((s, l) => s + l.remaining, 0) - overdraft;
 
   // 이번 연차기간 집계
   let periodGranted = 0;
   let periodCarried = 0;
-  let periodUsed = 0;
+  let periodUsed = overdraftInPeriod;
   lots.forEach((l, i) => {
     periodUsed += usedInThisPeriod[i];
     if (inPeriod(l.grantDate)) periodGranted += l.days;

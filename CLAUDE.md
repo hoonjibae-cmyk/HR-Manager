@@ -73,6 +73,10 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   시간만 넣으면 기본급·시간외·야간 금액이 자동 분해되어 계약서 제4조와 명세서에 함께 반영된다.
 - **급여 항목 추가** → `lib/payroll.ts`(계산) + `schema.prisma`(PayrollRecord) + `lib/documents-pay.ts`(명세서 표시).
 - **연차 규칙 변경** → `lib/leave.ts`(`annualLeaveDays`, `generateGrants`) + 테스트.
+- **쓰던 연차 관리시트 가져오기** → `/leave` 의 *연차 시트 가져오기* (`lib/leave-import.ts` 파서·계획,
+  `/api/leave/import`). **사용 내역만** 가져오고 발생일수는 시스템 계산을 쓴다(시트=회계연도, 시스템=입사일 기준).
+  휴가종류 가중치는 시트가 자체 계산한 누적사용일수와 대조해 확정 — 연차 1일·반차 0.5일만 연차를 깎고
+  대체휴일은 대휴(COMP), 공가공상·무급휴가는 차감하지 않는다. 같은 날짜 사용분은 다시 넣지 않아 재실행이 안전하다.
 - **직원 명단 일괄 등록** → `lib/employee-import.ts`(엑셀 파서·헤더 alias·값 정규화, 테스트 있음)
   + `/api/employees/import`(GET=빈 양식, POST=미리보기/등록). 등록 시 초기 계약도 함께 만든다.
 - **이미 등록된 직원의 빈 인적사항 채우기** → 같은 화면의 *정보 채우기* 탭

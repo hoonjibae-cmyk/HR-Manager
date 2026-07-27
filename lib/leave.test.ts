@@ -223,3 +223,35 @@ describe("period — 이번 연차기간 기준 현황", () => {
     expect(s.period.remaining).toBe(20);
   });
 });
+
+describe("발생분이 없는데 사용한 경우 — 사용 내역이 사라지면 안 된다", () => {
+  // 입사 한 달이 안 돼 발생(lot)이 하나도 없는 상태에서 미리 쓴 경우.
+  // 예전에는 배분할 lot 이 없어 사용분이 통째로 버려졌다.
+  const hire = d("2026-06-29");
+  const asOf = d("2026-07-27");
+  const txns: LeaveTxn[] = [
+    { date: d("2026-07-10"), days: -1, type: "USE" },
+    { date: d("2026-07-20"), days: -1, type: "USE" },
+  ];
+
+  it("사용 누계와 잔여에 반영된다", () => {
+    const s = summarizeLeave(hire, asOf, txns);
+    expect(s.granted).toBe(0);
+    expect(s.used).toBe(2);
+    expect(s.remaining).toBe(-2);
+  });
+
+  it("이번 연차기간 집계에도 잡힌다", () => {
+    const s = summarizeLeave(hire, asOf, txns);
+    expect(s.period.used).toBe(2);
+    expect(s.period.granted).toBe(0);
+  });
+
+  it("발생이 생긴 뒤에는 종전대로 lot 에서 차감한다", () => {
+    // 입사 1개월 경과 → 개근 1일 발생
+    const s = summarizeLeave(hire, d("2026-08-05"), txns);
+    expect(s.granted).toBe(1);
+    expect(s.used).toBe(2);
+    expect(s.remaining).toBe(-1);
+  });
+});

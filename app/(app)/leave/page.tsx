@@ -9,6 +9,7 @@ import {
 import { PageHeader } from "@/components/ui";
 import LeaveApprovals from "@/components/LeaveApprovals";
 import AddLeaveRequest from "@/components/AddLeaveRequest";
+import LeaveImport from "@/components/LeaveImport";
 import CompGrantButton from "@/components/CompGrantButton";
 import { ymd } from "@/lib/format";
 
@@ -83,7 +84,12 @@ export default async function LeavePage({
       <PageHeader
         title="연차 관리"
         desc="본래 연차(근로기준법 자동 산정) + 대휴보상연차(운영자 수동 부여) · 슬랙 신청 → 승인 → 반영"
-        action={<AddLeaveRequest employees={employees.map((e) => ({ id: e.id, name: e.name, department: e.department }))} />}
+        action={
+          <div className="flex items-center gap-2">
+            <LeaveImport />
+            <AddLeaveRequest employees={employees.map((e) => ({ id: e.id, name: e.name, department: e.department }))} />
+          </div>
+        }
       />
 
       <div className="card mb-6">

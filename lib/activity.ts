@@ -30,6 +30,7 @@ export const ACTION_LABEL: Record<string, string> = {
   LEAVE_REJECT: "휴가 반려",
   LEAVE_CANCEL: "휴가 취소 확정",
   LEAVE_ADJUST: "연차 수동 조정",
+  LEAVE_IMPORT: "연차 사용내역 일괄 등록",
   LEAVE_COMP_GRANT: "대휴 부여",
   SETTINGS_UPDATE: "설정 변경",
 };
