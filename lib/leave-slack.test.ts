@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { leaveBalanceText, modalPeriod } from "./leave-slack";
+import { leaveBalanceText, modalPeriod, leaveBlockNotice } from "./leave-slack";
 import { summarizeLeave, summarizeComp, type LeaveTxn } from "./leave";
 
 const d = (s: string) => new Date(s + "T00:00:00Z");
@@ -63,5 +63,79 @@ describe("modalPeriod — 모달 헤더용 요약", () => {
     const txns: LeaveTxn[] = [{ date: d("2025-07-01"), days: 3, type: "ADJUST" }];
     const p = modalPeriod(summarizeLeave(d("2021-01-01"), d("2026-03-01"), txns));
     expect(p).toEqual({ start: "2026.01.01", end: "2026.12.31", granted: 20, used: 0 });
+  });
+});
+
+describe("연차 미적용 직원이 슬랙에서 보는 안내", () => {
+  const hire = d("2024-03-01");
+  const asOf = d("2026-07-27");
+  const off = summarizeLeave(hire, asOf, [], { eligible: false });
+  const noComp = summarizeComp([], asOf);
+
+  const byHours = { eligible: false, weeklyHours: 13.5, forcedOff: false };
+  const byContract = { eligible: false, weeklyHours: 40, forcedOff: true };
+
+  it("주 15시간 미만이면 실제 시간과 법 근거를 함께 알려준다", () => {
+    const t = leaveBalanceText("서지안", off, noComp, byHours);
+    expect(t).toContain("1주 소정근로시간이 13.5시간(15시간 미만)");
+    expect(t).toContain("근로기준법 제18조 제3항");
+    expect(t).toContain("관리자에게 문의");
+    // 없는 연차를 있는 것처럼 말하지 않는다
+    expect(t).not.toContain("잔여 0일");
+    expect(t).not.toContain("사용기한");
+  });
+
+  it("계약상 미적용이면 근로시간을 근거로 대지 않는다", () => {
+    const t = leaveBalanceText("홍길동", off, noComp, byContract);
+    expect(t).toContain("계약상 연차휴가가 적용되지 않는 근무형태");
+    expect(t).not.toContain("15시간");
+  });
+
+  it("관리자가 부여한 잔여가 있으면 그 일수와 신청 방법을 알려준다", () => {
+    const granted = summarizeLeave(hire, asOf, [{ date: d("2026-05-01"), days: 3, type: "ADJUST" }], {
+      eligible: false,
+    });
+    const t = leaveBalanceText("서지안", granted, noComp, byHours);
+    expect(t).toContain("관리자가 따로 부여한 연차 잔여 *3일*");
+    expect(t).toContain("`/연차 신청`");
+  });
+
+  it("적용 대상이면 종전 문구 그대로", () => {
+    const on = summarizeLeave(hire, asOf, []);
+    const t = leaveBalanceText("김지연", on, noComp, { eligible: true, weeklyHours: 32.5, forcedOff: false });
+    expect(t).toContain("*이번 연차기간*");
+    expect(t).not.toContain("근로기준법 제18조");
+  });
+});
+
+describe("leaveBlockNotice — 신청을 막을지 판단", () => {
+  const hire = d("2024-03-01");
+  const asOf = d("2026-07-27");
+  const e = { eligible: false, weeklyHours: 9, forcedOff: false };
+
+  it("적용 대상은 막지 않는다", () => {
+    const on = summarizeLeave(hire, asOf, []);
+    expect(leaveBlockNotice(on, summarizeComp([], asOf), { ...e, eligible: true })).toBeNull();
+  });
+
+  it("미적용이고 쓸 잔여도 없으면 사유와 함께 막는다", () => {
+    const off = summarizeLeave(hire, asOf, [], { eligible: false });
+    const msg = leaveBlockNotice(off, summarizeComp([], asOf), e);
+    expect(msg).toContain("1주 소정근로시간이 9.0시간");
+    expect(msg).toContain("신청할 수 있는 연차·대휴가 없습니다");
+  });
+
+  it("관리자 부여분이나 대휴가 남아 있으면 신청을 막지 않는다", () => {
+    const granted = summarizeLeave(hire, asOf, [{ date: d("2026-05-01"), days: 2, type: "ADJUST" }], {
+      eligible: false,
+    });
+    expect(leaveBlockNotice(granted, summarizeComp([], asOf), e)).toBeNull();
+
+    const off = summarizeLeave(hire, asOf, [], { eligible: false });
+    const withComp = summarizeComp(
+      [{ date: d("2026-06-01"), days: 1, type: "GRANT", category: "COMP" }],
+      asOf
+    );
+    expect(leaveBlockNotice(off, withComp, e)).toBeNull();
   });
 });

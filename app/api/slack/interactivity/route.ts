@@ -30,6 +30,7 @@ import {
   cancelableLeaves,
   rangeLabel,
   leaveBalanceText,
+  leaveBlockNotice,
   modalPeriod,
 } from "@/lib/leave-slack";
 import { refreshHomeTab } from "@/lib/home-tab";
@@ -85,7 +86,13 @@ async function openLeaveForm(triggerId: string, userId: string, channelId?: stri
     );
     return;
   }
-  const { summary, comp } = await leaveBalanceOf(emp);
+  const { summary, comp, eligibility } = await leaveBalanceOf(emp);
+  // 연차 미적용이고 쓸 잔여도 없으면 양식을 열지 않고 이유를 알려준다
+  const blocked = leaveBlockNotice(summary, comp, eligibility);
+  if (blocked) {
+    await tellUser(channelId, userId, blocked);
+    return;
+  }
   await openView(
     triggerId,
     leaveModalView({
@@ -258,8 +265,8 @@ export async function POST(req: Request) {
       await tellUser(channelId, userId, notLinkedText(info));
       return new Response("", { status: 200 });
     }
-    const { summary, comp } = await leaveBalanceOf(emp);
-    await tellUser(channelId, userId, leaveBalanceText(emp.name, summary, comp));
+    const { summary, comp, eligibility } = await leaveBalanceOf(emp);
+    await tellUser(channelId, userId, leaveBalanceText(emp.name, summary, comp, eligibility));
     return new Response("", { status: 200 });
   }
 

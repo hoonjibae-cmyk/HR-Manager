@@ -74,6 +74,10 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   판정은 `isLeaveEligible(주소정시간, Employee.leaveEligible)` — 카드의 `leaveEligible` 이
   null 이면 근로시간으로 자동, true/false 면 계약대로 강제. `summarizeLeave(..., {eligible})` 에 넘긴다.
   미적용이어도 관리자가 직접 부여한 분(ADJUST +)은 살아 있다.
+  **슬랙도 같은 판정을 쓴다** — `leaveBalanceOf()` 가 스케줄에서 판정해 `eligible` 을 넘기고
+  `eligibility`(사유·주 소정시간)를 함께 돌려준다. 여기서 빠뜨리면 화면은 0인데 슬랙만 15일로 보인다.
+  미적용 직원이 신청을 시도하면 `leaveBlockNotice()` 가 사유와 함께 막는다 —
+  다만 관리자 부여분·대휴가 남아 있으면 그 범위 안에서는 쓸 수 있으므로 막지 않는다.
 - **연차 신청은 슬랙으로만 들어온다.** 관리자는 신청서를 만들지 않고 `/api/leave/adjust` 로 바로 반영한다
   (연차 화면의 *+ 연차 반영*). 반영 시 당사자에게 슬랙 DM 을 보낼지 선택할 수 있고, 알림 실패가 반영을 되돌리지 않는다.
 - 4대보험/세율은 하드코딩 금지 — `InsuranceRate`(설정 화면에서 수정). 세액표는 `TaxBracket`.

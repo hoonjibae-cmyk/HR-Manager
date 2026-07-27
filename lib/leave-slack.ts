@@ -4,15 +4,30 @@ import {
   countLeaveDays,
   summarizeLeave,
   summarizeComp,
+  isLeaveEligible,
   type LeaveTxn,
   type LeaveSummary,
   type CompSummary,
 } from "./leave";
+import { computeWeeklyHours } from "./payroll";
 import { postMessage, approvalBlocks } from "./slack";
 import { ymd } from "./format";
-import { LEAVE_TYPE_LABEL, isHalfDayLeave } from "./constants";
+import { LEAVE_TYPE_LABEL, isHalfDayLeave, parseSchedule } from "./constants";
 
-export async function leaveBalanceOf(emp: { id: number; hireDate: Date }) {
+/** 연차 미적용 판정 근거 — 안내 문구에 사유를 정확히 쓰기 위해 함께 들고 다닌다 */
+export interface LeaveEligibility {
+  eligible: boolean;
+  weeklyHours: number;
+  /** 계약에서 미적용으로 못박은 경우 (근로시간 자동 판정과 구분) */
+  forcedOff: boolean;
+}
+
+export async function leaveBalanceOf(emp: {
+  id: number;
+  hireDate: Date;
+  schedule?: string | null;
+  leaveEligible?: boolean | null;
+}) {
   const txns = await prisma.leaveTransaction.findMany({ where: { employeeId: emp.id } });
   const mapped = txns.map((t) => ({
     date: t.date,
@@ -20,10 +35,44 @@ export async function leaveBalanceOf(emp: { id: number; hireDate: Date }) {
     type: t.type as any,
     category: (t as any).category ?? "STATUTORY",
   })) as LeaveTxn[];
-  return {
-    summary: summarizeLeave(emp.hireDate, new Date(), mapped),
-    comp: summarizeComp(mapped),
+
+  // 화면과 같은 규칙으로 판정한다 — 여기서 빠뜨리면 슬랙만 연차가 있는 것처럼 보인다
+  const { weeklyContractual } = computeWeeklyHours(parseSchedule(emp.schedule ?? "[]"));
+  const eligibility: LeaveEligibility = {
+    eligible: isLeaveEligible(weeklyContractual, emp.leaveEligible),
+    weeklyHours: weeklyContractual,
+    forcedOff: emp.leaveEligible === false,
   };
+
+  return {
+    summary: summarizeLeave(emp.hireDate, new Date(), mapped, { eligible: eligibility.eligible }),
+    comp: summarizeComp(mapped),
+    eligibility,
+  };
+}
+
+/** 미적용 사유 한 줄 */
+export function ineligibleReason(e: LeaveEligibility): string {
+  return e.forcedOff
+    ? "계약상 연차휴가가 적용되지 않는 근무형태입니다."
+    : `1주 소정근로시간이 ${e.weeklyHours.toFixed(1)}시간(15시간 미만)이라 근로기준법 제18조 제3항에 따라 연차가 발생하지 않습니다.`;
+}
+
+/**
+ * 미적용 직원이 신청을 시도할 때 돌려줄 안내. 신청할 수 있으면 null.
+ * 관리자가 따로 부여한 연차나 대휴가 남아 있으면 그건 쓸 수 있으므로 막지 않는다.
+ */
+export function leaveBlockNotice(
+  summary: LeaveSummary,
+  comp: CompSummary,
+  e: LeaveEligibility
+): string | null {
+  if (e.eligible) return null;
+  if (summary.remaining > 0 || comp.remaining > 0) return null;
+  return (
+    `${ineligibleReason(e)}\n\n` +
+    "신청할 수 있는 연차·대휴가 없습니다. 휴무가 필요하시면 관리자에게 문의해 주세요."
+  );
 }
 
 /**
@@ -34,21 +83,29 @@ export async function leaveBalanceOf(emp: { id: number; hireDate: Date }) {
 export function leaveBalanceText(
   name: string,
   summary: LeaveSummary,
-  comp: CompSummary
+  comp: CompSummary,
+  eligibility?: LeaveEligibility
 ): string {
   const p = summary.period;
   if (!summary.eligible) {
     // 주 15시간 미만 초단시간근로자·계약상 연차 미적용 (근로기준법 §18③)
-    const extra =
-      comp.remaining > 0 ? `\n• 대휴보상연차 잔여 *${comp.remaining}일* 은 사용할 수 있습니다.` : "";
-    return (
-      `*${name}님의 연차 현황* (근속 ${summary.serviceLabel})\n\n` +
-      `현재 계약 기준으로는 법정 연차가 발생하지 않습니다.\n` +
-      `(1주 소정근로시간 15시간 미만 — 근로기준법 제18조 제3항)` +
-      (p.remaining !== 0 ? `\n• 관리자가 별도로 부여한 잔여 *${p.remaining}일*` : "") +
-      extra +
-      `\n\n확인이 필요하면 관리자에게 문의해 주세요.`
+    const reason = eligibility
+      ? ineligibleReason(eligibility)
+      : "현재 계약 기준으로는 법정 연차가 발생하지 않습니다.";
+    const lines = [
+      `*${name}님의 연차 현황* (근속 ${summary.serviceLabel})`,
+      ``,
+      `📌 ${reason}`,
+    ];
+    if (p.remaining > 0) lines.push(`• 관리자가 따로 부여한 연차 잔여 *${p.remaining}일*`);
+    if (comp.remaining > 0) lines.push(`• 대휴보상연차 잔여 *${comp.remaining}일*`);
+    lines.push(
+      ``,
+      p.remaining > 0 || comp.remaining > 0
+        ? "위 잔여분은 `/연차 신청` 으로 사용할 수 있습니다."
+        : "휴무가 필요하시면 관리자에게 문의해 주세요."
     );
+    return lines.join("\n");
   }
   const lines = [
     `*${name}님의 연차 현황* (근속 ${summary.serviceLabel})`,
@@ -107,7 +164,15 @@ export interface LeaveSubmitResult {
  * 잔여 검증(대휴), 근무일 산정, 완전비율제 제외를 여기서 일괄 처리한다.
  */
 export async function submitLeaveRequest(
-  emp: { id: number; name: string; hireDate: Date; department: string | null; payScheme: string },
+  emp: {
+    id: number;
+    name: string;
+    hireDate: Date;
+    department: string | null;
+    payScheme: string;
+    schedule?: string | null;
+    leaveEligible?: boolean | null;
+  },
   input: LeaveSubmitInput
 ): Promise<LeaveSubmitResult> {
   if (emp.payScheme === "RATIO") {
@@ -128,10 +193,25 @@ export async function submitLeaveRequest(
     };
   }
 
-  const { summary, comp } = await leaveBalanceOf(emp);
+  const { summary, comp, eligibility } = await leaveBalanceOf(emp);
   const isComp = input.leaveType === "COMP";
   const poolRemaining = isComp ? comp.remaining : summary.remaining;
   const poolLabel = isComp ? "대휴보상연차" : "연차";
+
+  // 연차 미적용인데 쓸 수 있는 잔여도 없으면 신청 자체를 만들지 않는다
+  const blocked = leaveBlockNotice(summary, comp, eligibility);
+  if (blocked) return { ok: false, error: blocked, field: "kind" };
+
+  // 미적용 직원이 연차를 신청하면 관리자 부여분 안에서만 허용한다
+  if (!eligibility.eligible && !isComp && summary.remaining < days) {
+    return {
+      ok: false,
+      error:
+        `${ineligibleReason(eligibility)}\n` +
+        `관리자가 따로 부여한 연차 잔여 ${summary.remaining}일 안에서만 신청할 수 있습니다 (신청 ${days}일).`,
+      field: "kind",
+    };
+  }
 
   if (isComp && comp.remaining < days) {
     return {

@@ -10,6 +10,7 @@ import {
 import {
   leaveBalanceOf,
   leaveBalanceText,
+  leaveBlockNotice,
   modalPeriod,
   submitLeaveRequest,
   rangeLabel,
@@ -58,9 +59,9 @@ export async function POST(req: Request) {
 
   // 잔여연차 조회 (직원 셀프 조회) — 이번 연차기간 기준 + 대휴보상연차
   if (!text || /^(조회|잔여|현황|내연차|status|balance)$/i.test(text)) {
-    const { summary, comp } = await leaveBalanceOf(emp);
+    const { summary, comp, eligibility } = await leaveBalanceOf(emp);
     return ephemeral(
-      leaveBalanceText(emp.name, summary, comp) +
+      leaveBalanceText(emp.name, summary, comp, eligibility) +
         "\n\n_신청: `/연차 신청` · 빠른 신청: `/연차 8/14 사유` · 도움말: `/연차 help`_"
     );
   }
@@ -68,7 +69,9 @@ export async function POST(req: Request) {
   // `/연차 신청` → 휴가신청서 양식(모달) 열기
   if (/^(신청|양식|신청서|form)$/i.test(text)) {
     const triggerId = form.get("trigger_id") || "";
-    const { summary: s2, comp: c2 } = await leaveBalanceOf(emp);
+    const { summary: s2, comp: c2, eligibility: e2 } = await leaveBalanceOf(emp);
+    const blocked = leaveBlockNotice(s2, c2, e2);
+    if (blocked) return ephemeral(blocked);
     await openView(
       triggerId,
       leaveModalView({
