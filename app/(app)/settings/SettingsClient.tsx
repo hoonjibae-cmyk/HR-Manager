@@ -54,6 +54,21 @@ export default function SettingsClient() {
     );
   }
 
+  async function copyManifest() {
+    const res = await fetch("/api/slack/manifest");
+    if (!res.ok) return alert("매니페스트를 불러오지 못했습니다.");
+    const yaml = await res.text();
+    try {
+      await navigator.clipboard.writeText(yaml);
+      alert(
+        "슬랙 앱 매니페스트를 복사했습니다. (이 배포 주소가 이미 채워져 있습니다)\n\n" +
+          "api.slack.com/apps → 앱 선택 → App Manifest → YAML 에 전체를 붙여넣고 저장하세요."
+      );
+    } catch {
+      window.open("/api/slack/manifest", "_blank");
+    }
+  }
+
   if (!data) return <div className="text-slate-400">불러오는 중…</div>;
 
   return (
@@ -72,7 +87,12 @@ export default function SettingsClient() {
         }}
       />
       <EmailLogCard logs={data.emailLogs ?? []} />
-      <IntegrationCard integrations={data.integrations} onTestEmail={testEmail} onPostLauncher={postLauncher} />
+      <IntegrationCard
+        integrations={data.integrations}
+        onTestEmail={testEmail}
+        onPostLauncher={postLauncher}
+        onCopyManifest={copyManifest}
+      />
     </div>
   );
 }
@@ -325,7 +345,7 @@ function EmailLogCard({ logs }: { logs: any[] }) {
   );
 }
 
-function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher }: any) {
+function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyManifest }: any) {
   const envHint = g.serverless
     ? "Vercel → Settings → Environment Variables 에 추가 후 재배포"
     : ".env 파일에 추가 후 서버 재시작";
@@ -382,6 +402,9 @@ function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher }: any) 
             슬랙 채널에 휴가신청 버튼 게시
           </button>
         )}
+        <button className="btn-outline" onClick={onCopyManifest}>
+          슬랙 앱 매니페스트 복사
+        </button>
       </div>
       {!g.smtp && (
         <p className="text-xs text-amber-700 mt-3">

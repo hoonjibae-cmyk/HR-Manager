@@ -3,8 +3,13 @@
 # 사용법
 #  1) https://api.slack.com/apps → [Create New App] → [From an app manifest]
 #  2) 워크스페이스 선택 → YAML 탭에 이 파일 내용을 붙여넣기
-#  3) 아래 YOUR-DOMAIN.vercel.app 2곳을 실제 배포 주소로 바꾼 뒤 생성
+#  3) 아래 YOUR-DOMAIN.vercel.app **3곳**(command · interactivity · events)을
+#     실제 배포 주소로 모두 바꾼 뒤 생성. 한 곳이라도 남으면
+#     "URL isn't verified" 오류가 나고 저장되지 않습니다.
 #     예) hr-manager-nine.vercel.app  ← 꺾쇠괄호 < > 를 남기면 오류가 납니다
+#
+#  ※ 더 쉬운 방법: 프로그램 `설정` → **슬랙 앱 매니페스트 복사** 버튼을 누르면
+#    실제 배포 주소가 채워진 매니페스트가 클립보드에 복사됩니다. (/api/slack/manifest)
 #  4) 생성 후 [Install to Workspace] → 권한 허용
 #  5) Basic Information → Signing Secret  → 환경변수 SLACK_SIGNING_SECRET
 #     OAuth & Permissions → Bot User OAuth Token(xoxb-...) → SLACK_BOT_TOKEN

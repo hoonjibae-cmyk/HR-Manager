@@ -131,8 +131,10 @@ ENABLE_SCHEDULER="true"
 > 입사 후 누계·소멸 이력은 관리자 화면(`직원 상세 → 연차 현황`)에서 확인합니다.
 
 ### 3-1. 슬랙 앱 생성 — 매니페스트로 한 번에 (권장)
-1. 저장소의 **`docs/slack-app-manifest.yml`** 을 열어 `YOUR-DOMAIN.vercel.app` 2곳을
-   실제 배포 주소로 바꿉니다. (예: `hr-manager-nine.vercel.app`)
+1. 프로그램 `설정` 화면 → **슬랙 앱 매니페스트 복사** 를 누르면 실제 배포 주소가
+   채워진 매니페스트가 복사됩니다. (직접 만들려면 `docs/slack-app-manifest.yml` 의
+   `YOUR-DOMAIN.vercel.app` **3곳**을 모두 실제 주소로 바꾸세요 — 예: `hr-manager-nine.vercel.app`.
+   한 곳이라도 남으면 `URL isn't verified` 오류로 저장되지 않습니다.)
    - 주소에 꺾쇠괄호 `< >` 를 남기면 오류가 납니다.
    - 봇 표시명(`display_name`)은 **영문만** 가능합니다. (앱 이름은 한글 가능)
 2. https://api.slack.com/apps → **Create New App** → **From an app manifest**
@@ -197,8 +199,9 @@ SLACK_APPROVERS="U01ADMIN1,U01ADMIN2" # 승인 권한자 (비우면 채널 누�
    채널·DM 어디서든 바로 신청서가 열립니다. 설정 불필요.
 
 > ③④는 슬랙 앱 매니페스트를 갱신해야 나타납니다 →
-> https://api.slack.com/apps → 앱 선택 → **App Manifest** 탭에
-> `docs/slack-app-manifest.yml` 최신 내용을 붙여넣고 저장.
+> 프로그램 `설정` → **슬랙 앱 매니페스트 복사** → https://api.slack.com/apps →
+> 앱 선택 → **App Manifest** 탭 → YAML 전체를 붙여넣고 저장.
+> (복사 버튼을 쓰면 배포 주소가 이미 채워져 있어 `URL isn't verified` 오류가 나지 않습니다)
 > 저장 시 **Event Subscriptions 의 요청 URL 이 자동 검증**되므로 배포가 먼저 끝나 있어야 합니다.
 > 상단에 재설치 배너가 뜨면 **Reinstall to Workspace** 를 눌러 주세요.
 
