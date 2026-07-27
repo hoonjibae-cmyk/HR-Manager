@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { PageHeader, Pill, Empty } from "@/components/ui";
 import SlackLinkButton from "@/components/SlackLinkButton";
+import EmployeeImport from "@/components/EmployeeImport";
 import { INCOME_TYPE_LABEL, PAY_SCHEME_LABEL } from "@/lib/constants";
 import { won, ymd } from "@/lib/format";
 import { governingContract, paySchemeOf, contractIssues } from "@/lib/contracts";
@@ -51,6 +52,7 @@ export default async function EmployeesPage({
         desc={`전체 ${emps.length}명`}
         action={
           <div className="flex gap-2">
+            <EmployeeImport />
             <SlackLinkButton />
             <Link href="/employees/new" className="btn-primary">
               + 신규 직원 등록

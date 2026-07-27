@@ -8,6 +8,8 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - `npm run build && npm start` — 프로덕션
 - `npm test` — 급여/연차 엔진 단위 테스트 (Vitest)
 - `npm run seed` / `npm run db:reset` — 시딩 / DB 초기화+재시딩
+- `npm run db:clear-employees` — 직원 데이터 전체 삭제 미리보기 (실제 삭제는 `CONFIRM=DELETE` 필요).
+  설정(회사·요율·세액표·공휴일)은 남긴다.
 - `npx tsc --noEmit` — 타입 체크
 - 로그인 비밀번호: `.env` 의 `ADMIN_PASSWORD` (기본 `yoossam2025`)
 
@@ -56,6 +58,8 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - **직원 보수조건 변경** → 직원 상세 → 계약 이력 → *조건 수정*(오타 정정) 또는 *신규 계약 작성*(변경 발효일 지정).
 - **급여 항목 추가** → `lib/payroll.ts`(계산) + `schema.prisma`(PayrollRecord) + `lib/documents-pay.ts`(명세서 표시).
 - **연차 규칙 변경** → `lib/leave.ts`(`annualLeaveDays`, `generateGrants`) + 테스트.
+- **직원 명단 일괄 등록** → `lib/employee-import.ts`(엑셀 파서·헤더 alias·값 정규화, 테스트 있음)
+  + `/api/employees/import`(GET=빈 양식, POST=미리보기/등록). 등록 시 초기 계약도 함께 만든다.
 - **슬랙 명령 추가** → `app/api/slack/command/route.ts`.
 - **시간기록표 양식 변경** → `lib/timesheet.ts`(파서·주휴 산정, 테스트 있음) + `/api/payroll/timesheet`.
   주휴 기준: 주(월~일) 실근로 15시간 '초과' 시 min(주근로/5, 8)시간. 휴게 30분은 Employee.breakPaid 로 유급/무급.
