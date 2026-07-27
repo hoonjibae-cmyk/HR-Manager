@@ -266,6 +266,9 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                   incPerStudent: emp.incPerStudent,
                   ratioPercent: emp.ratioPercent,
                   ratioMinGuarantee: emp.ratioMinGuarantee,
+                  fixedBaseHours: emp.fixedBaseHours,
+                  fixedOtHours: emp.fixedOtHours,
+                  fixedNightHours: emp.fixedNightHours,
                   position: emp.position,
                   duty: emp.duty,
                 }}
@@ -303,6 +306,13 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                       : `${wonUnit(c.baseWage)}`}
                     {c.mealAllow > 0 && ` · 식대 ${wonUnit(c.mealAllow)}`}
                     {c.positionAllow > 0 && ` · 직책 ${wonUnit(c.positionAllow)}`}
+                    {(c.fixedOtHours || c.fixedNightHours) && (
+                      <span className="text-slate-400">
+                        {" · 포괄"}
+                        {c.fixedOtHours ? ` 시간외 ${c.fixedOtHours}h` : ""}
+                        {c.fixedNightHours ? ` 야간 ${c.fixedNightHours}h` : ""}
+                      </span>
+                    )}
                   </div>
                   <div className="mt-2 flex items-center gap-3">
                     <DocButton endpoint="/api/documents/contract" body={{ contractId: c.id }} label="계약서 발급" className="text-xs text-brand-600 font-semibold" />
@@ -323,6 +333,9 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                         incPerStudent: c.incPerStudent,
                         ratioPercent: c.ratioPercent,
                         ratioMinGuarantee: c.ratioMinGuarantee,
+                        fixedBaseHours: c.fixedBaseHours,
+                        fixedOtHours: c.fixedOtHours,
+                        fixedNightHours: c.fixedNightHours,
                         note: c.note ?? "",
                       }}
                       deletable={emp.contracts.length > 1}

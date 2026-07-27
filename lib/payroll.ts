@@ -49,6 +49,12 @@ export interface EmployeePayInput {
   // 인센티브
   incThreshold?: number | null;
   incPerStudent?: number | null;
+  /** 포괄임금 기본급 산정시간(월) — 계약서 '기본급 (209시간)'. 없으면 스케줄 환산시간 */
+  fixedBaseHours?: number | null;
+  /** 포괄임금 약정 시간외근로시간(월) — 월 급여에 미리 포함된 시간 */
+  fixedOtHours?: number | null;
+  /** 포괄임금 약정 야간근로시간(월) */
+  fixedNightHours?: number | null;
   // 비율제
   ratioPercent?: number | null;
   /** 위탁 최저보장액(월) — 만근 시 수수료가 이에 못 미쳐도 보장 (계약서 제5조) */
@@ -193,6 +199,85 @@ export function computeWeeklyHours(schedule: ScheduleDay[]) {
   return { weeklyContractual, weeklyOvertime: overtime, weeklyHoliday };
 }
 
+/* ───────────── 포괄임금(고정OT) 분해 ───────────── */
+
+/** 포괄임금 분해에 필요한 계약 조건 */
+export interface InclusiveWageTerms {
+  /** 월 지급 총액(기준급여) — 식대·차량유지비(비과세)가 이 안에 포함된다 */
+  baseWage: number;
+  mealAllow?: number | null;
+  carAllow?: number | null;
+  /** 기본급 산정시간(월). 계약서 '기본급 (209시간)'. 없으면 스케줄 환산시간 */
+  baseHours: number;
+  /** 약정(고정) 시간외근로시간(월) */
+  otHours?: number | null;
+  /** 약정(고정) 야간근로시간(월) */
+  nightHours?: number | null;
+  /** 일할계산 비율 (월중 입·퇴사). 기본 1 */
+  prorate?: number;
+}
+
+/** 계약서 제4조 ① 의 임금 항목 분해 결과 */
+export interface InclusiveWageBreakdown {
+  hourlyWage: number; // 통상시급(표시용 반올림)
+  exactHourly: number; // 반올림 전 — 분해에 사용
+  baseHours: number;
+  otHours: number;
+  nightHours: number;
+  /** 약정(고정) 시간외근로수당 */
+  overtimePay: number;
+  /** 약정(고정) 야간근로수당 */
+  nightPay: number;
+  /** 기본급(과세) — 총액에서 비과세·약정수당을 뺀 잔액 */
+  basePay: number;
+  nonTax: number; // 식대+차량유지비
+  hasFixed: boolean;
+}
+
+/**
+ * 포괄임금 분해 — 계약서에 적힌 '기준급여' 를 기본급·시간외·야간으로 되돌린다.
+ *
+ *   통상시급 = 기준급여 ÷ (기본급 산정시간 + 1.5×약정 시간외 + 0.5×약정 야간)
+ *   시간외(고정) = 통상시급 × 1.5 × 약정 시간외시간
+ *   야간(고정)   = 통상시급 × 0.5 × 약정 야간시간
+ *   기본급       = 기준급여 − 식대·차량유지비 − 시간외(고정) − 야간(고정)
+ *
+ * 기본급을 잔액으로 두므로 항목 합계는 언제나 기준급여와 정확히 일치한다.
+ * 약정시간이 없으면 통상시급 = 기준급여 ÷ 기본급 산정시간 (기존 동작).
+ * 계약서·급여명세서가 같은 결과를 쓰도록 두 곳에서 이 함수를 호출한다.
+ */
+export function inclusiveWageBreakdown(t: InclusiveWageTerms): InclusiveWageBreakdown {
+  const otHours = Math.max(t.otHours ?? 0, 0);
+  const nightHours = Math.max(t.nightHours ?? 0, 0);
+  const hasFixed = otHours > 0 || nightHours > 0;
+  const prorate = t.prorate ?? 1;
+  const nonTax = (t.mealAllow || 0) + (t.carAllow || 0);
+
+  const divisor = t.baseHours + 1.5 * otHours + 0.5 * nightHours;
+  const exactHourly = divisor > 0 ? t.baseWage / divisor : 0;
+
+  const overtimePay = round0(exactHourly * 1.5 * otHours * prorate);
+  const nightPay = round0(exactHourly * 0.5 * nightHours * prorate);
+  const basePay = round0(
+    Math.max(t.baseWage - nonTax, 0) * prorate -
+      exactHourly * 1.5 * otHours * prorate -
+      exactHourly * 0.5 * nightHours * prorate
+  );
+
+  return {
+    hourlyWage: round0(exactHourly),
+    exactHourly,
+    baseHours: t.baseHours,
+    otHours,
+    nightHours,
+    overtimePay,
+    nightPay,
+    basePay,
+    nonTax,
+    hasFixed,
+  };
+}
+
 /** 간이세액표 조회 */
 export function lookupIncomeTax(
   taxableMonthly: number,
@@ -236,6 +321,33 @@ export function computePayroll(
   const monthlyStdHours =
     Math.max(weeklyContractual + weeklyHoliday, 0) * WEEKS_PER_MONTH;
 
+  // --- 포괄임금 약정시간 (월급제/인센티브만) ---
+  const isMonthlyScheme =
+    emp.payScheme === "MONTHLY" || emp.payScheme === "INCENTIVE";
+  const fixedOt = isMonthlyScheme ? emp.fixedOtHours ?? 0 : 0;
+  const fixedNight = isMonthlyScheme ? emp.fixedNightHours ?? 0 : 0;
+  const hasFixed = fixedOt > 0 || fixedNight > 0;
+  // 기본급 산정시간 — 계약서에 적힌 값(예 209시간)이 있으면 그대로, 없으면 스케줄 환산
+  const baseHours =
+    isMonthlyScheme && emp.fixedBaseHours ? emp.fixedBaseHours : monthlyStdHours;
+
+  // --- 일할계산 비율 (월중 입/퇴사). 비율제는 매출 기반이라 미적용 ---
+  const rawRatio = month.prorationRatio ?? 1;
+  const prorate =
+    emp.payScheme === "RATIO" ? 1 : Math.min(Math.max(rawRatio, 0), 1);
+  if (prorate < 1) notes.push(`일할계산 적용 (재직비율 ${(prorate * 100).toFixed(1)}%)`);
+
+  // --- 포괄임금 분해 (월급제/인센티브) — 계약서 제4조와 같은 계산을 쓴다 ---
+  const inclusive = inclusiveWageBreakdown({
+    baseWage: emp.baseWage,
+    mealAllow: emp.mealAllow,
+    carAllow: emp.carAllow,
+    baseHours,
+    otHours: fixedOt,
+    nightHours: fixedNight,
+    prorate,
+  });
+
   // --- 통상시급 ---
   let hourlyWage = 0;
   if (emp.payScheme === "HOURLY") {
@@ -243,16 +355,10 @@ export function computePayroll(
   } else if (emp.payScheme === "RATIO") {
     hourlyWage = 0; // 비율제 프리랜서 — 통상시급 개념 미적용
   } else {
-    // 월급제/인센티브: 통상임금(기본급) / 월소정환산시간
-    hourlyWage = monthlyStdHours > 0 ? emp.baseWage / monthlyStdHours : 0;
+    // 월급제/인센티브: 기준급여 ÷ (소정 + 1.5×약정연장 + 0.5×약정야간).
+    // 포괄임금 약정이 없으면 분모가 소정시간뿐이라 기존 계산과 같다.
+    hourlyWage = inclusive.hourlyWage;
   }
-  hourlyWage = round0(hourlyWage);
-
-  // --- 일할계산 비율 (월중 입/퇴사). 비율제는 매출 기반이라 미적용 ---
-  const rawRatio = month.prorationRatio ?? 1;
-  const prorate =
-    emp.payScheme === "RATIO" ? 1 : Math.min(Math.max(rawRatio, 0), 1);
-  if (prorate < 1) notes.push(`일할계산 적용 (재직비율 ${(prorate * 100).toFixed(1)}%)`);
 
   // --- 기본급 ---
   let baseP = 0;
@@ -294,8 +400,24 @@ export function computePayroll(
     // baseWage 는 '월 지급 총액'이며 식대·차량유지비(비과세)가 그 안에 포함돼 있다.
     // 명세서에는 과세 대상분만 기본급으로 싣고 비과세분은 아래에서 따로 표시한다.
     // (합계는 그대로 baseWage — 비과세 항목을 떼어내 세금만 줄이는 구조)
-    const inclusiveNonTax = (emp.mealAllow || 0) + (emp.carAllow || 0);
-    if (inclusiveNonTax > emp.baseWage) {
+    const inclusiveNonTax = inclusive.nonTax;
+    if (hasFixed) {
+      // 포괄임금: 약정 시간외·야간분을 먼저 떼고 남는 것이 기본급.
+      // (합계가 계약 총액과 정확히 맞도록 기본급을 잔액으로 둔다)
+      baseP = inclusive.basePay;
+      notes.push(
+        `포괄임금 분해: 통상시급 ${hourlyWage.toLocaleString()}원 (기본급 산정 ${baseHours.toFixed(
+          1
+        )}시간` +
+          (fixedOt ? ` · 약정 시간외 ${fixedOt}시간` : "") +
+          (fixedNight ? ` · 약정 야간 ${fixedNight}시간` : "") +
+          ")"
+      );
+      if (inclusiveNonTax > 0)
+        notes.push(
+          `기본급 ${emp.baseWage.toLocaleString()}원에 비과세 ${inclusiveNonTax.toLocaleString()}원(식대·차량유지비)이 포함되어 있습니다.`
+        );
+    } else if (inclusiveNonTax > emp.baseWage) {
       notes.push(
         `식대·차량유지비 합계(${inclusiveNonTax.toLocaleString()}원)가 기본급(${emp.baseWage.toLocaleString()}원)보다 큽니다 — 계약 조건을 확인하세요.`
       );
@@ -306,7 +428,7 @@ export function computePayroll(
         ).toLocaleString()}원입니다.`
       );
     }
-    baseP = round0(Math.max(emp.baseWage - inclusiveNonTax, 0) * prorate);
+    if (!hasFixed) baseP = inclusive.basePay;
   }
 
   // --- 인센티브 ---
@@ -333,8 +455,9 @@ export function computePayroll(
   const nightH = month.nightHours ?? 0;
   const holH = month.holidayHours ?? 0;
   const extraP = round0(exH * hourlyWage); // 법내연장 — 가산 없음
-  const overtimeP = round0(otH * hourlyWage * 1.5);
-  const nightP = round0(nightH * hourlyWage * 0.5);
+  // 포괄임금 약정분은 매월 고정 지급(일할 적용), 실적분은 그 위에 추가 가산
+  const overtimeP = inclusive.overtimePay + round0(otH * hourlyWage * 1.5);
+  const nightP = inclusive.nightPay + round0(nightH * hourlyWage * 0.5);
   const holidayP = round0(holH * hourlyWage * 1.5);
 
   // --- 수당 (월 정액 수당은 일할 적용) ---

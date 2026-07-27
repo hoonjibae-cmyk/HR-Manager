@@ -5,6 +5,7 @@ import {
   lookupIncomeTax,
   floor10,
   blendWageTerms,
+  inclusiveWageBreakdown,
   DEFAULT_RATES_2025,
   type EmployeePayInput,
   type TaxBracketRow,
@@ -459,6 +460,135 @@ describe("computePayroll — 완전비율제 최저보장", () => {
   it("보장액 적용분도 사업소득 3.3% 원천징수 대상", () => {
     const r = computePayroll(emp, { classRevenue: 10_000_000 }, DEFAULT_RATES_2025, smallTaxTable);
     expect(r.incomeTaxD).toBe(floor10(5_000_000 * 0.03));
+  });
+});
+
+describe("inclusiveWageBreakdown — 포괄임금 분해", () => {
+  // 실제 서명된 근로계약서 제4조를 그대로 재현할 수 있어야 한다.
+  it("하수정 계약서 재현 (총액 500만 · 식대 20만 · 209h/4.345h/10.8625h)", () => {
+    const iw = inclusiveWageBreakdown({
+      baseWage: 5_000_000,
+      mealAllow: 200_000,
+      carAllow: 0,
+      baseHours: 209,
+      otHours: 4.345,
+      nightHours: 10.8625,
+    });
+    expect(iw.hourlyWage).toBe(22_630); // 계약서 역산 22,629.7
+    expect(iw.overtimePay).toBe(147_489);
+    expect(iw.nightPay).toBe(122_907);
+    expect(iw.basePay).toBe(4_529_604);
+    // 항목 합계 = 기준급여
+    expect(iw.basePay + iw.overtimePay + iw.nightPay + iw.nonTax).toBe(5_000_000);
+  });
+
+  it("최은희 계약서 재현 (총액 460만 · 172.062h — 주 33시간 스케줄 환산)", () => {
+    const iw = inclusiveWageBreakdown({
+      baseWage: 4_600_000,
+      mealAllow: 200_000,
+      baseHours: (33 + 6.6) * 4.345, // 172.062
+      otHours: 4.345,
+      nightHours: 10.8625,
+    });
+    expect(iw.overtimePay).toBe(162_928);
+    expect(iw.nightPay).toBe(135_773);
+    expect(iw.basePay).toBe(4_101_299);
+    expect(iw.basePay + iw.overtimePay + iw.nightPay + iw.nonTax).toBe(4_600_000);
+  });
+
+  it("약정시간이 없으면 통상시급 = 기준급여 ÷ 산정시간, 기본급은 과세총액", () => {
+    const iw = inclusiveWageBreakdown({
+      baseWage: 3_000_000,
+      mealAllow: 200_000,
+      baseHours: 209,
+    });
+    expect(iw.hasFixed).toBe(false);
+    expect(iw.hourlyWage).toBe(Math.round(3_000_000 / 209));
+    expect(iw.overtimePay).toBe(0);
+    expect(iw.nightPay).toBe(0);
+    expect(iw.basePay).toBe(2_800_000);
+  });
+
+  it("일할계산은 모든 항목에 같은 비율로 걸리고 합계도 절반이 된다", () => {
+    const iw = inclusiveWageBreakdown({
+      baseWage: 5_000_000,
+      baseHours: 209,
+      otHours: 21.725,
+      nightHours: 10.8625,
+      prorate: 0.5,
+    });
+    expect(iw.basePay + iw.overtimePay + iw.nightPay).toBe(2_500_000);
+  });
+});
+
+describe("computePayroll — 포괄임금(고정OT)", () => {
+  const emp: EmployeePayInput = {
+    incomeType: "EMPLOYEE",
+    payScheme: "MONTHLY",
+    baseWage: 5_000_000,
+    positionAllow: 0,
+    mealAllow: 0,
+    carAllow: 0,
+    dependents: 1,
+    schedule: instructor,
+    fixedBaseHours: 209,
+    fixedOtHours: 21.725,
+    fixedNightHours: 10.8625,
+  };
+
+  it("계약서 금액(기본급·시간외·야간)을 그대로 재현하고 합계는 총액", () => {
+    const r = computePayroll(emp, {}, DEFAULT_RATES_2025, smallTaxTable);
+    // 김지연 근로계약서 제4조: 기본급 4,230,448 / 시간외 659,616 / 야간 109,936
+    expect(r.hourlyWage).toBe(20_241); // 5,000,000 ÷ 247.01875
+    expect(r.baseP).toBe(4_230_448);
+    expect(r.overtimeP).toBe(659_616);
+    expect(r.nightP).toBe(109_936);
+    expect(r.gross).toBe(5_000_000); // 약정분을 더해도 총액은 늘지 않는다
+    expect(r.notes.some((n) => n.includes("포괄임금 분해"))).toBe(true);
+  });
+
+  it("약정시간을 넘긴 실근로만 추가 가산된다", () => {
+    const r = computePayroll(emp, { overtimeHours: 10 }, DEFAULT_RATES_2025, smallTaxTable);
+    const flat = computePayroll(emp, {}, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.overtimeP - flat.overtimeP).toBe(Math.round(10 * 20_241 * 1.5));
+    expect(r.gross - flat.gross).toBe(Math.round(10 * 20_241 * 1.5));
+  });
+
+  it("식대는 총액 안에 포함되어 기본급에서만 빠진다", () => {
+    const r = computePayroll(
+      { ...emp, mealAllow: 200_000 },
+      {},
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.mealP).toBe(200_000);
+    expect(r.gross).toBe(5_000_000);
+    expect(r.taxableGross).toBe(4_800_000);
+    expect(r.baseP + r.overtimeP + r.nightP + r.mealP).toBe(5_000_000);
+  });
+
+  it("일할계산해도 항목 합계가 총액 × 비율", () => {
+    const r = computePayroll(emp, { prorationRatio: 0.5 }, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.gross).toBe(2_500_000);
+  });
+
+  it("시급제·비율제에는 약정시간이 적용되지 않는다", () => {
+    const hourly = computePayroll(
+      { ...emp, payScheme: "HOURLY", baseWage: 15_000 },
+      { workedHours: 100 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(hourly.overtimeP).toBe(0);
+    expect(hourly.nightP).toBe(0);
+  });
+
+  it("약정시간이 없으면 종전 계산과 동일", () => {
+    const plain = { ...emp, fixedBaseHours: null, fixedOtHours: null, fixedNightHours: null };
+    const r = computePayroll(plain, {}, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.baseP).toBe(5_000_000);
+    expect(r.overtimeP).toBe(0);
+    expect(r.nightP).toBe(0);
   });
 });
 

@@ -33,6 +33,10 @@ export interface ImportRow {
   incPerStudent: number | null;
   ratioPercent: number | null; // 0~1
   ratioMinGuarantee: number | null;
+  // 포괄임금(고정OT) 약정시간 — 계약서 제4조 「기본급 (209시간) / 시간외근로(고정) …」
+  fixedBaseHours: number | null;
+  fixedOtHours: number | null;
+  fixedNightHours: number | null;
   contractStart: string; // 기본값 = 입사일
   contractEnd?: string;
   errors: string[]; // 이 행의 문제 (있으면 등록 제외)
@@ -67,6 +71,24 @@ export const IMPORT_COLUMNS: Array<{ key: string; header: string; alias: string[
     header: "위탁 최저보장",
     alias: ["최저보장", "최저보장액", "보장금액"],
     note: "완전비율제 계약에 최저보장 조항이 있을 때만",
+  },
+  {
+    key: "fixedBaseHours",
+    header: "기본급 산정시간",
+    alias: ["기본급시간", "소정근로시간(월)", "월 산정시간"],
+    note: "포괄임금. 예: 209. 비우면 근로시간표에서 환산",
+  },
+  {
+    key: "fixedOtHours",
+    header: "약정 시간외근로시간",
+    alias: ["고정연장시간", "약정연장시간", "시간외근로(고정)"],
+    note: "포괄임금. 월 급여에 미리 포함된 연장시간. 예: 21.725",
+  },
+  {
+    key: "fixedNightHours",
+    header: "약정 야간근로시간",
+    alias: ["고정야간시간", "약정야간시간", "야간근로(고정)"],
+    note: "포괄임금. 월 급여에 미리 포함된 야간시간. 예: 10.8625",
   },
   { key: "dependents", header: "부양가족수", alias: ["부양가족", "가족수"], note: "본인포함, 기본 1" },
   { key: "rrn", header: "주민등록번호", alias: ["주민번호"] },
@@ -121,6 +143,14 @@ export function toAmount(v: unknown): number {
   if (man) return Math.round(Number(man[1]) * 10000);
   const n = Number(s);
   return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
+/** "209" / "21.725시간" → 209 / 21.725. 비었으면 null (소수점 유지 — 금액과 달리 반올림 금지) */
+export function toHoursOrNull(v: unknown): number | null {
+  if (v == null || String(v).trim() === "") return null;
+  if (typeof v === "number") return Number.isFinite(v) && v > 0 ? v : null;
+  const n = Number(String(v).replace(/[,\s시간h]/gi, ""));
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 /** "50%" / 50 / 0.5 → 0.5 */
@@ -277,6 +307,9 @@ export function parseEmployeeWorkbook(buf: Buffer | Uint8Array): ParseResult {
         String(get("ratioMinGuarantee") ?? "").trim() === ""
           ? null
           : toAmount(get("ratioMinGuarantee")) || null,
+      fixedBaseHours: toHoursOrNull(get("fixedBaseHours")),
+      fixedOtHours: toHoursOrNull(get("fixedOtHours")),
+      fixedNightHours: toHoursOrNull(get("fixedNightHours")),
       contractStart,
       contractEnd,
       errors,

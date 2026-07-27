@@ -131,6 +131,9 @@ describe("mirrorFromContract — 카드에 비출 값", () => {
       incPerStudent: null,
       ratioPercent: 0.4,
       ratioMinGuarantee: null,
+      fixedBaseHours: null,
+      fixedOtHours: null,
+      fixedNightHours: null,
     });
   });
 

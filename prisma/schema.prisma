@@ -108,6 +108,11 @@ model Employee {
   incThreshold    Int?   // 학생수 기준 (초과 시 인센 발생)
   incPerStudent   Int?   // 초과 1명당 금액
 
+  // 포괄임금 약정시간 (월급제/인센티브) — 월 급여에 미리 포함된 시간외·야간 시간
+  fixedBaseHours  Float? // 기본급 산정시간(월) — 근로계약서 '기본급 (209시간)'. 없으면 스케줄로 환산
+  fixedOtHours    Float? // 약정 시간외근로시간(월) — 근로계약서 '시간외근로(2호)'
+  fixedNightHours Float? // 약정 야간근로시간(월) — 근로계약서 '야간근로(3호)'
+
   // 비율제(RATIO) 설정
   ratioPercent    Float? // 담당 반 매출액의 % (예: 0.5 = 50%)
   ratioMinGuarantee Int?  // 위탁 최저보장액(월) — 만근 시 수수료가 이 금액에 못 미쳐도 보장
@@ -154,6 +159,9 @@ model Contract {
   incPerStudent Int?
   ratioPercent  Float?
   ratioMinGuarantee Int? // 위탁 최저보장액(월)
+  fixedBaseHours  Float? // 포괄임금 기본급 산정시간(월)
+  fixedOtHours    Float? // 포괄임금 약정 시간외근로시간(월)
+  fixedNightHours Float? // 포괄임금 약정 야간근로시간(월)
 
   status      String   @default("ACTIVE") // ACTIVE | EXPIRED | TERMINATED | DRAFT
   pdfPath     String?

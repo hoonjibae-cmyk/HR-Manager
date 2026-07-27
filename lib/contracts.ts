@@ -19,6 +19,9 @@ export const CONTRACT_TERM_FIELDS = [
   "ratioMinGuarantee",
   "incThreshold",
   "incPerStudent",
+  "fixedBaseHours",
+  "fixedOtHours",
+  "fixedNightHours",
 ] as const;
 
 /** 직원 카드에서 수정할 수 있는 항목 — 인적사항·소속·근태 설정만 */
@@ -92,6 +95,9 @@ export interface ContractLike {
   incPerStudent: number | null;
   ratioPercent: number | null;
   ratioMinGuarantee?: number | null;
+  fixedBaseHours?: number | null;
+  fixedOtHours?: number | null;
+  fixedNightHours?: number | null;
 }
 
 const DAY = 86400000;
@@ -231,6 +237,9 @@ export function mirrorFromContract(c: ContractLike): Record<string, any> {
     incPerStudent: c.incPerStudent ?? null,
     ratioPercent: c.ratioPercent ?? null,
     ratioMinGuarantee: c.ratioMinGuarantee ?? null,
+    fixedBaseHours: c.fixedBaseHours ?? null,
+    fixedOtHours: c.fixedOtHours ?? null,
+    fixedNightHours: c.fixedNightHours ?? null,
   };
 }
 

@@ -85,6 +85,27 @@ describe("parseEmployeeWorkbook", () => {
     expect(rows[1].mealAllow).toBe(0);
   });
 
+  it("포괄임금 약정시간은 소수점 그대로 읽는다 (금액처럼 반올림하면 안 된다)", () => {
+    const buf = sheet([
+      ["성명", "입사일자", "급여형태", "기본급", "기본급 산정시간", "약정 시간외근로시간", "약정 야간근로시간"],
+      ["김지연", "2025-12-01", "월급제", "5,000,000", "209", "21.725", "10.8625"],
+      ["고정없음", "2025-12-01", "월급제", "3,000,000", "", "", ""],
+      ["단위표기", "2025-12-01", "월급제", "3,000,000", "209시간", "4.345 시간", ""],
+    ]);
+    const { rows } = parseEmployeeWorkbook(buf);
+    expect(rows[0]).toMatchObject({
+      fixedBaseHours: 209,
+      fixedOtHours: 21.725,
+      fixedNightHours: 10.8625,
+    });
+    expect(rows[1]).toMatchObject({
+      fixedBaseHours: null,
+      fixedOtHours: null,
+      fixedNightHours: null,
+    });
+    expect(rows[2]).toMatchObject({ fixedBaseHours: 209, fixedOtHours: 4.345 });
+  });
+
   it("식대 기본값은 4대보험 월급제 계열에만 붙인다", () => {
     const buf = sheet([
       ["성명", "입사일자", "세무구분", "급여형태", "식대"],

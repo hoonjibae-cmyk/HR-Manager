@@ -39,7 +39,15 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
   for (const f of ["baseWage", "positionAllow", "mealAllow", "carAllow"])
     if (f in body) data[f] = num(body[f]);
-  for (const f of ["incThreshold", "incPerStudent", "ratioPercent", "ratioMinGuarantee"])
+  for (const f of [
+    "incThreshold",
+    "incPerStudent",
+    "ratioPercent",
+    "ratioMinGuarantee",
+    "fixedBaseHours",
+    "fixedOtHours",
+    "fixedNightHours",
+  ])
     if (f in body) data[f] = numOrNull(body[f]);
   if ("payScheme" in body) data.templateKey = templateKeyOf(body.payScheme);
   if ("incomeType" in body) data.incomeType = body.incomeType || null;

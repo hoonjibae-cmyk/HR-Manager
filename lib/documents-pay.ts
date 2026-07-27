@@ -221,6 +221,22 @@ export function payslipHtml(args: {
       );
     }
   }
+  // 포괄임금(고정OT) — 연장·야간수당 중 얼마가 계약상 약정분인지 밝힌다.
+  const fx = bd?.fixed;
+  if (isMonthlyLike && fx && (fx.otHours || fx.nightHours)) {
+    const hrs = (n: number) => String(Number(n.toFixed(4)));
+    const parts = [
+      fx.otHours ? `시간외 ${hrs(fx.otHours)}시간` : "",
+      fx.nightHours ? `야간 ${hrs(fx.nightHours)}시간` : "",
+    ].filter(Boolean);
+    basisLines.push(
+      `<b>포괄임금(고정) 약정</b> — 근로계약서 제4조에 따라 월 ${parts.join(
+        " · "
+      )}의 가산수당이 급여에 미리 포함되어 있습니다` +
+        (fx.baseHours ? ` (기본급 산정 ${hrs(fx.baseHours)}시간)` : "") +
+        `. 약정시간을 초과한 실근로만 통상시급 ${won(p.hourlyWage)}원 기준으로 추가 가산됩니다.`
+    );
+  }
   if (isMonthlyLike && ratio < 1) {
     // 재직기간 재구성 — 기록 당시 비율과 일치할 때만 일수·기간을 표기
     const monthStart = new Date(Date.UTC(p.year, p.month - 1, 1));

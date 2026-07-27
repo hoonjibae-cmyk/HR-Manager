@@ -90,6 +90,10 @@ export function empToPayInput(e: any): EmployeePayInput {
     incThreshold: e.incThreshold,
     incPerStudent: e.incPerStudent,
     ratioPercent: e.ratioPercent,
+    ratioMinGuarantee: e.ratioMinGuarantee,
+    fixedBaseHours: e.fixedBaseHours,
+    fixedOtHours: e.fixedOtHours,
+    fixedNightHours: e.fixedNightHours,
   };
 }
 
@@ -132,6 +136,9 @@ export function contractToDoc(ct: any): DocContract {
     ratioPercent: ct.ratioPercent,
     incThreshold: ct.incThreshold,
     incPerStudent: ct.incPerStudent,
+    fixedBaseHours: ct.fixedBaseHours,
+    fixedOtHours: ct.fixedOtHours,
+    fixedNightHours: ct.fixedNightHours,
   };
 }
 

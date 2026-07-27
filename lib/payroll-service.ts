@@ -456,6 +456,15 @@ export async function runPayrollMonth(
         // 월중 계약변경 가중 내역
         baseApplied: payInput.baseWage,
         blend: blend?.info ?? null,
+        // 포괄임금 약정시간 — 명세서에 '계약서 어느 항목이 얼마인지' 를 그대로 비추기 위함
+        fixed:
+          payInput.fixedOtHours || payInput.fixedNightHours
+            ? {
+                baseHours: payInput.fixedBaseHours ?? null,
+                otHours: payInput.fixedOtHours ?? null,
+                nightHours: payInput.fixedNightHours ?? null,
+              }
+            : null,
         // 인센티브 명단 산정 요약 (상세는 IncentiveStudent 테이블)
         incentive: incSummary
           ? {

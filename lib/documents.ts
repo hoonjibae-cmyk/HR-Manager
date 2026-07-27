@@ -3,6 +3,7 @@
 
 import { won, wonUnit, ymd, ymdKo, maskRRN } from "./format";
 import { DAY_KO, PAY_SCHEME_LABEL, parseSchedule, type ScheduleDay } from "./constants";
+import { computeWeeklyHours, inclusiveWageBreakdown, WEEKS_PER_MONTH } from "./payroll";
 
 export interface DocCompany {
   name: string;
@@ -47,6 +48,12 @@ export interface DocContract {
   ratioPercent?: number | null;
   incThreshold?: number | null;
   incPerStudent?: number | null;
+  /** 포괄임금 — 기본급 산정시간(월). 없으면 근로시간표에서 환산 */
+  fixedBaseHours?: number | null;
+  /** 포괄임금 — 약정(고정) 시간외근로시간(월) */
+  fixedOtHours?: number | null;
+  /** 포괄임금 — 약정(고정) 야간근로시간(월) */
+  fixedNightHours?: number | null;
 }
 
 function esc(s: any): string {
@@ -145,6 +152,12 @@ function resignNoticeDays(e: DocEmployee): number {
   return (e.department ?? "").includes("교수부") ? 60 : 30;
 }
 
+/** 시간 표기 — 209 / 4.345 / 172.062 처럼 불필요한 0 없이 */
+function hoursText(h: number): string {
+  const s = h.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+  return `${s}시간`;
+}
+
 /* ============================ 근로/위탁 계약서 ============================ */
 export function contractHtml(args: {
   employee: DocEmployee;
@@ -221,21 +234,93 @@ export function contractHtml(args: {
   } else {
     // 식대·차량유지비(비과세)는 기본급 총액 '안에' 포함된 금액이라 따로 더하지 않는다.
     const totalWage = ct.baseWage + ct.positionAllow;
-    const taxableBase = Math.max(ct.baseWage - ct.mealAllow - ct.carAllow, 0);
-    const incRef = isIncentive
-      ? `<p class="sub">⑦ "을"의 인센티브 산정·지급 및 퇴직유보금에 관한 세부 사항은 별지 「인센티브 산정 계약서」에 따른다.</p>`
+    // 포괄임금 분해 — 급여 엔진과 같은 함수를 써서 계약서·명세서 금액이 어긋나지 않게 한다.
+    const { weeklyContractual, weeklyHoliday } = computeWeeklyHours(sched);
+    const baseHours =
+      ct.fixedBaseHours ||
+      Math.max(weeklyContractual + weeklyHoliday, 0) * WEEKS_PER_MONTH;
+    const iw = inclusiveWageBreakdown({
+      baseWage: ct.baseWage,
+      mealAllow: ct.mealAllow,
+      carAllow: ct.carAllow,
+      baseHours,
+      otHours: ct.fixedOtHours,
+      nightHours: ct.fixedNightHours,
+    });
+
+    // 임금 항목 표 — 약정 시간외·야간이 있으면 시간과 함께 별도 행으로 표기한다.
+    const rows: Array<[string, number]> = [
+      [`기본급 <span class="muted">(${hoursText(iw.baseHours)})</span>`, iw.basePay],
+    ];
+    if (iw.otHours > 0)
+      rows.push([
+        `시간외근로(고정) <span class="muted">(${hoursText(iw.otHours)})</span>`,
+        iw.overtimePay,
+      ]);
+    if (iw.nightHours > 0)
+      rows.push([
+        `야간근로(고정) <span class="muted">(${hoursText(iw.nightHours)})</span>`,
+        iw.nightPay,
+      ]);
+    rows.push(["직책수당", ct.positionAllow]);
+    rows.push(["식대(비과세)", ct.mealAllow]);
+    rows.push(["차량유지비(비과세)", ct.carAllow]);
+    const cells: string[] = [];
+    for (let i = 0; i < rows.length; i += 2) {
+      const a = rows[i];
+      const b = rows[i + 1];
+      cells.push(
+        `<tr><th>${a[0]}</th><td>${wonUnit(a[1])}</td>` +
+          (b ? `<th>${b[0]}</th><td>${wonUnit(b[1])}</td>` : `<th></th><td></td>`) +
+          `</tr>`
+      );
+    }
+
+    // 포괄임금 합의 조항 — 약정시간이 있을 때만.
+    const fixedParts = [
+      iw.otHours > 0 ? `시간외근로 ${hoursText(iw.otHours)}` : "",
+      iw.nightHours > 0 ? `야간근로 ${hoursText(iw.nightHours)}` : "",
+    ].filter(Boolean);
+    const fixedLabel = [
+      iw.otHours > 0 ? "시간외근로수당" : "",
+      iw.nightHours > 0 ? "야간근로수당" : "",
+    ]
+      .filter(Boolean)
+      .join("·");
+    const inclusiveClause = iw.hasFixed
+      ? `제①항의 ${fixedLabel}은 월 ${fixedParts.join(
+          " · "
+        )}의 약정근로에 대한 근로기준법 제56조의 가산수당을 미리 포함하여 지급하는 것으로 하며, "을"은 이에 동의한다. 위 약정시간을 초과하여 실제 근로한 시간에 대하여는 통상시급 <b>${won(
+          iw.hourlyWage
+        )}원</b>을 기준으로 법정 가산수당을 별도 지급한다.`
       : "";
+
+    const items: string[] = [];
+    if (inclusiveClause) items.push(inclusiveClause);
+    items.push(
+      `위 급여는 제2, 3조에 따라 책정된 임금이며, 이에 관한 사항이 변경 시 변경된 업무, 직책, 근무장소 및 근로시간 등에 따라 급여가 변경됨에 동의한다.`,
+      `"을"의 임금은 매월 초일부터 말일까지 기산하여, 익월 ${payday}일에 "을"의 통장으로 법정 공제액을 공제한 후 지급한다. (휴일 전일 당일 지급)`,
+      `"을"의 퇴직 시 근속기간 중 1주 평균 근로시간이 15시간 이상인 주가 1년 이상인 경우 퇴직급여보장법에 따른 법정 퇴직금을 지급한다.`,
+      `"갑"은 "을"이 복무서약에 따라 성실하게 근무한 경우 "을"에게 인센티브를 지급할 수 있으며, 이는 호혜적인 금품에 해당하므로 근로기준법상 임금에 해당하지 아니한다.`,
+      `직책수당의 경우 해당 임금 산정기간 중 5일 이상 근무한 자에 한하여 이를 일할지급하며, 통상임금 산정 시 제외한다.`
+    );
+    if (isIncentive)
+      items.push(
+        `"을"의 인센티브 산정·지급 및 퇴직유보금에 관한 세부 사항은 별지 「인센티브 산정 계약서」에 따른다.`
+      );
+
+    const nonTaxNote =
+      ct.mealAllow + ct.carAllow > 0
+        ? `<p class="footnote">※ 식대·차량유지비는 위 기준급여에 포함된 금액이며, 소득세법상 비과세 항목으로 구분하여 지급한다.</p>`
+        : "";
+
     wageClause = `<div class="clause"><h3>제 4조 (임금)</h3>
     <p class="sub">① "을"의 급여 산정 및 지급은 <b>${wonUnit(totalWage)}</b>을 기준급여로 하여 아래와 같은 임금 항목으로 포괄하여 지급한다.</p>
-    <table class="kv"><tr><th>기본급</th><td>${wonUnit(taxableBase)}</td><th>직책수당</th><td>${wonUnit(ct.positionAllow)}</td></tr>
-    <tr><th>식대(비과세)</th><td>${wonUnit(ct.mealAllow)}</td><th>차량유지비(비과세)</th><td>${wonUnit(ct.carAllow)}</td></tr></table>
-    <p class="footnote">※ 식대·차량유지비는 위 기본급 총액 ${wonUnit(ct.baseWage)} 에 포함된 금액이며, 소득세법상 비과세 항목으로 구분하여 지급한다.</p>
-    <p class="sub">② 위 급여는 제2, 3조에 따라 책정된 임금이며, 이에 관한 사항이 변경 시 변경된 업무, 직책, 근무장소 및 근로시간 등에 따라 급여가 변경됨에 동의한다.</p>
-    <p class="sub">③ "을"의 임금은 매월 초일부터 말일까지 기산하여, 익월 ${payday}일에 "을"의 통장으로 법정 공제액을 공제한 후 지급한다. (휴일 전일 당일 지급)</p>
-    <p class="sub">④ "을"의 퇴직 시 근속기간 중 1주 평균 근로시간이 15시간 이상인 주가 1년 이상인 경우 퇴직급여보장법에 따른 법정 퇴직금을 지급한다.</p>
-    <p class="sub">⑤ "갑"은 "을"이 복무서약에 따라 성실하게 근무한 경우 "을"에게 인센티브를 지급할 수 있으며, 이는 호혜적인 금품에 해당하므로 근로기준법상 임금에 해당하지 아니한다.</p>
-    <p class="sub">⑥ 직책수당의 경우 해당 임금 산정기간 중 5일 이상 근무한 자에 한하여 이를 일할지급하며, 통상임금 산정 시 제외한다.</p>
-    ${incRef}</div>`;
+    <table class="kv">${cells.join("\n    ")}</table>
+    ${nonTaxNote}
+    ${items
+      .map((t, i) => `<p class="sub">${CIRC[i + 1]} ${t}</p>`)
+      .join("\n    ")}</div>`;
   }
 
   // 제5조 — 휴일 (시급제는 주휴 요건을 '실근로 15시간 초과' 기준으로 표기)
