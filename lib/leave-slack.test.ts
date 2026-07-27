@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { leaveBalanceText, modalPeriod, leaveBlockNotice } from "./leave-slack";
+import {
+  leaveBalanceText,
+  modalPeriod,
+  leaveBlockNotice,
+  ineligibleReason,
+  RATIO_LEAVE_NOTICE,
+  RATIO_LEAVE_NOTICE_INLINE,
+} from "./leave-slack";
 import { summarizeLeave, summarizeComp, type LeaveTxn } from "./leave";
 
 const d = (s: string) => new Date(s + "T00:00:00Z");
@@ -137,5 +144,23 @@ describe("leaveBlockNotice — 신청을 막을지 판단", () => {
       asOf
     );
     expect(leaveBlockNotice(off, withComp, e)).toBeNull();
+  });
+});
+
+describe("위탁(완전비율제) 안내 문구", () => {
+  it("네 경로가 같은 문구를 쓰고, 사유와 다음 행동을 함께 알려준다", () => {
+    expect(RATIO_LEAVE_NOTICE).toContain("근로기준법상 연차휴가 적용 대상이 아닙니다");
+    expect(RATIO_LEAVE_NOTICE).toContain("관리자에게 문의");
+    // 모달 오류칸용은 줄바꿈 없이 한 줄
+    expect(RATIO_LEAVE_NOTICE_INLINE).not.toContain("\n");
+    expect(RATIO_LEAVE_NOTICE_INLINE).toContain("근로기준법상 연차휴가 적용 대상이 아닙니다");
+  });
+
+  it("초단시간 미적용과는 사유를 다르게 말한다", () => {
+    // 위탁은 애초에 근로기준법 밖, 초단시간은 근로자인데 §18③ 으로 연차만 없음
+    expect(RATIO_LEAVE_NOTICE).not.toContain("제18조");
+    expect(ineligibleReason({ eligible: false, weeklyHours: 13.5, forcedOff: false })).toContain(
+      "제18조 제3항"
+    );
   });
 });

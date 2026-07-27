@@ -32,6 +32,7 @@ import {
   leaveBalanceText,
   leaveBlockNotice,
   modalPeriod,
+  RATIO_LEAVE_NOTICE,
 } from "@/lib/leave-slack";
 import { refreshHomeTab } from "@/lib/home-tab";
 import { createLeaveEvent, deleteLeaveEvent, gcalConfigured } from "@/lib/gcal";
@@ -79,11 +80,7 @@ async function openLeaveForm(triggerId: string, userId: string, channelId?: stri
     return;
   }
   if (emp.payScheme === "RATIO") {
-    await tellUser(
-      channelId,
-      userId,
-      "완전비율제(위탁) 계약은 연차휴가 적용 대상이 아닙니다. 문의는 관리자에게 부탁드립니다."
-    );
+    await tellUser(channelId, userId, RATIO_LEAVE_NOTICE);
     return;
   }
   const { summary, comp, eligibility } = await leaveBalanceOf(emp);

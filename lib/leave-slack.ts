@@ -51,6 +51,18 @@ export async function leaveBalanceOf(emp: {
   };
 }
 
+/**
+ * 위탁(완전비율제) 계약자 안내 — 슬래시 명령·채널 버튼·홈탭·신청 제출 네 곳이 같은 문구를 쓴다.
+ * 초단시간 미적용과는 사유가 다르다: 그쪽은 근로자인데 연차만 안 생기는 것이고,
+ * 이쪽은 애초에 근로기준법이 적용되지 않는 계약이다.
+ */
+export const RATIO_LEAVE_NOTICE =
+  "📌 위탁(완전비율제) 계약은 근로기준법상 연차휴가 적용 대상이 아닙니다.\n수업 일정 조정은 관리자에게 문의해 주세요.";
+
+/** 모달 오류칸처럼 한 줄로 보여야 하는 자리용 */
+export const RATIO_LEAVE_NOTICE_INLINE =
+  "위탁(완전비율제) 계약은 근로기준법상 연차휴가 적용 대상이 아닙니다. 수업 일정 조정은 관리자에게 문의해 주세요.";
+
 /** 미적용 사유 한 줄 */
 export function ineligibleReason(e: LeaveEligibility): string {
   return e.forcedOff
@@ -176,7 +188,7 @@ export async function submitLeaveRequest(
   input: LeaveSubmitInput
 ): Promise<LeaveSubmitResult> {
   if (emp.payScheme === "RATIO") {
-    return { ok: false, error: "완전비율제(위탁) 계약은 연차휴가 적용 대상이 아닙니다." };
+    return { ok: false, error: RATIO_LEAVE_NOTICE_INLINE };
   }
   if (input.end < input.start) {
     return { ok: false, error: "종료일이 시작일보다 빠릅니다.", field: "end" };

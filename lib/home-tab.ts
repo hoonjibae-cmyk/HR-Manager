@@ -1,7 +1,7 @@
 // 슬랙 앱 홈 탭 구성 — 이벤트 수신(app_home_opened)과 버튼 처리에서 함께 쓴다.
 import { prisma } from "./db";
 import { findEmployeeBySlack, autoLinkEmployeeBySlack, homeTabView, publishHomeView } from "./slack";
-import { leaveBalanceOf, leaveBalanceText, rangeLabel } from "./leave-slack";
+import { leaveBalanceOf, leaveBalanceText, rangeLabel, RATIO_LEAVE_NOTICE } from "./leave-slack";
 import { LEAVE_TYPE_LABEL, LEAVE_STATUS_LABEL } from "./constants";
 
 /** 오늘(KST) 이후로 예정된 신청·승인 건 */
@@ -49,7 +49,7 @@ export async function refreshHomeTab(slackUserId: string) {
       slackUserId,
       homeTabView({
         companyName,
-        notice: "완전비율제(위탁) 계약은 연차휴가 적용 대상이 아닙니다.\n문의는 관리자에게 부탁드립니다.",
+        notice: RATIO_LEAVE_NOTICE,
       })
     );
   }

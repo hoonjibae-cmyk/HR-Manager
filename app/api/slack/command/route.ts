@@ -12,6 +12,7 @@ import {
   leaveBalanceText,
   leaveBlockNotice,
   modalPeriod,
+  RATIO_LEAVE_NOTICE,
   submitLeaveRequest,
   rangeLabel,
 } from "@/lib/leave-slack";
@@ -51,11 +52,7 @@ export async function POST(req: Request) {
       );
     }
   }
-  if (emp.payScheme === "RATIO") {
-    return ephemeral(
-      "완전비율제(위탁) 계약은 연차휴가 적용 대상이 아닙니다. 문의는 관리자에게 부탁드립니다."
-    );
-  }
+  if (emp.payScheme === "RATIO") return ephemeral(RATIO_LEAVE_NOTICE);
 
   // 잔여연차 조회 (직원 셀프 조회) — 이번 연차기간 기준 + 대휴보상연차
   if (!text || /^(조회|잔여|현황|내연차|status|balance)$/i.test(text)) {
