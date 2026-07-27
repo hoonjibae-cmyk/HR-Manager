@@ -256,13 +256,27 @@ SLACK_APPROVERS="U01ADMIN1,U01ADMIN2" # 승인 권한자 (비우면 채널 누�
 (개인 캘린더면 이메일 형태, 공유 캘린더면 `...@group.calendar.google.com`)
 
 ### 3-A-4. 환경변수
+
+**방법 A — 키 파일 통째로 (권장)**
+다운로드한 JSON 파일을 열어 **전체 선택(Ctrl+A) → 복사** 한 뒤 그대로 붙여넣습니다.
+값에서 일부만 떼어낼 필요가 없어 오타가 나지 않습니다.
+
+| Key | Value |
+|---|---|
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | `{ "type": "service_account", ... }` (파일 내용 전체) |
+| `GOOGLE_CALENDAR_ID` | `....@group.calendar.google.com` |
+
+**방법 B — 두 값을 따로**
 ```env
 GOOGLE_CLIENT_EMAIL="yoossam-hr@프로젝트.iam.gserviceaccount.com"
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 GOOGLE_CALENDAR_ID="....@group.calendar.google.com"
 ```
-> `GOOGLE_PRIVATE_KEY` 는 JSON 의 `private_key` 값을 **줄바꿈 `\n` 표기 그대로** 붙여넣으면 됩니다.
-> Vercel 환경변수에 넣을 때도 동일합니다.
+> `GOOGLE_PRIVATE_KEY` 는 JSON 의 `private_key` 값을 **줄바꿈 `\n` 표기 그대로** 붙여넣습니다.
+
+> **Vercel 에 넣을 때는 앞뒤 큰따옴표를 빼고** 값만 붙여넣으세요.
+> (`.env` 파일에서는 따옴표로 감싸는 것이 맞습니다.)
+> 넣은 뒤 **Redeploy** 해야 반영됩니다.
 
 ### 3-A-5. 연결 확인
 `설정` 화면 → **구글 캘린더 연결 테스트** 버튼.

@@ -7,24 +7,48 @@
 //  1) Google Cloud 콘솔에서 서비스 계정 생성 → JSON 키 발급
 //  2) 구글 캘린더에서 대상 캘린더 → 설정 → '특정 사용자와 공유'에
 //     서비스 계정 이메일을 추가하고 **변경 및 공유 관리 권한** 부여
-//  3) 환경변수: GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY, GOOGLE_CALENDAR_ID
+//  3) 환경변수: GOOGLE_SERVICE_ACCOUNT_JSON(키 파일 통째로) + GOOGLE_CALENDAR_ID
+//     (또는 GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY + GOOGLE_CALENDAR_ID)
 
 import { createSign } from "crypto";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SCOPE = "https://www.googleapis.com/auth/calendar";
 
+/**
+ * 서비스 계정 자격증명.
+ * 두 가지 방법을 모두 지원한다.
+ *  (A) GOOGLE_SERVICE_ACCOUNT_JSON — 다운로드한 JSON 파일 내용을 통째로 (권장·오타 없음)
+ *  (B) GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY — 두 값을 따로
+ */
+export function serviceAccount(): { clientEmail: string; privateKey: string } {
+  const raw = (process.env.GOOGLE_SERVICE_ACCOUNT_JSON || "").trim();
+  if (raw) {
+    try {
+      const j = JSON.parse(raw);
+      return {
+        clientEmail: j.client_email || "",
+        // JSON.parse 가 \n 을 이미 실제 줄바꿈으로 바꿔 준다
+        privateKey: j.private_key || "",
+      };
+    } catch {
+      // 파싱 실패 시 아래 개별 환경변수로 넘어간다 (진단에서 형식 오류로 잡힘)
+    }
+  }
+  return {
+    clientEmail: process.env.GOOGLE_CLIENT_EMAIL || "",
+    // 환경변수에 저장할 때 줄바꿈이 \n 문자열로 들어가는 경우가 많다
+    privateKey: (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+  };
+}
+
 export function gcalConfigured(): boolean {
-  return (
-    !!process.env.GOOGLE_CLIENT_EMAIL &&
-    !!process.env.GOOGLE_PRIVATE_KEY &&
-    !!process.env.GOOGLE_CALENDAR_ID
-  );
+  const sa = serviceAccount();
+  return !!sa.clientEmail && !!sa.privateKey && !!process.env.GOOGLE_CALENDAR_ID;
 }
 
 function privateKey(): string {
-  // 환경변수에 저장할 때 줄바꿈이 \n 문자열로 들어가는 경우가 많다
-  return (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, "\n");
+  return serviceAccount().privateKey;
 }
 
 function b64url(input: string | Buffer): string {
@@ -45,7 +69,7 @@ async function accessToken(): Promise<string | null> {
   const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const claim = b64url(
     JSON.stringify({
-      iss: process.env.GOOGLE_CLIENT_EMAIL,
+      iss: serviceAccount().clientEmail,
       scope: SCOPE,
       aud: TOKEN_URL,
       iat: now,
@@ -88,7 +112,7 @@ function gcalHint(status: number, reason: string, message: string): string {
   if (m.includes("accessnotconfigured") || m.includes("has not been used"))
     return "Google Cloud 프로젝트에서 **Google Calendar API** 가 사용 설정되지 않았습니다.\n콘솔 → API 및 서비스 → 라이브러리 → Google Calendar API → 사용.";
   if (m.includes("invalid_grant"))
-    return "서비스 계정 인증에 실패했습니다. GOOGLE_CLIENT_EMAIL 이 JSON 의 client_email 과 같은지,\nGOOGLE_PRIVATE_KEY 가 -----BEGIN PRIVATE KEY----- 부터 끝까지 잘리지 않고 들어갔는지 확인하세요.";
+    return "서비스 계정 인증에 실패했습니다. 키 파일(JSON)을 통째로 GOOGLE_SERVICE_ACCOUNT_JSON 에\n붙여넣는 방법이 가장 확실합니다. 개별 변수를 쓴다면 client_email 과 private_key 가\n같은 JSON 파일에서 온 값인지, 키가 중간에 잘리지 않았는지 확인하세요.";
   if (status === 404)
     return "캘린더를 찾지 못했습니다. GOOGLE_CALENDAR_ID 가 정확한지, 그리고 그 캘린더를\n서비스 계정 이메일과 **공유** 했는지 확인하세요 (공유하지 않으면 존재해도 404 가 납니다).";
   if (status === 403)
@@ -109,16 +133,35 @@ export async function gcalDiagnose(): Promise<{
   calendarName?: string;
 }> {
   const steps: GcalStep[] = [];
+  const sa = serviceAccount();
+  const usedJson = !!(process.env.GOOGLE_SERVICE_ACCOUNT_JSON || "").trim();
+  const jsonBroken = usedJson && !sa.clientEmail;
+  if (jsonBroken) {
+    steps.push({
+      name: "환경변수",
+      ok: false,
+      detail: "GOOGLE_SERVICE_ACCOUNT_JSON 을 JSON 으로 읽지 못했습니다",
+    });
+    return {
+      ok: false,
+      steps,
+      hint: "다운로드한 키 파일 내용을 { 부터 } 까지 통째로, 앞뒤 따옴표 없이 붙여넣었는지 확인하세요.",
+    };
+  }
   const missing = [
-    !process.env.GOOGLE_CLIENT_EMAIL && "GOOGLE_CLIENT_EMAIL",
-    !process.env.GOOGLE_PRIVATE_KEY && "GOOGLE_PRIVATE_KEY",
+    !sa.clientEmail && "GOOGLE_CLIENT_EMAIL (또는 GOOGLE_SERVICE_ACCOUNT_JSON)",
+    !sa.privateKey && "GOOGLE_PRIVATE_KEY (또는 GOOGLE_SERVICE_ACCOUNT_JSON)",
     !process.env.GOOGLE_CALENDAR_ID && "GOOGLE_CALENDAR_ID",
   ].filter(Boolean) as string[];
   if (missing.length) {
     steps.push({ name: "환경변수", ok: false, detail: `누락: ${missing.join(", ")}` });
-    return { ok: false, steps, hint: "환경변수를 넣고 재배포한 뒤 다시 시도하세요." };
+    return { ok: false, steps, hint: "환경변수를 넣고 재배포(Redeploy)한 뒤 다시 시도하세요." };
   }
-  steps.push({ name: "환경변수", ok: true, detail: process.env.GOOGLE_CLIENT_EMAIL });
+  steps.push({
+    name: "환경변수",
+    ok: true,
+    detail: `${sa.clientEmail} (${usedJson ? "JSON 통째로" : "개별 변수"})`,
+  });
 
   const key = privateKey();
   const keyOk = key.includes("BEGIN PRIVATE KEY") && key.includes("END PRIVATE KEY");
@@ -131,7 +174,7 @@ export async function gcalDiagnose(): Promise<{
     return {
       ok: false,
       steps,
-      hint: "JSON 의 private_key 값을 따옴표 안 내용 그대로(\\n 포함) 붙여넣으세요.",
+      hint: "키 파일(JSON) 전체를 GOOGLE_SERVICE_ACCOUNT_JSON 에 붙여넣으면 이 오류가 나지 않습니다.",
     };
 
   // 1) 토큰
