@@ -203,7 +203,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
           <div className="card p-5">
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-bold text-slate-800">연차 현황</h2>
-              <Link href="/leave" className="text-xs text-brand-600 font-semibold">관리 →</Link>
+              <Link href={`/leave/${emp.id}`} className="text-xs text-brand-600 font-semibold">상세 내역 →</Link>
             </div>
             <div className="text-xs text-slate-500 mb-2">
               이번 연차기간 <b className="text-slate-700">{ymd(summary.period.start)} ~ {ymd(summary.period.end)}</b>{" "}

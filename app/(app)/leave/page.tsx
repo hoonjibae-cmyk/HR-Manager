@@ -154,7 +154,7 @@ export default async function LeavePage({
             {rows.map(({ e, s, c, p, weeklyContractual }) => (
               <tr key={e.id} className="hover:bg-slate-50">
                 <td className="td">
-                  <Link href={`/employees/${e.id}`} className="font-semibold text-brand-700 hover:underline">{e.name}</Link>
+                  <Link href={`/leave/${e.id}`} className="font-semibold text-brand-700 hover:underline">{e.name}</Link>
                   {!s.eligible && (
                     <span className="ml-2 pill bg-slate-100 text-slate-500">연차 미적용</span>
                   )}
