@@ -410,7 +410,7 @@ function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyM
           hint={
             g.gcal
               ? "승인된 휴가가 캘린더에 자동 등록·취소 시 삭제됩니다"
-              : "GOOGLE_CLIENT_EMAIL · GOOGLE_PRIVATE_KEY · GOOGLE_CALENDAR_ID 필요 (선택)"
+              : "GOOGLE_SERVICE_ACCOUNT_JSON(키 파일 통째로) · GOOGLE_CALENDAR_ID 필요 (선택)"
           }
         />
         <Status

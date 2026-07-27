@@ -3,6 +3,7 @@ import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { invalidateTaxCache } from "@/lib/repo";
 import { computeNextRun, formatKst } from "@/lib/scheduler";
+import { gcalConfigured } from "@/lib/gcal";
 
 export const dynamic = "force-dynamic";
 
@@ -45,10 +46,8 @@ export async function GET() {
       slackSecret: !!process.env.SLACK_SIGNING_SECRET,
       slackChannel: !!process.env.SLACK_APPROVAL_CHANNEL,
       slackRecordChannel: !!process.env.SLACK_RECORD_CHANNEL,
-      gcal:
-        !!process.env.GOOGLE_CLIENT_EMAIL &&
-        !!process.env.GOOGLE_PRIVATE_KEY &&
-        !!process.env.GOOGLE_CALENDAR_ID,
+      // 키 파일 통째로(GOOGLE_SERVICE_ACCOUNT_JSON) 넣은 경우도 인정해야 하므로 엔진 판정을 그대로 쓴다
+      gcal: gcalConfigured(),
       // 서버리스(Vercel)에서는 내부 스케줄러가 아니라 Vercel Cron 이 실행 주체
       serverless: !!process.env.VERCEL,
       scheduler: !!process.env.VERCEL || process.env.ENABLE_SCHEDULER === "true",
