@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   leaveBalanceText,
+  leaveUseLines,
   modalPeriod,
   leaveBlockNotice,
   ineligibleReason,
@@ -62,6 +63,88 @@ describe("leaveBalanceText — 직원에게 보여줄 연차 현황", () => {
     );
     expect(t).toContain("발생 4 · 사용 0 · *잔여 4일*");
     expect(t).toContain("앞으로 7일 더 발생 예정");
+  });
+});
+
+describe("사용 내역 — 잔여 숫자만으로는 확인이 안 돼 함께 보여준다", () => {
+  const hire = d("2021-01-01");
+  const asOf = d("2026-07-26");
+  const txns: LeaveTxn[] = [
+    { date: d("2025-05-02"), days: -3, type: "USE" }, // 지난 기간 → 안 나온다
+    { date: d("2026-07-29"), days: -1, type: "USE" }, // 이번 기간 (미래 승인분)
+    { date: d("2026-03-10"), days: -2, type: "USE" },
+    { date: d("2026-04-01"), days: -1, type: "USE", category: "COMP" },
+    { date: d("2026-02-01"), days: 2, type: "GRANT", category: "COMP" },
+  ];
+  const s = summarizeLeave(hire, asOf, txns);
+  const t = leaveBalanceText("배지훈", s, summarizeComp(txns, asOf), undefined, txns);
+
+  it("이번 연차기간 사용분만 날짜순으로 늘어놓는다", () => {
+    const body = t.slice(t.indexOf("*사용 내역*"));
+    expect(body.split("\n").filter((l) => l.startsWith("•"))).toEqual([
+      "• 2026.03.10 (화) 연차 2일",
+      "• 2026.04.01 (수) 대휴 1일",
+      "• 2026.07.29 (수) 연차 1일",
+    ]);
+    expect(t).not.toContain("2025.05.02");
+  });
+
+  it("내역을 넘기지 않으면 종전처럼 잔여만 보여준다", () => {
+    const only = leaveBalanceText("배지훈", s, summarizeComp(txns, asOf));
+    expect(only).not.toContain("*사용 내역*");
+  });
+
+  it("사용이 없으면 없다고 알려준다", () => {
+    const none = leaveBalanceText(
+      "배지훈",
+      summarizeLeave(hire, asOf, []),
+      summarizeComp([], asOf),
+      undefined,
+      []
+    );
+    expect(none).toContain("이번 기간에 사용한 연차가 없습니다");
+  });
+
+  it("12건이 넘으면 최근 것을 남기고 오래된 쪽을 접는다", () => {
+    const many: LeaveTxn[] = Array.from({ length: 15 }, (_, i) => ({
+      date: d(`2026-03-${String(i + 1).padStart(2, "0")}`),
+      days: -1,
+      type: "USE" as const,
+    }));
+    const lines = leaveUseLines(many, d("2026-01-01"), d("2026-12-31"));
+    expect(lines).toHaveLength(13);
+    expect(lines[0]).toBe("• …이전 3건 생략");
+    expect(lines[1]).toBe("• 2026.03.04 (수) 연차 1일"); // 1~3일은 접히고 4일부터
+    expect(lines[12]).toBe("• 2026.03.15 (일) 연차 1일");
+  });
+
+  it("연차기간이 해를 넘겨도 어느 해인지 알 수 있게 연도를 쓴다", () => {
+    // 입사일 기준 기간이라 2025.11 ~ 2026.11 처럼 두 해에 걸치는 게 보통이다
+    const lines = leaveUseLines(
+      [
+        { date: d("2025-12-24"), days: -1, type: "USE" },
+        { date: d("2026-02-11"), days: -1, type: "USE" },
+      ],
+      d("2025-11-02"),
+      d("2026-11-01")
+    );
+    expect(lines).toEqual(["• 2025.12.24 (수) 연차 1일", "• 2026.02.11 (수) 연차 1일"]);
+  });
+
+  it("연차 미적용 직원도 관리자 부여분을 쓴 내역을 볼 수 있다", () => {
+    const used: LeaveTxn[] = [
+      { date: d("2026-05-01"), days: 3, type: "ADJUST" },
+      { date: d("2026-06-15"), days: -1, type: "USE" },
+    ];
+    const off = summarizeLeave(d("2024-03-01"), asOf, used, { eligible: false });
+    const t2 = leaveBalanceText(
+      "서지안",
+      off,
+      summarizeComp(used, asOf),
+      { eligible: false, weeklyHours: 13.5, forcedOff: false },
+      used
+    );
+    expect(t2).toContain("• 2026.06.15 (월) 연차 1일");
   });
 });
 

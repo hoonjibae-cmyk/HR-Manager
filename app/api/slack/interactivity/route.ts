@@ -262,8 +262,12 @@ export async function POST(req: Request) {
       await tellUser(channelId, userId, notLinkedText(info));
       return new Response("", { status: 200 });
     }
-    const { summary, comp, eligibility } = await leaveBalanceOf(emp);
-    await tellUser(channelId, userId, leaveBalanceText(emp.name, summary, comp, eligibility));
+    const { summary, comp, eligibility, txns } = await leaveBalanceOf(emp);
+    await tellUser(
+      channelId,
+      userId,
+      leaveBalanceText(emp.name, summary, comp, eligibility, txns)
+    );
     return new Response("", { status: 200 });
   }
 

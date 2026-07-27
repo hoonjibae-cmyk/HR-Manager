@@ -56,9 +56,9 @@ export async function POST(req: Request) {
 
   // 잔여연차 조회 (직원 셀프 조회) — 이번 연차기간 기준 + 대휴보상연차
   if (!text || /^(조회|잔여|현황|내연차|status|balance)$/i.test(text)) {
-    const { summary, comp, eligibility } = await leaveBalanceOf(emp);
+    const { summary, comp, eligibility, txns } = await leaveBalanceOf(emp);
     return ephemeral(
-      leaveBalanceText(emp.name, summary, comp, eligibility) +
+      leaveBalanceText(emp.name, summary, comp, eligibility, txns) +
         "\n\n_신청: `/연차 신청` · 빠른 신청: `/연차 8/14 사유` · 도움말: `/연차 help`_"
     );
   }

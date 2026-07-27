@@ -7,6 +7,7 @@ import {
   summarizeComp,
   usedInPeriod,
   countLeaveDays,
+  businessDaysFrom,
   isLeaveEligible,
   type LeaveTxn,
 } from "./leave";
@@ -309,5 +310,40 @@ describe("summarizeLeave — 미적용 직원", () => {
     expect(s.granted).toBe(0);
     expect(s.used).toBe(2);
     expect(s.remaining).toBe(-2);
+  });
+});
+
+describe("businessDaysFrom — 시작일부터 N 업무일", () => {
+  it("주말을 건너뛰고 평일만 센다", () => {
+    // 2026-07-31(금) 부터 3일 → 금, 월, 화
+    const days = businessDaysFrom(d("2026-07-31"), 3);
+    expect(days.map((x) => x.toISOString().slice(0, 10))).toEqual([
+      "2026-07-31",
+      "2026-08-03",
+      "2026-08-04",
+    ]);
+  });
+
+  it("공휴일도 건너뛴다", () => {
+    const days = businessDaysFrom(d("2026-08-03"), 3, { holidays: [d("2026-08-04")] });
+    expect(days.map((x) => x.toISOString().slice(0, 10))).toEqual([
+      "2026-08-03",
+      "2026-08-05",
+      "2026-08-06",
+    ]);
+  });
+
+  it("시작일이 주말이면 다음 근무일부터 채운다", () => {
+    const days = businessDaysFrom(d("2026-08-01"), 2); // 토
+    expect(days.map((x) => x.toISOString().slice(0, 10))).toEqual(["2026-08-03", "2026-08-04"]);
+  });
+
+  it("1일이면 그날 하루만", () => {
+    expect(businessDaysFrom(d("2026-08-03"), 1)).toHaveLength(1);
+  });
+
+  it("0 이하면 빈 목록", () => {
+    expect(businessDaysFrom(d("2026-08-03"), 0)).toEqual([]);
+    expect(businessDaysFrom(d("2026-08-03"), -1)).toEqual([]);
   });
 });

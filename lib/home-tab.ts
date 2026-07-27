@@ -54,12 +54,12 @@ export async function refreshHomeTab(slackUserId: string) {
     );
   }
 
-  const { summary, comp, eligibility } = await leaveBalanceOf(emp);
+  const { summary, comp, eligibility, txns } = await leaveBalanceOf(emp);
   return publishHomeView(
     slackUserId,
     homeTabView({
       companyName,
-      balanceText: leaveBalanceText(emp.name, summary, comp, eligibility),
+      balanceText: leaveBalanceText(emp.name, summary, comp, eligibility, txns),
       upcoming: await upcomingLeaves(emp.id),
     })
   );

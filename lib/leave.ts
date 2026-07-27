@@ -394,6 +394,32 @@ export function usedInPeriod(
 }
 
 /** 두 날짜 사이 연차 사용일수 계산 (주말/공휴일 제외, 반차 0.5 지원) */
+/**
+ * 시작일부터 N 업무일(주말·공휴일 제외)을 늘어놓는다.
+ * 방학처럼 여러 날을 한 번에 반영할 때, 하루씩 따로 기록하려고 쓴다.
+ * 시작일이 주말·공휴일이면 그날은 빼고 다음 근무일부터 채운다.
+ */
+export function businessDaysFrom(
+  start: Date,
+  count: number,
+  opts: { holidays?: Date[] } = {}
+): Date[] {
+  const key = (d: Date) => d.toISOString().slice(0, 10);
+  const holidaySet = new Set((opts.holidays ?? []).map(key));
+  const out: Date[] = [];
+  if (count <= 0) return out;
+  const cur = new Date(
+    Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())
+  );
+  // 연휴가 길어도 멈추도록 넉넉한 상한을 둔다 (1년치를 넘겨 찾지 않는다)
+  for (let scanned = 0; out.length < count && scanned < 400; scanned++) {
+    const dow = cur.getUTCDay();
+    if (dow !== 0 && dow !== 6 && !holidaySet.has(key(cur))) out.push(new Date(cur));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return out;
+}
+
 export function countLeaveDays(
   start: Date,
   end: Date,

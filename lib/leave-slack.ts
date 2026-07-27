@@ -48,7 +48,46 @@ export async function leaveBalanceOf(emp: {
     summary: summarizeLeave(emp.hireDate, new Date(), mapped, { eligible: eligibility.eligible }),
     comp: summarizeComp(mapped),
     eligibility,
+    /** 사용 내역 표시용 원본 — leaveBalanceText 에 그대로 넘긴다 */
+    txns: mapped,
   };
+}
+
+const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
+
+/**
+ * 2026-07-29 → "2026.07.29 (수)".
+ * 연차기간은 입사일 기준이라 두 해에 걸치는 게 보통(2025.11 ~ 2026.11)이라
+ * 월/일만 쓰면 어느 해인지 알 수 없다. 앱의 다른 날짜 표기와도 같은 형식.
+ */
+function dayLine(d: Date): string {
+  return `${ymd(d)} (${WEEK[d.getUTCDay()]})`;
+}
+
+/** 슬랙 사용 내역에 한 번에 보여줄 최대 줄 수 — 넘치면 오래된 쪽을 접는다 */
+const MAX_USE_LINES = 12;
+
+/**
+ * 이번 연차기간에 쓴 내역을 날짜순으로 늘어놓는다.
+ * 잔여 일수만 보면 "내가 언제 썼더라" 를 알 수 없어 직원 문의가 관리자에게 몰린다.
+ * 줄 수가 넘치면 **최근 것을 남기고 오래된 쪽을 접는다** — 궁금한 건 방금 쓴 연차다.
+ */
+export function leaveUseLines(txns: LeaveTxn[], from: Date, to: Date): string[] {
+  // 부호는 보지 않는다 — 집계(usedInPeriod)와 같은 기준으로 절댓값을 쓴다
+  const uses = txns
+    .filter((t) => t.type === "USE" || t.type === "PAYOUT")
+    .filter((t) => t.date >= from && t.date <= to)
+    .sort((a, b) => a.date.getTime() - b.date.getTime());
+  const shown = uses.slice(-MAX_USE_LINES);
+  const hidden = uses.length - shown.length;
+  const lines = shown.map(
+    (t) =>
+      `• ${dayLine(t.date)} ${
+        (t.category ?? "STATUTORY") === "COMP" ? "대휴" : "연차"
+      } ${Math.abs(t.days)}일`
+  );
+  if (hidden > 0) lines.unshift(`• …이전 ${hidden}건 생략`);
+  return lines;
 }
 
 /**
@@ -96,9 +135,11 @@ export function leaveBalanceText(
   name: string,
   summary: LeaveSummary,
   comp: CompSummary,
-  eligibility?: LeaveEligibility
+  eligibility?: LeaveEligibility,
+  txns?: LeaveTxn[]
 ): string {
   const p = summary.period;
+  const useLines = txns ? leaveUseLines(txns, p.start, p.end) : [];
   if (!summary.eligible) {
     // 주 15시간 미만 초단시간근로자·계약상 연차 미적용 (근로기준법 §18③)
     const reason = eligibility
@@ -111,6 +152,7 @@ export function leaveBalanceText(
     ];
     if (p.remaining > 0) lines.push(`• 관리자가 따로 부여한 연차 잔여 *${p.remaining}일*`);
     if (comp.remaining > 0) lines.push(`• 대휴보상연차 잔여 *${comp.remaining}일*`);
+    if (useLines.length) lines.push(``, `*사용 내역* (${ymd(p.start)} ~ ${ymd(p.end)})`, ...useLines);
     lines.push(
       ``,
       p.remaining > 0 || comp.remaining > 0
@@ -133,6 +175,9 @@ export function leaveBalanceText(
     lines.push(
       `• 대휴보상연차: 발생 ${comp.granted} · 사용 ${comp.used} · *잔여 ${comp.remaining}일* (기한 없음)`
     );
+  // 언제 썼는지를 함께 보여준다 — 잔여 숫자만으로는 확인이 안 돼 관리자에게 되묻게 된다
+  if (useLines.length) lines.push(``, `*사용 내역*`, ...useLines);
+  else lines.push(``, `_이번 기간에 사용한 연차가 없습니다._`);
   // 입사 후 누계는 직원 화면에 넣지 않는다 — 지금 쓸 수 있는 일수와 무관해 혼선만 준다.
   // (누계·소멸 이력은 관리자 화면 '직원 상세 → 연차 현황' 에서 확인)
   return lines.join("\n");
