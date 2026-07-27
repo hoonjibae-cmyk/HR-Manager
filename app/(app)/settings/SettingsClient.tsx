@@ -377,6 +377,59 @@ function EmailLogCard({ logs }: { logs: any[] }) {
   );
 }
 
+/**
+ * 슬랙 앱 설정에 붙여넣어야 하는 요청 URL 3개.
+ * 배포 주소를 직접 적다 오타를 내는 일이 잦아 화면에서 그대로 복사하게 둔다
+ * (브라우저 주소 = 이 배포 주소이므로 서버에 물어볼 필요가 없다).
+ */
+function SlackUrls() {
+  const [copied, setCopied] = useState("");
+  const [origin, setOrigin] = useState("");
+  useEffect(() => setOrigin(window.location.origin), []);
+  if (!origin) return null;
+
+  const rows: Array<[string, string]> = [
+    ["슬래시 명령 (/연차 · /보강)", `${origin}/api/slack/command`],
+    ["버튼·모달 (Interactivity)", `${origin}/api/slack/interactivity`],
+    ["앱 홈 (Event Subscriptions)", `${origin}/api/slack/events`],
+  ];
+
+  const copy = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(url);
+      setTimeout(() => setCopied(""), 1500);
+    } catch {
+      window.prompt("아래 주소를 복사하세요", url);
+    }
+  };
+
+  return (
+    <details className="mt-4 border-t border-slate-100 pt-3">
+      <summary className="text-xs text-slate-500 cursor-pointer select-none">
+        슬랙 앱에 붙여넣을 요청 URL 보기
+      </summary>
+      <p className="text-[11px] text-slate-400 mt-2">
+        <b>매니페스트 복사</b> 로 한 번에 넣으면 아래 값이 이미 채워져 있어 따로 쓸 일이 없습니다.
+        슬랙 앱 설정에서 항목 하나만 손으로 고칠 때 쓰세요.
+      </p>
+      <div className="mt-2 space-y-1">
+        {rows.map(([label, url]) => (
+          <div key={url} className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="w-52 shrink-0 text-slate-500">{label}</span>
+            <code className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-700 break-all">
+              {url}
+            </code>
+            <button className="btn-outline py-0.5 px-2 text-[11px]" onClick={() => copy(url)}>
+              {copied === url ? "복사됨" : "복사"}
+            </button>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyManifest, onTestGcal, onCheckSchema }: any) {
   const envHint = g.serverless
     ? "Vercel → Settings → Environment Variables 에 추가 후 재배포"
@@ -458,6 +511,8 @@ function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyM
           DB 스키마 점검
         </button>
       </div>
+      <SlackUrls />
+
       {!g.smtp && (
         <p className="text-xs text-amber-700 mt-3">
           ⚠️ SMTP가 설정되지 않아 <b>급여명세서 발송(수동·예약 모두)이 동작하지 않습니다.</b> 설정 방법은{" "}

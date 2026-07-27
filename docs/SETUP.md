@@ -321,7 +321,7 @@ git pull
 npx prisma db push
 ```
 
-프로그램 `설정` → **DB 스키마 확인** 버튼을 누르면
+프로그램 `설정` 화면 맨 아래 **DB 스키마 점검** 버튼을 누르면
 `MakeupSession` · `ExamPeriod` · `OvertimePolicy` · `PayrollRecord.holidayOverHours` 가
 모두 ✅ 로 나와야 합니다.
 
@@ -330,52 +330,94 @@ npx prisma db push
 휴가 캘린더와 **섞이면 안 되므로 반드시 별도 캘린더**를 씁니다.
 (설정하지 않으면 캘린더에만 안 올라가고, 신청·수당 산정은 그대로 동작합니다)
 
-1. [구글 캘린더](https://calendar.google.com/) → 왼쪽 **다른 캘린더 +** → **새 캘린더 만들기**
-   - 이름: `보강캘린더` → **캘린더 만들기**
-2. 만든 캘린더 → **설정 및 공유** → **특정 사용자 또는 그룹과 공유** → **사용자 추가**
-   - 서비스 계정 이메일(`...iam.gserviceaccount.com`)을 넣습니다.
-     3-A-1 에서 받은 JSON 파일의 `client_email` 값이며, 휴가 캘린더에 넣은 것과 같은 값입니다.
-   - 권한: **일정 변경** 이상 (권장: 변경 및 공유 관리)
-3. 같은 화면 아래 **캘린더 통합 → 캘린더 ID** 복사
-   (`....@group.calendar.google.com` 형태)
+1. [구글 캘린더](https://calendar.google.com/) 접속
+2. 왼쪽 아래 **다른 캘린더** 옆의 **+** → **새 캘린더 만들기**
+3. 이름에 `보강캘린더` 입력 → **캘린더 만들기** → 잠시 뒤 왼쪽 목록에 생깁니다
+4. 왼쪽 목록에서 `보강캘린더` 에 마우스를 올리고 **⋮ → 설정 및 공유**
+5. 아래로 내려 **특정 사용자 또는 그룹과 공유** → **사용자 및 그룹 추가**
+   - 넣을 값: 서비스 계정 이메일 (`...iam.gserviceaccount.com` 로 끝나는 주소)
+     **휴가 캘린더에 넣으신 것과 똑같은 값** 입니다. 기억이 안 나면
+     휴가 캘린더(`유쌤에듀-직원휴가일정`)의 같은 화면을 열어 확인하거나,
+     3-A-1 에서 받은 JSON 키 파일의 `client_email` 값을 보세요.
+   - 권한을 **일정 변경** 이상으로 바꿉니다 (기본값 '모든 일정의 세부정보 보기' 로 두면 안 됩니다)
+   - **보내기** 클릭
+6. 같은 화면을 계속 아래로 내려 **캘린더 통합** 항목의 **캘린더 ID** 를 복사합니다
+   (`abc123...@group.calendar.google.com` 형태)
 
-> 2번 공유를 빼먹으면 캘린더가 있어도 404 가 납니다. 가장 흔한 실수입니다.
+> 5번 공유를 빼먹으면 캘린더가 있어도 404 가 납니다. 가장 흔한 실수입니다.
 
 ### 3-B-3. 환경변수 추가
 
-`.env`(로컬) 또는 Vercel → Settings → Environment Variables 에 넣습니다.
+넣을 값은 두 개입니다.
 
-| Key | Value | 필수 |
+| Key | Value | 없으면 |
 |---|---|---|
-| `GOOGLE_MAKEUP_CALENDAR_ID` | 3-B-2 에서 복사한 보강캘린더 ID | 캘린더 연동 시 |
-| `SLACK_MAKEUP_CHANNEL` | 보강 등록 내역을 공유할 채널 ID (예: `#보강-신청`) | 선택 |
+| `GOOGLE_MAKEUP_CALENDAR_ID` | 3-B-2 의 6번에서 복사한 보강캘린더 ID | 보강 일정만 캘린더에 안 올라감 (나머지는 정상) |
+| `SLACK_MAKEUP_CHANNEL` | 보강 등록 내역을 공유할 채널 ID | 등록 내역이 신청자 DM 으로만 감 |
 
-`.env` 에 넣을 때는 따옴표로 감싸고, **Vercel 에는 따옴표 없이 값만** 넣습니다.
-넣은 뒤 **Redeploy** 해야 반영됩니다.
+> 채널 ID 찾는 법: 슬랙에서 `#보강-신청` 채널 이름을 클릭 → 창 맨 아래 **채널 ID**
+> (`C` 로 시작하는 값) 옆의 복사 아이콘.
 
-`SLACK_MAKEUP_CHANNEL` 을 비워 두면 등록 내역이 신청자 DM 으로만 갑니다.
-채널 ID 는 슬랙에서 채널 이름 클릭 → 맨 아래 **채널 ID** 에 있습니다 (`C` 로 시작).
+**Vercel 에 넣는 경우**
+1. https://vercel.com → 프로젝트(`hr-manager`) 클릭
+2. 위쪽 **Settings** → 왼쪽 **Environment Variables**
+3. Key 칸에 `GOOGLE_MAKEUP_CALENDAR_ID`, Value 칸에 복사한 캘린더 ID
+   — **따옴표 없이 값만** 붙여넣습니다
+4. Environments 는 **Production / Preview / Development** 모두 체크 → **Save**
+5. `SLACK_MAKEUP_CHANNEL` 도 같은 방법으로 추가
+6. 위쪽 **Deployments** 탭 → 맨 위 배포의 **⋯ → Redeploy** → **Redeploy**
+   (환경변수는 재배포해야 반영됩니다)
+
+**로컬 `.env` 에 넣는 경우** — 이쪽은 따옴표로 감쌉니다
+```env
+GOOGLE_MAKEUP_CALENDAR_ID="abc123...@group.calendar.google.com"
+SLACK_MAKEUP_CHANNEL="C0123ABCD"
+```
+저장 후 개발 서버를 껐다 켜세요(`Ctrl+C` → `npm run dev`).
 
 확인: `설정` 화면의 **구글 캘린더 (보강)** 상태가 `연결됨` 이 되면 성공입니다.
 
 ### 3-B-4. 슬랙에 `/보강` 명령 추가
 
-**방법 A — 매니페스트 통째로 (다른 설정도 최신으로 맞춰짐, 권장)**
-`설정` → **슬랙 앱 매니페스트 복사** → https://api.slack.com/apps → 앱 선택 →
-**App Manifest** 탭 → YAML 전체를 붙여넣고 **Save Changes**.
-상단에 재설치 배너가 뜨면 **Reinstall to Workspace** 를 눌러 주세요.
+기존 슬랙 앱에 명령어를 하나 더 붙이는 작업입니다. 앱을 새로 만들 필요는 없습니다.
 
-**방법 B — 명령 하나만 손으로 추가**
-https://api.slack.com/apps → 앱 선택 → **Slash Commands** → **Create New Command**
+**방법 A — 매니페스트 통째로 붙여넣기 (권장)**
+
+배포 주소가 이미 채워진 채로 나오므로 주소를 직접 적을 일이 없습니다.
+
+1. HR 프로그램 `설정` 화면 맨 아래 **슬랙 앱 매니페스트 복사** 클릭
+   → "매니페스트를 복사했습니다" 안내가 뜹니다 (클립보드에 담김)
+2. https://api.slack.com/apps 접속 → 목록에서 **유쌤에듀 HR** 앱 클릭
+3. 왼쪽 메뉴 아래쪽 **App Manifest** 클릭
+4. 가운데 YAML 편집창에서 **전체 선택(Ctrl+A 또는 ⌘+A) → 붙여넣기(Ctrl+V)**
+5. 오른쪽 아래 **Save Changes** 클릭
+   - 확인 창이 뜨면 **Save** 를 한 번 더 누릅니다
+   - 저장할 때 슬랙이 요청 URL 3개를 실제로 호출해 확인하므로, **배포가 끝난 뒤** 하세요
+6. 화면 위쪽에 노란 띠로 `You've changed the permission scopes... Reinstall your app` 이 뜨면
+   그 안의 **Reinstall to Workspace** → **허용** 을 눌러 마무리합니다
+
+**방법 B — 명령어 하나만 손으로 추가**
+
+1. https://api.slack.com/apps → **유쌤에듀 HR** 앱 클릭
+2. 왼쪽 메뉴 **Slash Commands** → 오른쪽 **Create New Command** 버튼
+3. 네 칸을 아래처럼 채웁니다
 
 | 칸 | 넣을 값 |
 |---|---|
 | Command | `/보강` |
-| Request URL | `https://<배포주소>/api/slack/command` |
+| Request URL | HR 프로그램 `설정` → **슬랙 앱에 붙여넣을 요청 URL 보기** → *슬래시 명령* 줄의 **복사** 버튼 |
 | Short Description | `보강계획 사전신청 및 내 보강 내역` |
 | Usage Hint | `양식 열기  |  내역` |
 
-**Save** 후 상단 재설치 배너가 뜨면 **Reinstall to Workspace**.
+> Request URL 은 `https://<배포주소>/api/slack/command` 형태입니다.
+> 주소를 외울 필요 없이 `설정` 화면의 **복사** 버튼을 누르면 그대로 복사됩니다.
+> (지금 `/연차` 명령에 들어 있는 주소와 **같은 값** 이므로, `/연차` 설정을 열어 복사해도 됩니다)
+
+4. 오른쪽 아래 **Save** 클릭
+5. 위쪽에 재설치 띠가 뜨면 **Reinstall to Workspace** → **허용**
+
+**확인** — 슬랙 아무 채널에서 `/보강` 을 치면 보강계획 사전신청 양식이 열립니다.
+`/보강 내역` 은 본인 보강 목록을 보여 줍니다.
 
 ### 3-B-5. 신청 진입점 만들기 (최초 1회)
 
