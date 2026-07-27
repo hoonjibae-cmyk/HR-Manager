@@ -29,6 +29,11 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   `lib/doc-service.ts`(PDF 생성+저장+기록), `lib/email.ts`, `lib/scheduler.ts`, `lib/slack.ts`.
 - **API**: `app/api/**` — 모두 `isAuthed()` 가드(슬랙/크론 제외, 자체 서명검증).
 - **화면**: `app/(app)/**` — 서버컴포넌트가 데이터 로드, `components/*Client.tsx` 가 상호작용.
+- **명단 화면의 필터·정렬**: `components/TableTools.tsx`(`useTableSort` / `SortTh` / `FilterSelect` / `FilterBar`).
+  수십 건 규모라 서버를 다시 부르지 않고 브라우저에서 거른다 — 서버컴포넌트가 행을 평평한
+  값으로 직렬화해 내려주고(`EmployeeRow` / `LeaveRow`) 표 컴포넌트가 걸러 정렬한다.
+  열 머리글은 오름차순 → 내림차순 → 원래 순서로 돈다. 날짜는 `YYYY-MM-DD` 문자열로 넘겨
+  사전순 = 시간순이 되게 한다. 라벨로 보여주는 값(근속 "1년 6개월")은 정렬용 원시값을 따로 싣는다.
 
 ## 규칙/주의
 - **보수조건은 계약(Contract)만 고친다.** 직원 카드(Employee)의 기본급·수당·위탁비율·인센티브·

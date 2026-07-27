@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { prisma } from "@/lib/db";
 import {
   summarizeLeave,
@@ -13,8 +12,7 @@ import { PageHeader } from "@/components/ui";
 import LeaveApprovals from "@/components/LeaveApprovals";
 import LeaveImport from "@/components/LeaveImport";
 import LeaveAdjust from "@/components/LeaveAdjust";
-import CompGrantButton from "@/components/CompGrantButton";
-import { ymd } from "@/lib/format";
+import LeaveTable, { type LeaveRow } from "@/components/LeaveTable";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +71,31 @@ export default async function LeavePage({
     };
   });
 
+  const DAY = 86400000;
+  const leaveRows: LeaveRow[] = rows.map(({ e, s, c, p, weeklyContractual }) => ({
+    id: e.id,
+    name: e.name,
+    department: e.department,
+    position: e.position,
+    eligible: s.eligible,
+    forcedOff: (e as any).leaveEligible === false,
+    weeklyContractual,
+    hireDate: e.hireDate.toISOString().slice(0, 10),
+    serviceLabel: s.serviceLabel,
+    serviceDays: Math.floor((now.getTime() - e.hireDate.getTime()) / DAY),
+    periodStart: s.period.start.toISOString().slice(0, 10),
+    periodEnd: s.period.end.toISOString().slice(0, 10),
+    periodLabel: s.period.label,
+    granted: s.period.granted + s.period.carriedOver,
+    used: s.period.used,
+    remaining: s.period.remaining,
+    compGranted: c.granted,
+    compUsed: c.used,
+    compRemaining: c.remaining,
+    rangeStatutory: p.statutory,
+    rangeComp: p.comp,
+  }));
+
   const serializedReqs = pending.map((r) => ({
     id: r.id,
     startDate: r.startDate.toISOString(),
@@ -117,9 +140,9 @@ export default async function LeavePage({
         </div>
       </div>
 
-      <div className="card overflow-x-auto">
-        <div className="px-5 py-3 border-b border-slate-100 flex flex-wrap items-center gap-3">
-          <span className="font-bold text-slate-800">직원별 연차 현황</span>
+      <LeaveTable
+        rows={leaveRows}
+        rangeLabel={
           <form method="get" className="flex items-center gap-2 text-xs">
             <span className="text-slate-400">사용 조회 기간</span>
             <input type="date" name="from" defaultValue={fmt(from)} className="input py-1 w-36 text-xs" />
@@ -127,76 +150,18 @@ export default async function LeavePage({
             <input type="date" name="to" defaultValue={fmt(to)} className="input py-1 w-36 text-xs" />
             <button className="btn-outline py-1 px-2.5 text-xs">조회</button>
           </form>
-        </div>
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50">
-            <tr>
-              <th className="th" rowSpan={2}>직원</th>
-              <th className="th" rowSpan={2}>근속</th>
-              <th className="th" rowSpan={2}>이번 연차기간</th>
-              <th className="th text-center border-l border-slate-200" colSpan={3}>본래 연차 <span className="font-normal text-slate-400">(이번 기간)</span></th>
-              <th className="th text-center border-l border-slate-200" colSpan={3}>대휴보상연차</th>
-              <th className="th text-center border-l border-slate-200" colSpan={2}>기간 내 사용</th>
-              <th className="th" rowSpan={2}></th>
-            </tr>
-            <tr>
-              <th className="th text-right border-l border-slate-200">발생</th>
-              <th className="th text-right">사용</th>
-              <th className="th text-right">잔여</th>
-              <th className="th text-right border-l border-slate-200">발생</th>
-              <th className="th text-right">사용</th>
-              <th className="th text-right">잔여</th>
-              <th className="th text-right border-l border-slate-200">연차</th>
-              <th className="th text-right">대휴</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ e, s, c, p, weeklyContractual }) => (
-              <tr key={e.id} className="hover:bg-slate-50">
-                <td className="td">
-                  <Link href={`/leave/${e.id}`} className="font-semibold text-brand-700 hover:underline">{e.name}</Link>
-                  {!s.eligible && (
-                    <span className="ml-2 pill bg-slate-100 text-slate-500">연차 미적용</span>
-                  )}
-                  <div className="text-xs text-slate-400">{e.department} {e.position}</div>
-                  {!s.eligible && (
-                    <div className="text-[11px] text-slate-400">
-                      주 소정 {weeklyContractual.toFixed(1)}시간
-                      {(e as any).leaveEligible === false ? " · 계약상 미적용" : " · 15시간 미만"}
-                    </div>
-                  )}
-                </td>
-                <td className="td text-slate-500 text-xs">{s.serviceLabel}</td>
-                <td className="td text-slate-500 text-xs tnum whitespace-nowrap">
-                  {fmt(s.period.start)} ~ {fmt(s.period.end)}
-                  <div className="text-slate-300">{s.period.label}</div>
-                </td>
-                <td className="td text-right tnum border-l border-slate-100">
-                  {s.period.granted + s.period.carriedOver}
-                </td>
-                <td className="td text-right tnum text-slate-500">{s.period.used}</td>
-                <td className="td text-right tnum font-bold text-brand-600">{s.period.remaining}</td>
-                <td className="td text-right tnum border-l border-slate-100">{c.granted}</td>
-                <td className="td text-right tnum text-slate-500">{c.used}</td>
-                <td className="td text-right tnum font-bold text-emerald-600">{c.remaining}</td>
-                <td className="td text-right tnum border-l border-slate-100">{p.statutory || "-"}</td>
-                <td className="td text-right tnum">{p.comp || "-"}</td>
-                <td className="td text-right">
-                  <CompGrantButton employeeId={e.id} employeeName={e.name} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className="text-xs text-slate-400 px-5 py-3 border-t border-slate-100">
-          · <b>본래 연차</b>: 근로기준법 §60 자동 산정 — <b>이번 연차기간(입사일 기준 1년)</b> 의 발생·사용·잔여.
-          지난 기간 미사용분은 기간 종료일에 소멸되어 넘어오지 않는다 &nbsp;
-          · <b>대휴보상연차</b>: 지정 휴일 근무 보상 등 — <b>"+대휴"</b> 버튼으로 운영자가 직접 부여/차감 &nbsp;
-          · <b>기간 내 사용</b>: 위에서 지정한 기간에 사용한 일수 (연차/대휴 구분) &nbsp;
-          · <b>연차 미적용</b>: 1주 소정근로시간이 15시간 미만인 초단시간근로자는 연차·주휴가 발생하지 않는다
-          (근로기준법 §18③). 직원 카드의 <b>연차 적용</b> 항목으로 계약에 맞춰 바꿀 수 있다.
-        </p>
-      </div>
+        }
+      />
+
+      <p className="text-xs text-slate-400 mt-3 leading-relaxed">
+        · <b>본래 연차</b>: 근로기준법 §60 자동 산정 — <b>이번 연차기간(입사일 기준 1년)</b> 의 발생·사용·잔여.
+        지난 기간 미사용분은 기간 종료일에 소멸되어 넘어오지 않는다 &nbsp;
+        · <b>대휴보상연차</b>: 지정 휴일 근무 보상 등 — <b>&quot;+대휴&quot;</b> 버튼으로 운영자가 직접 부여/차감 &nbsp;
+        · <b>기간 내 사용</b>: 위에서 지정한 기간에 사용한 일수 (연차/대휴 구분) &nbsp;
+        · <b>연차 미적용</b>: 1주 소정근로시간이 15시간 미만인 초단시간근로자는 연차·주휴가 발생하지 않는다
+        (근로기준법 §18③). 직원 카드의 <b>연차 적용</b> 항목으로 계약에 맞춰 바꿀 수 있다 &nbsp;
+        · 열 머리글을 누르면 오름차순 → 내림차순 → 원래 순서로 정렬된다.
+      </p>
     </div>
   );
 }
