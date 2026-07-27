@@ -10,6 +10,10 @@ import {
   toIncomeType,
   toPayScheme,
   IMPORT_COLUMNS,
+  normalizeRRN,
+  rrnToBirth,
+  maskSensitive,
+  planFill,
 } from "./employee-import";
 
 function sheet(rows: any[][]): Buffer {
@@ -221,5 +225,128 @@ describe("템플릿", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ name: "홍길동", hireDate: "2025-03-01", baseWage: 3_000_000 });
     expect(rows[0].errors).toEqual([]);
+  });
+});
+
+describe("주민등록번호 정규화", () => {
+  it("하이픈 유무·공백을 흡수한다", () => {
+    expect(normalizeRRN("9001011234567").value).toBe("900101-1234567");
+    expect(normalizeRRN("900101 - 1234567").value).toBe("900101-1234567");
+    expect(normalizeRRN("").value).toBeNull();
+  });
+  it("자릿수·형식이 틀리면 오류를 돌려준다", () => {
+    expect(normalizeRRN("90010112345").error).toContain("13자리");
+    expect(normalizeRRN("901301-1234567").error).toContain("생년월일");
+    expect(normalizeRRN("900101-9234567").error).toContain("성별");
+  });
+  it("생년월일을 성별자리로 세기 판정해 뽑아낸다", () => {
+    expect(rrnToBirth("900101-1234567")).toBe("1990-01-01");
+    expect(rrnToBirth("050407-3234567")).toBe("2005-04-07");
+    expect(rrnToBirth("990101-5234567")).toBe("1999-01-01"); // 외국인
+  });
+  it("화면 표시는 뒤 6자리를 가린다", () => {
+    expect(maskSensitive("rrn", "900101-1234567")).toBe("900101-1••••••");
+    expect(maskSensitive("bankAccount", "123456789")).toBe("•••••6789");
+    expect(maskSensitive("email", "a@b.com")).toBe("a@b.com");
+  });
+});
+
+describe("planFill — 기존 직원 정보 채우기", () => {
+  const emps = [
+    { id: 1, empNo: "E001", name: "김지연", email: null, phone: "010-1111-1111", rrn: null, dependents: 1 },
+    { id: 2, empNo: "E002", name: "안정미", email: "old@x.com", phone: null, rrn: null, dependents: 1 },
+  ];
+  const parse = (rows: any[][]) => parseEmployeeWorkbook(sheet(rows), { mode: "fill" });
+  const fill = (rows: any[][], employees: any[] = emps, opts: any = {}) => {
+    const p = parse(rows);
+    return planFill(p.rows, employees as any, { ...opts, presentKeys: p.presentKeys });
+  };
+
+  it("입사일 없이 성명만 있어도 읽는다", () => {
+    const { rows } = parse([
+      ["성명", "이메일"],
+      ["김지연", "kim@x.com"],
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].errors).toEqual([]);
+  });
+
+  it("파일에 없는 열은 건드리지 않는다 (파서 기본값이 새어 들어오면 안 된다)", () => {
+    // 부양가족수는 파서가 늘 1로 채우지만, 열이 없으면 변경 대상이 아니다
+    const plan = fill([
+      ["성명", "이메일"],
+      ["김지연", "kim@x.com"],
+    ]);
+    expect(plan.rows[0].changes.map((c) => c.field)).toEqual(["email"]);
+  });
+
+  it("비어 있는 항목만 채우고, 값이 있으면 유지한다", () => {
+    const plan = fill([
+      ["성명", "이메일", "연락처"],
+      ["김지연", "kim@x.com", "010-9999-9999"],
+    ]);
+    expect(plan.rows[0].changes.map((c) => c.field)).toEqual(["email"]);
+    expect(plan.rows[0].kept.map((c) => c.field)).toEqual(["phone"]);
+    expect(plan.changeCount).toBe(1);
+  });
+
+  it("덮어쓰기를 켜면 기존 값도 바꾼다", () => {
+    const plan = fill([
+      ["성명", "이메일"],
+      ["안정미", "new@x.com"],
+    ], emps, { overwrite: true });
+    expect(plan.rows[0].changes[0]).toMatchObject({ field: "email", from: "old@x.com", to: "new@x.com" });
+  });
+
+  it("같은 값이면 변경으로 세지 않는다", () => {
+    const plan = fill([
+      ["성명", "이메일"],
+      ["안정미", "old@x.com"],
+    ], emps, { overwrite: true });
+    expect(plan.changeCount).toBe(0);
+  });
+
+  it("등록되지 않은 사람은 오류로 남기고 건너뛴다", () => {
+    const plan = fill([
+      ["성명", "이메일"],
+      ["없는사람", "x@x.com"],
+    ]);
+    expect(plan.rows[0].errors[0]).toContain("일치하는 사람이 없습니다");
+    expect(plan.unmatched).toEqual(["없는사람"]);
+  });
+
+  it("동명이인은 사번 없이는 채우지 않는다", () => {
+    const dup = [...emps, { id: 3, empNo: "E003", name: "김지연", email: null, dependents: 1 }];
+    expect(
+      fill([
+        ["성명", "이메일"],
+        ["김지연", "x@x.com"],
+      ], dup).rows[0].errors[0]
+    ).toContain("2명");
+
+    const plan = fill([
+      ["사번", "성명", "이메일"],
+      ["E003", "김지연", "x@x.com"],
+    ], dup);
+    expect(plan.rows[0].employeeId).toBe(3);
+    expect(plan.rows[0].matchedBy).toBe("empNo");
+  });
+
+  it("주민번호를 넣으면 생년월일까지 함께 채워진다", () => {
+    const plan = fill([
+      ["성명", "주민등록번호"],
+      ["김지연", "900101-1234567"],
+    ]);
+    expect(plan.rows[0].data).toMatchObject({ rrn: "900101-1234567", birth: "1990-01-01" });
+    // 화면에는 가려서 보여준다
+    expect(plan.rows[0].changes.find((c) => c.field === "rrn")!.to).toBe("900101-1••••••");
+  });
+
+  it("보수조건 열이 섞여 있어도 무시한다 (계약이 정하는 값)", () => {
+    const plan = fill([
+      ["성명", "이메일", "기본급", "위탁비율"],
+      ["김지연", "kim@x.com", "9,999,999", "99%"],
+    ]);
+    expect(Object.keys(plan.rows[0].data)).toEqual(["email"]);
   });
 });

@@ -75,6 +75,12 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - **연차 규칙 변경** → `lib/leave.ts`(`annualLeaveDays`, `generateGrants`) + 테스트.
 - **직원 명단 일괄 등록** → `lib/employee-import.ts`(엑셀 파서·헤더 alias·값 정규화, 테스트 있음)
   + `/api/employees/import`(GET=빈 양식, POST=미리보기/등록). 등록 시 초기 계약도 함께 만든다.
+- **이미 등록된 직원의 빈 인적사항 채우기** → 같은 화면의 *정보 채우기* 탭
+  (`parseEmployeeWorkbook(buf, {mode:"fill"})` → `planFill()` → `mode=fill-preview|fill-commit`).
+  사번→성명 순으로 직원을 찾고, **비어 있는 항목만** 채운다(덮어쓰기는 선택). 채울 수 있는 건
+  `FILL_FIELDS`(인적사항)뿐 — 보수조건은 계약이 정하므로 이 경로로 바뀌지 않는다.
+  파일에 **없는 열은 건드리지 않는다**(`presentKeys`) — 파서 기본값(부양가족수 1 등)이 새어 들어가면 안 된다.
+  주민번호는 `normalizeRRN()` 으로 형식을 통일하고 생년월일을 자동 도출, 화면·이력에는 마스킹해 남긴다.
 - **슬랙 명령 추가** → `app/api/slack/command/route.ts`.
 - **시간기록표 양식 변경** → `lib/timesheet.ts`(파서·주휴 산정, 테스트 있음) + `/api/payroll/timesheet`.
   주휴 기준: 주(월~일) 실근로 15시간 '초과' 시 min(주근로/5, 8)시간. 휴게 30분은 Employee.breakPaid 로 유급/무급.

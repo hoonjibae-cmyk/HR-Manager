@@ -153,6 +153,43 @@ export function toHoursOrNull(v: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/**
+ * 주민등록번호 정규화 — "9001011234567" / "900101 - 1234567" → "900101-1234567".
+ * 자릿수·생년월일·성별자리만 본다. 2020-10 이후 발급분은 뒤 6자리가 임의값이라
+ * 검증번호(checksum)로는 판별할 수 없어 쓰지 않는다.
+ */
+export function normalizeRRN(v: unknown): { value: string | null; error?: string } {
+  const raw = String(v ?? "").trim();
+  if (!raw) return { value: null };
+  const d = raw.replace(/\D/g, "");
+  if (d.length !== 13) return { value: null, error: `주민등록번호 자릿수가 13자리가 아닙니다 (${d.length}자리)` };
+  const mm = Number(d.slice(2, 4));
+  const dd = Number(d.slice(4, 6));
+  const g = Number(d[6]);
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31)
+    return { value: null, error: "주민등록번호 앞 6자리가 생년월일 형식이 아닙니다" };
+  if (g < 1 || g > 8) return { value: null, error: "주민등록번호 뒤 첫 자리(성별)가 올바르지 않습니다" };
+  return { value: `${d.slice(0, 6)}-${d.slice(6)}` };
+}
+
+/** 주민등록번호 → 생년월일 YYYY-MM-DD (성별자리로 세기 판정) */
+export function rrnToBirth(rrn: unknown): string | null {
+  const { value } = normalizeRRN(rrn);
+  if (!value) return null;
+  const d = value.replace("-", "");
+  const g = Number(d[6]);
+  const century = g === 1 || g === 2 || g === 5 || g === 6 ? 1900 : g === 3 || g === 4 || g === 7 || g === 8 ? 2000 : 1800;
+  return `${century + Number(d.slice(0, 2))}-${d.slice(2, 4)}-${d.slice(4, 6)}`;
+}
+
+/** 화면·로그에 보일 때는 뒤 6자리를 가린다 */
+export function maskSensitive(key: string, v: string): string {
+  if (!v) return v;
+  if (key === "rrn") return v.replace(/^(\d{6})-?(\d)\d{6}$/, "$1-$2••••••");
+  if (key === "bankAccount") return v.length > 4 ? `${"•".repeat(v.length - 4)}${v.slice(-4)}` : v;
+  return v;
+}
+
 /** "50%" / 50 / 0.5 → 0.5 */
 export function toRatio(v: unknown): number | null {
   if (v == null || v === "") return null;
@@ -188,16 +225,35 @@ export interface ParseResult {
   unknownHeaders: string[];
   /** 인식한 헤더 → 내부 키 */
   mapped: Array<{ header: string; key: string }>;
+  /**
+   * 파일에 실제로 있던 열의 키.
+   * 파서가 기본값을 채워 넣는 항목(부양가족수 등)을 '적어 낸 값'과 구분하는 데 쓴다 —
+   * 정보 채우기에서 열도 없는 항목이 덮어써지면 안 된다.
+   */
+  presentKeys: string[];
+}
+
+export interface ParseOptions {
+  /**
+   * create — 신규 등록용. 입사일·급여형태 등 등록에 필요한 항목을 검사한다.
+   * fill   — 이미 등록된 직원의 빈 인적사항을 채우는 용도. 이름(또는 사번)만 있으면 되고
+   *          보수·계약 관련 검사는 하지 않는다(그 값은 계약이 정하므로 여기서 건드리지 않는다).
+   */
+  mode?: "create" | "fill";
 }
 
 /** 엑셀/CSV 버퍼 → 직원 행 목록 (첫 시트, 첫 행이 헤더) */
-export function parseEmployeeWorkbook(buf: Buffer | Uint8Array): ParseResult {
+export function parseEmployeeWorkbook(
+  buf: Buffer | Uint8Array,
+  opts: ParseOptions = {}
+): ParseResult {
+  const fillMode = opts.mode === "fill";
   const wb = XLSX.read(buf, { type: "buffer", cellDates: true });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  if (!ws) return { rows: [], unknownHeaders: [], mapped: [] };
+  if (!ws) return { rows: [], unknownHeaders: [], mapped: [], presentKeys: [] };
 
   const grid: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
-  if (!grid.length) return { rows: [], unknownHeaders: [], mapped: [] };
+  if (!grid.length) return { rows: [], unknownHeaders: [], mapped: [], presentKeys: [] };
 
   // 헤더 행 찾기 — '성명/이름' 이 있는 첫 행
   let headerIdx = grid.findIndex((r) => r.some((c) => headerKey(String(c)) === "name"));
@@ -230,14 +286,14 @@ export function parseEmployeeWorkbook(buf: Buffer | Uint8Array): ParseResult {
     if (!name) continue; // 이름 없는 줄은 조용히 건너뛴다 (합계행 등)
 
     const hireDate = toYmd(get("hireDate"));
-    if (!hireDate) errors.push("입사일자를 읽을 수 없습니다");
+    if (!hireDate && !fillMode) errors.push("입사일자를 읽을 수 없습니다");
 
     const payScheme = toPayScheme(get("payScheme"));
-    if (!payScheme) {
+    if (!payScheme && !fillMode) {
       warnings.push("급여형태를 알 수 없어 월급제로 등록합니다");
     }
     const incomeType = toIncomeType(get("incomeType"));
-    if (!incomeType) {
+    if (!incomeType && !fillMode) {
       warnings.push("세무구분을 알 수 없어 4대보험으로 등록합니다");
     }
 
@@ -247,22 +303,30 @@ export function parseEmployeeWorkbook(buf: Buffer | Uint8Array): ParseResult {
     const incThresholdRaw = get("incThreshold");
     const incPerStudentRaw = get("incPerStudent");
 
-    if (scheme === "RATIO" && ratioPercent == null)
-      errors.push("완전비율제인데 위탁비율이 없습니다");
-    if (scheme !== "RATIO" && baseWage <= 0)
-      warnings.push("기본급이 0원입니다");
-    if (scheme === "INCENTIVE" && (!incThresholdRaw || !incPerStudentRaw))
-      warnings.push("인센티브 기준인원·기준금액이 비어 있습니다");
+    if (!fillMode) {
+      if (scheme === "RATIO" && ratioPercent == null)
+        errors.push("완전비율제인데 위탁비율이 없습니다");
+      if (scheme !== "RATIO" && baseWage <= 0) warnings.push("기본급이 0원입니다");
+      if (scheme === "INCENTIVE" && (!incThresholdRaw || !incPerStudentRaw))
+        warnings.push("인센티브 기준인원·기준금액이 비어 있습니다");
+    }
 
     const resignDate = toYmd(get("resignDate")) ?? undefined;
     const contractStart = toYmd(get("contractStart")) ?? hireDate ?? "";
     const contractEnd = toYmd(get("contractEnd")) ?? undefined;
-    if (hireDate && contractStart && contractStart < hireDate)
-      errors.push("계약시작일이 입사일보다 빠릅니다");
-    if (contractEnd && contractStart && contractEnd < contractStart)
-      errors.push("계약종료일이 계약시작일보다 빠릅니다");
-    if (resignDate && hireDate && resignDate < hireDate)
-      errors.push("퇴사일이 입사일보다 빠릅니다");
+    if (!fillMode) {
+      if (hireDate && contractStart && contractStart < hireDate)
+        errors.push("계약시작일이 입사일보다 빠릅니다");
+      if (contractEnd && contractStart && contractEnd < contractStart)
+        errors.push("계약종료일이 계약시작일보다 빠릅니다");
+      if (resignDate && hireDate && resignDate < hireDate)
+        errors.push("퇴사일이 입사일보다 빠릅니다");
+    }
+
+    // 주민등록번호는 자릿수·형식만 확인하고 하이픈 표기를 통일한다
+    const rrnRaw = get("rrn");
+    const rrnParsed = normalizeRRN(rrnRaw);
+    if (rrnParsed.error) errors.push(rrnParsed.error);
 
     const str = (k: string) => {
       const v = String(get(k) ?? "").trim();
@@ -273,8 +337,9 @@ export function parseEmployeeWorkbook(buf: Buffer | Uint8Array): ParseResult {
       rowNo: i + 1,
       empNo: str("empNo"),
       name,
-      rrn: str("rrn"),
-      birth: toYmd(get("birth")) ?? str("birth"),
+      rrn: rrnParsed.value ?? undefined,
+      // 생년월일이 비어 있으면 주민등록번호에서 끌어온다
+      birth: toYmd(get("birth")) ?? str("birth") ?? rrnToBirth(rrnParsed.value) ?? undefined,
       department: str("department"),
       position: str("position"),
       duty: str("duty"),
@@ -331,7 +396,12 @@ export function parseEmployeeWorkbook(buf: Buffer | Uint8Array): ParseResult {
     if (idxs.length > 1)
       idxs.forEach((i) => rows[i].errors.push(`사번 ${empNo} 가 파일 안에서 중복됩니다`));
 
-  return { rows, unknownHeaders, mapped };
+  return {
+    rows,
+    unknownHeaders,
+    mapped,
+    presentKeys: [...new Set(colKey.filter((k): k is string => !!k))],
+  };
 }
 
 /**
@@ -393,6 +463,207 @@ export function buildTemplateWorkbook(): Buffer {
   ];
   const gs = XLSX.utils.aoa_to_sheet(guide);
   gs["!cols"] = [{ wch: 18 }, { wch: 6 }, { wch: 40 }, { wch: 22 }];
+  XLSX.utils.book_append_sheet(wb, gs, "작성안내");
+
+  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+}
+
+/* ============================ 기존 직원 정보 채우기 ============================ */
+//
+// 이미 등록된 직원의 '비어 있는 인적사항' 만 채운다.
+// 보수조건(기본급·수당·비율·포괄임금 시간)은 계약이 정하므로 여기서 절대 손대지 않는다
+// — 그쪽을 바꾸려면 계약을 수정하거나 신규 계약을 써야 한다(lib/contracts.ts).
+
+/** 채울 수 있는 항목 — 인적사항만 */
+export const FILL_FIELDS: Array<{
+  key: string;
+  label: string;
+  kind: "text" | "int";
+  sensitive?: boolean;
+}> = [
+  { key: "rrn", label: "주민등록번호", kind: "text", sensitive: true },
+  { key: "birth", label: "생년월일", kind: "text" },
+  { key: "department", label: "부서", kind: "text" },
+  { key: "position", label: "직책", kind: "text" },
+  { key: "duty", label: "업무", kind: "text" },
+  { key: "phone", label: "연락처", kind: "text" },
+  { key: "email", label: "이메일", kind: "text" },
+  { key: "address", label: "주소", kind: "text" },
+  { key: "bankName", label: "은행", kind: "text" },
+  { key: "bankAccount", label: "계좌번호", kind: "text", sensitive: true },
+  { key: "dependents", label: "부양가족수", kind: "int" },
+];
+
+export interface FillChange {
+  field: string;
+  label: string;
+  /** 화면 표시용 — 민감항목은 가려서 담는다 */
+  from: string;
+  to: string;
+}
+
+export interface FillPlanRow {
+  rowNo: number;
+  name: string;
+  employeeId: number | null;
+  matchedBy: "empNo" | "name" | null;
+  /** 실제로 적용될 변경 */
+  changes: FillChange[];
+  /** 이미 값이 있어 건드리지 않는 항목 (덮어쓰기를 켜면 적용 대상) */
+  kept: FillChange[];
+  /** 커밋에 쓸 실제 값 (미리보기 응답에는 싣지 않는다) */
+  data: Record<string, any>;
+  errors: string[];
+  warnings: string[];
+}
+
+export interface FillPlan {
+  rows: FillPlanRow[];
+  matchedCount: number;
+  changeCount: number;
+  unmatched: string[];
+}
+
+/** 명단 파일에 담긴 사람을 이미 등록된 직원과 맞춘다 (사번 우선, 없으면 성명) */
+export interface FillTarget {
+  id: number;
+  empNo: string;
+  name: string;
+  [field: string]: any;
+}
+
+const isEmpty = (v: any) => v == null || String(v).trim() === "";
+
+/**
+ * 채우기 계획 수립 (순수 함수).
+ * overwrite=false(기본)면 대상 직원의 값이 비어 있는 항목만 채운다.
+ */
+export function planFill(
+  rows: ImportRow[],
+  employees: FillTarget[],
+  opts: {
+    overwrite?: boolean;
+    /** 파일에 실제로 있던 열만 대상으로 한다 (parseEmployeeWorkbook 의 presentKeys) */
+    presentKeys?: string[];
+  } = {}
+): FillPlan {
+  const allowed = opts.presentKeys ? new Set(opts.presentKeys) : null;
+  // 주민등록번호 열이 있으면 거기서 뽑아낸 생년월일도 채울 수 있게 한다
+  if (allowed?.has("rrn")) allowed.add("birth");
+  const byNo = new Map<string, FillTarget>();
+  const byName = new Map<string, FillTarget[]>();
+  for (const e of employees) {
+    if (e.empNo) byNo.set(e.empNo.trim(), e);
+    const list = byName.get(e.name.trim()) ?? [];
+    list.push(e);
+    byName.set(e.name.trim(), list);
+  }
+
+  const plan: FillPlanRow[] = [];
+  const unmatched: string[] = [];
+
+  for (const r of rows) {
+    const errors = [...r.errors];
+    const warnings: string[] = [];
+    let target: FillTarget | null = null;
+    let matchedBy: "empNo" | "name" | null = null;
+
+    if (r.empNo && byNo.has(r.empNo.trim())) {
+      target = byNo.get(r.empNo.trim())!;
+      matchedBy = "empNo";
+    } else {
+      const cands = byName.get(r.name.trim()) ?? [];
+      if (cands.length === 1) {
+        target = cands[0];
+        matchedBy = "name";
+      } else if (cands.length > 1) {
+        errors.push(`'${r.name}' 이름의 직원이 ${cands.length}명입니다 — 사번 열을 넣어 구분해 주세요`);
+      } else {
+        errors.push("등록된 직원 중 일치하는 사람이 없습니다");
+        unmatched.push(r.name);
+      }
+    }
+
+    const changes: FillChange[] = [];
+    const kept: FillChange[] = [];
+    const data: Record<string, any> = {};
+
+    if (target && !errors.length) {
+      for (const f of FILL_FIELDS) {
+        // 파일에 그 열이 없으면 건너뛴다. 파서 기본값(부양가족수 1 등)이 새어 들어오면 안 된다.
+        if (allowed && !allowed.has(f.key)) continue;
+        const incomingRaw = (r as any)[f.key];
+        if (isEmpty(incomingRaw)) continue;
+        const incoming = f.kind === "int" ? Number(incomingRaw) : String(incomingRaw).trim();
+        const current = target[f.key];
+        if (!isEmpty(current) && String(current) === String(incoming)) continue; // 같은 값 — 변경 아님
+
+        const show = (v: any) =>
+          isEmpty(v) ? "(비어 있음)" : f.sensitive ? maskSensitive(f.key, String(v)) : String(v);
+        const entry: FillChange = {
+          field: f.key,
+          label: f.label,
+          from: show(current),
+          to: show(incoming),
+        };
+        if (isEmpty(current) || opts.overwrite) {
+          changes.push(entry);
+          data[f.key] = incoming;
+        } else {
+          kept.push(entry);
+        }
+      }
+      if (!changes.length && !kept.length) warnings.push("채울 내용이 없습니다");
+      else if (!changes.length) warnings.push("이미 값이 있어 건너뜁니다 (덮어쓰기 필요)");
+    }
+
+    plan.push({
+      rowNo: r.rowNo,
+      name: r.name,
+      employeeId: target?.id ?? null,
+      matchedBy,
+      changes,
+      kept,
+      data,
+      errors,
+      warnings,
+    });
+  }
+
+  return {
+    rows: plan,
+    matchedCount: plan.filter((p) => p.employeeId != null && !p.errors.length).length,
+    changeCount: plan.reduce((a, p) => a + p.changes.length, 0),
+    unmatched,
+  };
+}
+
+/**
+ * 정보 채우기용 빈 양식 — 성명 + 인적사항만.
+ * 보수조건 열이 없으니 실수로 급여를 덮어쓸 여지가 없다.
+ */
+export function buildFillTemplateWorkbook(employees: Array<{ empNo: string; name: string }> = []): Buffer {
+  const keys = ["empNo", "name", ...FILL_FIELDS.map((f) => f.key)];
+  const headers = keys.map((k) => IMPORT_COLUMNS.find((c) => c.key === k)?.header ?? k);
+  const wb = XLSX.utils.book_new();
+
+  // 등록된 직원을 미리 깔아 두면 이름을 다시 적을 필요가 없다
+  const body = employees.map((e) => [e.empNo, e.name, ...FILL_FIELDS.map(() => "")]);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...body]);
+  ws["!cols"] = headers.map((h) => ({ wch: Math.max(12, h.length + 4) }));
+  XLSX.utils.book_append_sheet(wb, ws, "직원정보");
+
+  const guide = [
+    ["정보 채우기 안내"],
+    ["· 이미 등록된 직원의 '비어 있는 인적사항' 을 채우는 양식입니다."],
+    ["· 사번·성명으로 직원을 찾습니다. 동명이인이 있으면 사번을 꼭 적어 주세요."],
+    ["· 채울 항목만 적으면 됩니다. 빈 칸은 건드리지 않습니다."],
+    ["· 기본급·수당·위탁비율 등 보수조건은 이 양식으로 바꿀 수 없습니다 (계약에서 수정)."],
+    ["· 주민등록번호는 900101-1234567 처럼 적어 주세요. 하이픈은 없어도 됩니다."],
+    ["· 생년월일을 비워 두면 주민등록번호에서 자동으로 채웁니다."],
+  ].map((r) => [r[0]]);
+  const gs = XLSX.utils.aoa_to_sheet(guide);
+  gs["!cols"] = [{ wch: 70 }];
   XLSX.utils.book_append_sheet(wb, gs, "작성안내");
 
   return XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
