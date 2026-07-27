@@ -150,7 +150,8 @@ export const DAY_KO: Record<string, string> = {
   sun: "일",
 };
 
-export const DEPARTMENTS = ["교수부", "학습지원팀", "조교팀", "경영지원"];
+// 부서 — 노션 조직도 기준 (교수부 고등·중등은 '교수부'로 통일, 원장·부원장만 경영지원)
+export const DEPARTMENTS = ["교수부", "조교팀", "교육운영팀", "경영지원"];
 
 /** 근로시간표 한 요일 */
 export interface ScheduleDay {
