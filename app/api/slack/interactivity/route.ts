@@ -15,7 +15,18 @@ import {
   cancelApprovalBlocks,
   recordBlocks,
   postMessage,
+  makeupModalView,
+  readMakeupModal,
+  makeupRecordBlocks,
 } from "@/lib/slack";
+import {
+  parseMakeupInput,
+  makeupDateLabel,
+  makeupListText,
+} from "@/lib/makeup-slack";
+import { createMakeupSession } from "@/lib/makeup-service";
+import { makeupCalendarConfigured } from "@/lib/gcal";
+import { MAKEUP_CATEGORY_LABEL } from "@/lib/constants";
 import {
   approveLeaveRequest,
   rejectLeaveRequest,
@@ -37,6 +48,7 @@ import {
 import { refreshHomeTab } from "@/lib/home-tab";
 import { createLeaveEvent, deleteLeaveEvent, gcalConfigured } from "@/lib/gcal";
 import { LEAVE_TYPE_LABEL } from "@/lib/constants";
+import { logActivity } from "@/lib/activity";
 import { ymd } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -100,6 +112,22 @@ async function openLeaveForm(triggerId: string, userId: string, channelId?: stri
       period: modalPeriod(summary),
       channel: channelId,
     })
+  );
+}
+
+/**
+ * 보강계획 사전신청 모달 열기 — 채널 버튼·앱 홈·슬래시 명령이 공유한다.
+ * 휴가와 달리 완전비율제도 막지 않는다 — 수당은 안 붙지만 일정 공유는 필요하다.
+ */
+async function openMakeupForm(triggerId: string, userId: string, channelId?: string) {
+  const { emp, info } = await resolveEmployee(userId);
+  if (!emp) {
+    await tellUser(channelId, userId, notLinkedText(info));
+    return;
+  }
+  await openView(
+    triggerId,
+    makeupModalView({ empName: emp.name, channel: channelId, ratio: emp.payScheme === "RATIO" })
   );
 }
 
@@ -167,6 +195,78 @@ export async function POST(req: Request) {
     }).catch(() => {});
     await refreshHomeTab(userId).catch(() => {});
 
+    return Response.json({ response_action: "clear" });
+  }
+
+  /* ---------- 보강계획 사전신청 모달 제출 ---------- */
+  if (payload.type === "view_submission" && payload.view?.callback_id === "makeup_plan_submit") {
+    const userId = payload.user?.id as string;
+    const { emp, info } = await resolveEmployee(userId);
+    if (!emp) {
+      return Response.json({
+        response_action: "errors",
+        errors: { target: notLinkedText(info).replace(/\n/g, " ").slice(0, 150) },
+      });
+    }
+    const f = readMakeupModal(payload.view);
+    const parsed = parseMakeupInput(f);
+    if (!parsed.ok) {
+      return Response.json({
+        response_action: "errors",
+        errors: { [parsed.field ?? "sdate"]: parsed.error ?? "입력을 확인해 주세요." },
+      });
+    }
+
+    const row = await createMakeupSession({
+      employeeId: emp.id,
+      planStart: parsed.start!,
+      planEnd: parsed.end!,
+      category: f.category,
+      targetClass: f.targetClass,
+      headcount: f.headcount,
+      detail: f.detail,
+      note: f.note,
+      source: "SLACK",
+      slackUserId: userId,
+    });
+
+    const dateLabel = makeupDateLabel(parsed.start!, parsed.end!);
+    const blocks = makeupRecordBlocks({
+      name: emp.name,
+      dept: emp.department,
+      categoryLabel: MAKEUP_CATEGORY_LABEL[f.category] ?? f.category,
+      dateLabel,
+      targetClass: f.targetClass,
+      headcount: f.headcount,
+      detail: f.detail,
+      note: f.note,
+      calendarSynced: makeupCalendarConfigured(),
+    });
+
+    // 신청자 확인 DM
+    await postMessage(userId, `📚 보강계획이 등록되었습니다 — ${dateLabel}`, blocks).catch(() => {});
+    // 공유 채널이 지정돼 있으면 함께 게시 (승인 버튼 없음 — 기록용)
+    let meta: any = {};
+    try {
+      meta = JSON.parse(payload.view.private_metadata || "{}");
+    } catch {}
+    const channel = process.env.SLACK_MAKEUP_CHANNEL || meta.channel;
+    if (channel)
+      await postMessage(channel, `📚 보강계획 등록: ${emp.name} · ${dateLabel}`, blocks).catch(() => {});
+
+    await logActivity({
+      action: "MAKEUP_CREATE",
+      actor: "SLACK",
+      actorName: userId,
+      employeeId: emp.id,
+      target: emp.name,
+      summary: `${emp.name}님이 보강계획을 사전신청했습니다 — ${dateLabel} · ${
+        MAKEUP_CATEGORY_LABEL[f.category] ?? f.category
+      } (${f.targetClass}).`,
+      meta: { makeupId: row.id, category: f.category, targetClass: f.targetClass },
+    }).catch(() => {});
+
+    await refreshHomeTab(userId).catch(() => {});
     return Response.json({ response_action: "clear" });
   }
 
@@ -244,6 +344,29 @@ export async function POST(req: Request) {
       payload.user?.id,
       payload.container?.channel_id || payload.channel?.id
     );
+    return new Response("", { status: 200 });
+  }
+
+  /* ---------- '보강계획 신청' 버튼 (채널 · 앱 홈) ---------- */
+  if (action.action_id === "open_makeup_modal") {
+    await openMakeupForm(
+      payload.trigger_id,
+      payload.user?.id,
+      payload.container?.channel_id || payload.channel?.id
+    );
+    return new Response("", { status: 200 });
+  }
+
+  /* ---------- '내 보강 내역' 버튼 ---------- */
+  if (action.action_id === "check_makeup_list") {
+    const uid = payload.user?.id as string;
+    const channelId = payload.container?.channel_id || payload.channel?.id;
+    const { emp, info } = await resolveEmployee(uid);
+    if (!emp) {
+      await tellUser(channelId, uid, notLinkedText(info));
+      return new Response("", { status: 200 });
+    }
+    await tellUser(channelId, uid, await makeupListText(emp.id, emp.name));
     return new Response("", { status: 200 });
   }
 

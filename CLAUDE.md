@@ -15,7 +15,8 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - 로그인 비밀번호: `.env` 의 `ADMIN_PASSWORD` (기본 `yoossam2025`)
 
 ## 아키텍처
-- **엔진(순수 함수, DB 무관, 테스트 있음)**: `lib/payroll.ts`(급여), `lib/leave.ts`(연차, 근로기준법 §60).
+- **엔진(순수 함수, DB 무관, 테스트 있음)**: `lib/payroll.ts`(급여), `lib/leave.ts`(연차, 근로기준법 §60),
+  `lib/overtime.ts`(보강 오버타임, 근로기준법 §56).
   UI/API 는 이 엔진을 호출만 한다. 계산 로직 변경은 여기서.
 - **문서→PDF**: `lib/documents.ts`(계약서/서약서/동의서), `lib/documents-pay.ts`(명세서/증명서) 가
   HTML 을 만들고 `lib/pdf.ts` 가 puppeteer-core 로 PDF 렌더(Vercel=@sparticuz/chromium, 로컬=설치된 Chrome/Edge).
@@ -26,9 +27,12 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - **작업 이력**: `lib/activity.ts` 의 `logActivity()` → `AuditLog`. 급여·명세서·계약·직원·문서처럼
   되돌리기 어려운 작업은 여기에 한 줄 남긴다(화면: `/activity`). 기록 실패가 본 작업을 막지 않는다.
 - **서비스**: `lib/payroll-service.ts`(월 급여 upsert), `lib/leave-service.ts`(승인/조정),
-  `lib/doc-service.ts`(PDF 생성+저장+기록), `lib/email.ts`, `lib/scheduler.ts`, `lib/slack.ts`.
+  `lib/makeup-service.ts`(보강 신청·확인·오버타임 산정), `lib/doc-service.ts`(PDF 생성+저장+기록),
+  `lib/email.ts`, `lib/scheduler.ts`, `lib/slack.ts`.
 - **API**: `app/api/**` — 모두 `isAuthed()` 가드(슬랙/크론 제외, 자체 서명검증).
 - **화면**: `app/(app)/**` — 서버컴포넌트가 데이터 로드, `components/*Client.tsx` 가 상호작용.
+  보강 화면(`/makeup`)만 표가 아니라 **월 달력**(`components/MakeupCalendar.tsx`) — 누가 언제 보강하는지가
+  날짜 축으로 보여야 하고, 구글 보강캘린더와 같은 그림을 보게 하기 위함.
 - **명단 화면의 필터·정렬**: `components/TableTools.tsx`(`useTableSort` / `SortTh` / `FilterSelect` / `FilterBar`).
   수십 건 규모라 서버를 다시 부르지 않고 브라우저에서 거른다 — 서버컴포넌트가 행을 평평한
   값으로 직렬화해 내려주고(`EmployeeRow` / `LeaveRow`) 표 컴포넌트가 걸러 정렬한다.
@@ -88,6 +92,26 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - **슬랙 잔여 확인에는 사용 내역이 함께 나간다.** `leaveBalanceOf()` 가 트랜잭션을 그대로 돌려주고
   `leaveBalanceText(..., txns)` 가 `leaveUseLines()` 로 이번 연차기간 사용분을 한 줄씩 붙인다.
   최대 12줄이고 넘치면 **오래된 쪽을 접는다**(궁금한 건 방금 쓴 연차). 연차기간이 해를 넘기므로 날짜에 연도를 쓴다.
+- **보강계획 사전신청 = 오버타임 수당의 원장**(`MakeupSession`). 직원이 슬랙으로 등록하고(승인 절차 없음)
+  관리자가 **실근무 시각을 확정(CONFIRMED)** 해야 비로소 수당이 생긴다. PLANNED 는 0원.
+  산정은 `computeOvertime()`(lib/overtime.ts, 순수 함수) 하나가 전담한다:
+  ① 평일 소정근로시간 밖·토요일 → **연장**(×1.5) ② 일요일·공휴일 → **휴일**(8시간까지 ×1.5, 초과 ×2.0)
+  ③ 소정근로시간 안은 대상 아님(월급에 이미 포함) ④ 완전비율제는 제외 ⑤ 22~06시는 +0.5 야간 가산.
+  **소정근로시간은 `Employee.schedule` 에서 뺀다** — 시간표가 비어 있으면 전부 연장으로 잡히므로
+  화면이 '근로시간표 없음' 경고를 띄운다.
+  **내신의무보강은 내신 기간(`ExamPeriod`)당 상한(기본 10시간)** 까지만 인정하고,
+  **수당이 큰 조각부터** 채운다(토 7h·일 7h → 일 7h 전부 + 토 3h). 내신 기간을 등록하지 않으면
+  분기(연 4회)로 대신 묶어 상한이 새지 않게 한다. **결시보강은 기본 미반영** — `payEligible` 로 건건이 켠다.
+  지급 조건은 `OvertimePolicy`(단일 행) 에 있고 화면(보강·오버타임 → 수당 지급 조건)에서 고친다.
+- **오버타임은 급여 산정에 자동으로 실린다.** `runPayrollMonth()` 가 `overtimeInputsFor()` 로
+  그 달 확정분을 읽어 `overtimeHours/holidayHours/holidayOverHours/nightHours` 를 채운다
+  (명시적으로 넘긴 값이 있으면 그쪽 우선). 산정 줄은 `breakdown.overtime` 에 남고
+  명세서에 「보강 오버타임 산정 내역서」로 첨부된다(`overtimeDetailHtml`).
+  내신 상한은 **내신 기간 전체** 기준이라 기간이 달을 걸치면 뒤 달 신청이 앞 달 배분을 바꿀 수 있다 —
+  발송(SENT)된 달은 재계산하지 않으므로 확정분이 흔들리지는 않는다.
+- **보강은 '보강캘린더' 에 올린다** — 연차 캘린더(`GOOGLE_CALENDAR_ID`)와 **다른 캘린더**
+  (`GOOGLE_MAKEUP_CALENDAR_ID`)를 쓰고, 섞이면 안 되므로 없을 때 연차 캘린더로 대체하지 않는다.
+  신청·수정 시 동기화하고 취소·미실시면 일정을 내린다(`syncMakeupCalendar`). 캘린더 실패가 신청을 되돌리지 않는다.
 - 4대보험/세율은 하드코딩 금지 — `InsuranceRate`(설정 화면에서 수정). 세액표는 `TaxBracket`.
 - 계산식 변경 시 `lib/*.test.ts` 를 먼저 갱신하고 `npm test` 로 검증.
 - 관리자 로그인은 비밀번호 공유(`ADMIN_PASSWORD`) 방식이라 화면 작업의 '누가' 는 남지 않는다.
@@ -116,6 +140,10 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   `FILL_FIELDS`(인적사항)뿐 — 보수조건은 계약이 정하므로 이 경로로 바뀌지 않는다.
   파일에 **없는 열은 건드리지 않는다**(`presentKeys`) — 파서 기본값(부양가족수 1 등)이 새어 들어가면 안 된다.
   주민번호는 `normalizeRRN()` 으로 형식을 통일하고 생년월일을 자동 도출, 화면·이력에는 마스킹해 남긴다.
+- **보강 실근무 확인** → `/makeup` 월 달력에서 칩 클릭 → 실근무 시각 기입 → *실근무 확정*.
+  결시보강은 *수당 반영* 을 직접 고른다(⚠ 표시가 판단 대기). 확정 후 급여를 다시 산정하면 명세서에 반영된다.
+- **오버타임 지급 조건·내신 기간 수정** → `/makeup` 의 *수당 지급 조건* (`OvertimePolicy` / `ExamPeriod`).
+  법정 배수보다 낮추면 저장 시 경고가 뜬다.
 - **슬랙 명령 추가** → `app/api/slack/command/route.ts`.
 - **시간기록표 양식 변경** → `lib/timesheet.ts`(파서·주휴 산정, 테스트 있음) + `/api/payroll/timesheet`.
   주휴 기준: 주(월~일) 실근로 15시간 '초과' 시 min(주근로/5, 8)시간. 휴게 30분은 Employee.breakPaid 로 유급/무급.

@@ -32,6 +32,9 @@ export const ACTION_LABEL: Record<string, string> = {
   LEAVE_ADJUST: "연차 수동 조정",
   LEAVE_IMPORT: "연차 사용내역 일괄 등록",
   LEAVE_COMP_GRANT: "대휴 부여",
+  MAKEUP_CREATE: "보강계획 사전신청",
+  MAKEUP_UPDATE: "보강 실근무 확인",
+  MAKEUP_DELETE: "보강 신청 삭제",
   SETTINGS_UPDATE: "설정 변경",
 };
 

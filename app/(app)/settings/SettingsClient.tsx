@@ -35,16 +35,18 @@ export default function SettingsClient() {
     alert(res.ok ? "테스트 메일 발송 성공" : `실패: ${j.error || "SMTP 설정 확인"}`);
   }
 
-  async function postLauncher() {
+  async function postLauncher(kind: "leave" | "makeup" = "leave") {
+    const what = kind === "makeup" ? "보강계획 사전신청" : "휴가신청";
+    const fallback = kind === "makeup" ? "SLACK_MAKEUP_CHANNEL" : "승인 채널";
     const channel = prompt(
-      "휴가신청 버튼을 게시할 슬랙 채널 ID를 입력하세요.\n(비워두면 승인 채널에 게시 · 봇을 먼저 채널에 초대해야 합니다)",
+      `${what} 버튼을 게시할 슬랙 채널 ID를 입력하세요.\n(비워두면 ${fallback} 에 게시 · 봇을 먼저 채널에 초대해야 합니다)`,
       ""
     );
     if (channel === null) return;
     const res = await fetch("/api/slack/launcher", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channel: channel.trim() }),
+      body: JSON.stringify({ channel: channel.trim(), kind }),
     });
     const j = await res.json().catch(() => ({}));
     alert(
@@ -405,12 +407,21 @@ function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyM
         />
         <Status label="슬랙 연동" ok={g.slack} hint={slackHint} />
         <Status
-          label="구글 캘린더"
+          label="구글 캘린더 (휴가)"
           ok={g.gcal}
           hint={
             g.gcal
               ? "승인된 휴가가 캘린더에 자동 등록·취소 시 삭제됩니다"
               : "GOOGLE_SERVICE_ACCOUNT_JSON(키 파일 통째로) · GOOGLE_CALENDAR_ID 필요 (선택)"
+          }
+        />
+        <Status
+          label="구글 캘린더 (보강)"
+          ok={g.gcalMakeup}
+          hint={
+            g.gcalMakeup
+              ? "보강계획이 '보강캘린더'에 자동 등록됩니다 (휴가와 별개 캘린더)"
+              : "GOOGLE_MAKEUP_CALENDAR_ID 필요 — 휴가 캘린더와 섞이지 않도록 별도 지정 (선택)"
           }
         />
         <Status
@@ -428,9 +439,14 @@ function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyM
       <div className="mt-4 flex flex-wrap gap-2">
         <button className="btn-outline" onClick={onTestEmail}>테스트 메일 발송</button>
         {g.slack && (
-          <button className="btn-outline" onClick={onPostLauncher}>
-            슬랙 채널에 휴가신청 버튼 게시
-          </button>
+          <>
+            <button className="btn-outline" onClick={() => onPostLauncher("leave")}>
+              슬랙 채널에 휴가신청 버튼 게시
+            </button>
+            <button className="btn-outline" onClick={() => onPostLauncher("makeup")}>
+              슬랙 채널에 보강신청 버튼 게시
+            </button>
+          </>
         )}
         <button className="btn-outline" onClick={onCopyManifest}>
           슬랙 앱 매니페스트 복사

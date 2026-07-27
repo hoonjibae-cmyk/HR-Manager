@@ -110,12 +110,13 @@ ENABLE_SCHEDULER="true"
 | `#휴가-신청` | 직원이 신청 버튼을 누르는 곳 | 버튼 게시(3-6) |
 | `#알림-운영진` | 승인/반려 버튼 카드가 올라오는 곳 | `SLACK_APPROVAL_CHANNEL` |
 | `#휴가-기록` | 승인·취소 확정 내역이 남는 곳 | `SLACK_RECORD_CHANNEL` |
+| `#보강-신청` | 보강계획 사전신청 버튼·등록 내역 (선택) | `SLACK_MAKEUP_CHANNEL` |
 
 슬랙 앱이 쓰는 요청 URL은 3개입니다 (매니페스트에 이미 들어 있음).
 
 | 용도 | 경로 |
 | --- | --- |
-| 슬래시 명령 `/연차` | `/api/slack/command` |
+| 슬래시 명령 `/연차` · `/보강` | `/api/slack/command` |
 | 버튼·모달 (Interactivity) | `/api/slack/interactivity` |
 | 앱 홈 (Event Subscriptions) | `/api/slack/events` |
 
@@ -264,14 +265,20 @@ SLACK_APPROVERS="U01ADMIN1,U01ADMIN2" # 승인 권한자 (비우면 채널 누�
 | Key | Value |
 |---|---|
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | `{ "type": "service_account", ... }` (파일 내용 전체) |
-| `GOOGLE_CALENDAR_ID` | `....@group.calendar.google.com` |
+| `GOOGLE_CALENDAR_ID` | `....@group.calendar.google.com` (휴가 캘린더) |
+| `GOOGLE_MAKEUP_CALENDAR_ID` | `....@group.calendar.google.com` (**보강캘린더** — 휴가와 별개) |
 
 **방법 B — 두 값을 따로**
 ```env
 GOOGLE_CLIENT_EMAIL="yoossam-hr@프로젝트.iam.gserviceaccount.com"
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 GOOGLE_CALENDAR_ID="....@group.calendar.google.com"
+GOOGLE_MAKEUP_CALENDAR_ID="....@group.calendar.google.com"
 ```
+> 보강 일정은 휴가와 **다른 캘린더**('보강캘린더')에 올라갑니다.
+> 두 캘린더 모두 서비스 계정 이메일에 **일정 변경** 권한으로 공유해야 합니다.
+> `GOOGLE_MAKEUP_CALENDAR_ID` 를 비우면 보강 일정만 캘린더에 올라가지 않고,
+> HR 시스템 등록과 수당 산정은 그대로 동작합니다.
 > `GOOGLE_PRIVATE_KEY` 는 JSON 의 `private_key` 값을 **줄바꿈 `\n` 표기 그대로** 붙여넣습니다.
 
 > **Vercel 에 넣을 때는 앞뒤 큰따옴표를 빼고** 값만 붙여넣으세요.

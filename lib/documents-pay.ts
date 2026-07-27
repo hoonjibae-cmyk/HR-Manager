@@ -19,6 +19,7 @@ export interface DocPayroll {
   overtimeHours?: number;
   nightHours?: number;
   holidayHours?: number;
+  holidayOverHours?: number;
   baseP: number;
   extraP: number;
   overtimeP: number;
@@ -154,6 +155,17 @@ export function payslipHtml(args: {
   };
   let hoursRow = "";
   let holidayNote = "";
+  // 보강 오버타임 — 첨부 내역서를 보기 전에도 몇 시간이 어떤 구분으로 잡혔는지 명세서 1장에서 알 수 있게
+  const otParts = [
+    (p.overtimeHours ?? 0) > 0 ? `연장 ${p.overtimeHours}시간` : "",
+    (p.holidayHours ?? 0) > 0 ? `휴일 ${p.holidayHours}시간` : "",
+    (p.holidayOverHours ?? 0) > 0 ? `휴일 8시간초과 ${p.holidayOverHours}시간` : "",
+    (p.nightHours ?? 0) > 0 ? `야간 ${p.nightHours}시간(가산)` : "",
+  ].filter(Boolean);
+  const otRow =
+    !isHourly && otParts.length
+      ? `<tr><th>오버타임</th><td colspan="3">${otParts.join(" · ")} <span class="muted">(산정 근거는 별첨 「보강 오버타임 산정 내역서」)</span></td></tr>`
+      : "";
   if (isHourly) {
     const baseHours =
       p.workedHours != null && p.workedHours > 0
@@ -282,6 +294,7 @@ export function payslipHtml(args: {
     <tr><th>직책</th><td>${esc(e.position ?? "")}</td><th>입사일자</th><td>${ymd(e.hireDate)}</td></tr>
     <tr><th>${isHourly ? "시급" : "통상시급"}</th><td>${wonUnit(p.hourlyWage)}</td><th>구분</th><td>${esc(INCOME_TYPE_LABEL[p.incomeType] ?? "")}</td></tr>
     ${hoursRow}
+    ${otRow}
   </table>
   <table class="pay">
     <thead><tr><th colspan="2">지 급</th><th colspan="2">공 제</th></tr>
@@ -295,7 +308,7 @@ export function payslipHtml(args: {
   <div class="clause" style="margin-top:10px">
     ${isHourly ? `<div class="small">· 기본급 = 기본 근로시간 × 시급</div>` : ""}
     <div class="small">· 추가근로수당(법내연장) = 추가근로시간 × 통상시급 &nbsp; · 연장근로수당(법정초과) = 연장근로시간 × 통상시급 × 1.5</div>
-    <div class="small">· 휴일근로수당 = 휴일근로시간 × 통상시급 × 1.5 &nbsp; · 야간근로수당 = 야간근로시간 × 통상시급 × 0.5</div>
+    <div class="small">· 휴일근로수당 = 휴일근로시간 × 통상시급 × 1.5 <span class="muted">(1일 8시간 초과분은 × 2.0)</span> &nbsp; · 야간근로수당 = 야간근로시간 × 통상시급 × 0.5</div>
     ${holidayNote}
     ${isFree
       ? `<div class="small">· 사업소득 원천징수: 지급총액의 3.3%(소득세 3% + 지방소득세 0.3%) 공제</div>`
@@ -467,6 +480,114 @@ export function incentiveDetailHtml(args: {
     <div class="small">· 월 중간에 입학·전출·퇴원한 학생은 실제 수업 회차에 비례하여 산정됩니다 (1회당 ${won(s.perSession)}원, 0회는 미산정).</div>
     <div class="small">· 기준 인원수(${s.threshold}명) 이내의 학생은 인센티브가 발생하지 않으며, 만근 학생이 기준 인원을 먼저 채웁니다.</div>
     <div class="small">· 본 내역서는 급여명세서의 <b>인센티브</b> 항목 산출 근거로 첨부됩니다.</div>
+  </div>
+  </div>`;
+}
+
+/* ==================== 보강 오버타임 산정 내역서 ==================== */
+
+/** 산정 결과 한 줄 (lib/overtime.ts 의 OtLine 과 같은 모양) */
+export interface OvertimeDetailLine {
+  date: string; // YYYY-MM-DD
+  timeLabel: string; // "19:00~22:00"
+  category: string;
+  kind: string; // OVERTIME | HOLIDAY
+  night: boolean;
+  over?: boolean;
+  hours: number;
+  countedHours: number;
+  multiplier: number;
+  reason?: string;
+}
+
+const WEEK_KO = ["일", "월", "화", "수", "목", "금", "토"];
+
+/**
+ * 급여명세서에 첨부되는 「보강 오버타임 산정 내역서」.
+ * 어떤 보강이 어떤 구분(연장/휴일)으로 몇 시간 인정됐는지, 왜 깎였는지까지
+ * 한 장에 남겨 직원이 명세서만 보고도 확인할 수 있게 한다.
+ */
+export function overtimeDetailHtml(args: {
+  employee: DocEmployee;
+  company: DocCompany;
+  year: number;
+  month: number;
+  hourlyWage: number;
+  lines: OvertimeDetailLine[];
+  excluded?: OvertimeDetailLine[];
+  categoryLabel: Record<string, string>;
+}): string {
+  const { employee: e, company: c, hourlyWage } = args;
+  const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
+  const dow = (d: string) => WEEK_KO[new Date(`${d}T00:00:00Z`).getUTCDay()];
+  const kindOf = (l: OvertimeDetailLine) =>
+    l.kind === "HOLIDAY" ? (l.over ? "휴일(8h초과)" : "휴일근로") : "연장근로";
+
+  const rowHtml = (l: OvertimeDetailLine) => {
+    const amount = Math.round(l.countedHours * hourlyWage * l.multiplier);
+    return `<tr>
+      <td class="c sm">${esc(l.date.slice(5))}(${dow(l.date)})</td>
+      <td class="c sm">${esc(l.timeLabel)}</td>
+      <td class="sm">${esc(args.categoryLabel[l.category] ?? l.category)}</td>
+      <td class="c sm">${kindOf(l)}${l.night ? " +야간" : ""}</td>
+      <td class="c">${num(l.countedHours)}h</td>
+      <td class="c">×${l.multiplier}</td>
+      <td class="num">${won(amount)}</td>
+    </tr>`;
+  };
+
+  const total = args.lines.reduce(
+    (a, l) => a + Math.round(l.countedHours * hourlyWage * l.multiplier),
+    0
+  );
+  const sumH = (f: (l: OvertimeDetailLine) => boolean) =>
+    Math.round(args.lines.filter(f).reduce((a, l) => a + l.countedHours, 0) * 100) / 100;
+
+  const cut = (args.excluded ?? []).filter((l) => l.hours > 0);
+
+  return `<div class="compact">${head(c, `<div class="small">${args.year}년 ${args.month}월분</div>`)}
+  <div class="doc-title" style="letter-spacing:0.2em">보강 오버타임 산정 내역서</div>
+  <p style="text-align:center" class="muted">${args.year}년 ${args.month}월 · ${esc(e.name)} ${esc(e.position ?? "선생님")}</p>
+
+  <table class="kv">
+    <tr><th>통상시급</th><td>${wonUnit(hourlyWage)}</td><th>연장근로</th><td>${num(sumH((l) => l.kind === "OVERTIME"))}시간</td></tr>
+    <tr><th>휴일근로</th><td>${num(sumH((l) => l.kind === "HOLIDAY" && !l.over))}시간 <span class="muted">(8시간 초과 ${num(sumH((l) => !!l.over))}시간)</span></td><th>야간근로</th><td>${num(sumH((l) => l.night))}시간 <span class="muted">(가산 +0.5)</span></td></tr>
+    <tr><th>수당 합계</th><td colspan="3"><b>${wonUnit(total)}</b></td></tr>
+  </table>
+
+  ${
+    args.lines.length
+      ? `<table class="pay">
+      <thead><tr><th>일자</th><th>시간대</th><th>보강종류</th><th>구분</th><th>인정시간</th><th>배수</th><th>금액</th></tr></thead>
+      <tbody>${args.lines.map(rowHtml).join("")}
+        <tr class="total"><td colspan="6">합계</td><td class="num">${won(total)}</td></tr>
+      </tbody></table>`
+      : `<p class="muted" style="text-align:center">이 달에 수당으로 인정된 보강 근무가 없습니다.</p>`
+  }
+
+  ${
+    cut.length
+      ? `<div class="clause" style="margin-top:8px">
+      <div class="small"><b>수당에 반영되지 않은 근무</b></div>
+      ${cut
+        .map(
+          (l) =>
+            `<div class="small">· ${esc(l.date.slice(5))}(${dow(l.date)}) ${esc(l.timeLabel || "")} ${num(
+              l.hours
+            )}시간 — ${esc(l.reason ?? "수당 대상 아님")}</div>`
+        )
+        .join("")}
+    </div>`
+      : ""
+  }
+
+  <div class="clause" style="margin-top:8px">
+    <div class="small">· <b>연장근로</b>: 평일 소정근로시간 밖 또는 토요일 근무 — 통상시급 ×1.5</div>
+    <div class="small">· <b>휴일근로</b>: 일요일·공휴일 근무 — 8시간까지 ×1.5, 초과분 ×2.0 (근로기준법 §56②)</div>
+    <div class="small">· <b>야간근로</b>: 22시~06시 사이 근무에 +0.5 가산 (근로기준법 §56③)</div>
+    <div class="small">· 소정근로시간 안에서 진행된 보강은 월 급여에 이미 포함되어 별도 수당이 발생하지 않습니다.</div>
+    <div class="small">· 내신의무보강은 내신 기간별 인정 상한이 있으며, 수당이 큰 근무부터 상한을 채웁니다.</div>
+    <div class="small">· 본 내역서는 급여명세서의 <b>연장·휴일·야간근로수당</b> 항목 산출 근거로 첨부됩니다.</div>
   </div>
   </div>`;
 }

@@ -140,6 +140,39 @@ export function isHalfDayLeave(leaveType: string | null | undefined): boolean {
   return HALF_DAY_LEAVE_TYPES.includes(leaveType as any);
 }
 
+/* ==================== 보강계획 사전신청 / 오버타임 ==================== */
+
+/** 보강 종류 — 슬랙 신청 양식의 '어떤 보강인가요?' 선택지 */
+export const MAKEUP_CATEGORY = {
+  IMMEDIATE: "IMMEDIATE", // 직전보강 — 수당 산출 대상
+  MANDATORY: "MANDATORY", // 내신의무보강 — 내신기간당 상한(기본 10시간)까지만
+  ABSENCE: "ABSENCE", // 결시보강 — 관리자가 건건이 판단
+  OTHER: "OTHER", // 기타 보강/근무
+} as const;
+export type MakeupCategory = keyof typeof MAKEUP_CATEGORY;
+
+export const MAKEUP_CATEGORY_LABEL: Record<string, string> = {
+  IMMEDIATE: "직전보강",
+  MANDATORY: "내신의무보강",
+  ABSENCE: "결시보강",
+  OTHER: "기타",
+};
+
+/** 보강 신청 상태 */
+export const MAKEUP_STATUS_LABEL: Record<string, string> = {
+  PLANNED: "신청됨",
+  CONFIRMED: "실근무 확정",
+  NOSHOW: "미실시",
+  CANCELED: "취소",
+};
+
+/** 오버타임 구분 */
+export const OT_KIND_LABEL: Record<string, string> = {
+  OVERTIME: "연장근로",
+  HOLIDAY: "휴일근로",
+  NONE: "수당 대상 아님",
+};
+
 export const DAY_KO: Record<string, string> = {
   mon: "월",
   tue: "화",

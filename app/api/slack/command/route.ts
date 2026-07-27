@@ -6,7 +6,9 @@ import {
   parseLeaveText,
   openView,
   leaveModalView,
+  makeupModalView,
 } from "@/lib/slack";
+import { makeupListText } from "@/lib/makeup-slack";
 import {
   leaveBalanceOf,
   leaveBalanceText,
@@ -52,6 +54,29 @@ export async function POST(req: Request) {
       );
     }
   }
+  /* ── /보강 — 보강계획 사전신청 (완전비율제도 일정 공유용으로 등록한다) ── */
+  const cmd = (form.get("command") || "").replace(/^\//, "");
+  const isMakeup = /보강|makeup/i.test(cmd);
+  if (isMakeup) {
+    if (/^(내역|목록|조회|list)$/i.test(text))
+      return ephemeral(await makeupListText(emp.id, emp.name));
+    if (/도움|help/i.test(text))
+      return ephemeral(
+        "*보강계획 사전신청*\n• 신청 양식 열기: `/보강`\n• 내 보강 내역: `/보강 내역`\n\n" +
+          "_승인 절차 없이 바로 등록되며, 보강캘린더에도 함께 올라갑니다._\n" +
+          "_실제 근무 여부는 관리자가 확인한 뒤 오버타임 수당으로 산정됩니다._"
+      );
+    await openView(
+      form.get("trigger_id") || "",
+      makeupModalView({
+        empName: emp.name,
+        channel: form.get("channel_id") || undefined,
+        ratio: emp.payScheme === "RATIO",
+      })
+    );
+    return new Response("", { status: 200 });
+  }
+
   if (emp.payScheme === "RATIO") return ephemeral(RATIO_LEAVE_NOTICE);
 
   // 잔여연차 조회 (직원 셀프 조회) — 이번 연차기간 기준 + 대휴보상연차

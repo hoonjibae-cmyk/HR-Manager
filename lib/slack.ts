@@ -392,6 +392,35 @@ export function leaveLauncherBlocks(companyName = "유쌤에듀") {
   ];
 }
 
+/** 채널 상단에 고정할 '보강계획 사전신청' 버튼 메시지 */
+export function makeupLauncherBlocks(companyName = "유쌤에듀") {
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*📚 보강계획 사전신청*\n아래 버튼을 누르면 신청 양식이 열립니다.\n_승인 절차 없이 바로 등록되며, ${companyName} 보강캘린더와 HR 시스템에 함께 반영됩니다._`,
+      },
+    },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          style: "primary",
+          text: { type: "plain_text", text: "보강계획 신청", emoji: true },
+          action_id: "open_makeup_modal",
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "내 보강 내역", emoji: true },
+          action_id: "check_makeup_list",
+        },
+      ],
+    },
+  ];
+}
+
 /* ==================== 앱 홈 탭 (사이드바 → 앱 이름) ==================== */
 
 export async function publishHomeView(userId: string, view: any) {
@@ -406,6 +435,7 @@ export function homeTabView(ctx: {
   balanceText?: string;
   notice?: string;
   upcoming?: Array<{ label: string; status: string }>;
+  makeups?: Array<{ label: string; status: string }>;
   companyName?: string;
 }) {
   const blocks: any[] = [
@@ -450,6 +480,37 @@ export function homeTabView(ctx: {
       },
     });
   }
+
+  // 보강계획 사전신청 — 휴가와 성격이 달라 아래에 따로 묶는다 (완전비율제도 일정 공유용으로 쓴다)
+  blocks.push(
+    { type: "divider" },
+    { type: "header", text: { type: "plain_text", text: "📚 보강계획 사전신청", emoji: true } },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          style: "primary",
+          text: { type: "plain_text", text: "보강계획 신청", emoji: true },
+          action_id: "open_makeup_modal",
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "내 보강 내역", emoji: true },
+          action_id: "check_makeup_list",
+        },
+      ],
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: (ctx.makeups ?? []).length
+          ? `*예정된 보강*\n${(ctx.makeups ?? []).map((m) => `• ${m.label} — ${m.status}`).join("\n")}`
+          : "*예정된 보강*\n_예정된 보강이 없습니다._",
+      },
+    }
+  );
 
   blocks.push({
     type: "context",
@@ -589,6 +650,202 @@ export function readLeaveModal(view: any): {
     reason: (v.reason?.v?.value ?? "").trim(),
     workplan: (v.workplan?.v?.value ?? "").trim(),
   };
+}
+
+/* ==================== 보강계획 사전신청 ==================== */
+
+/**
+ * 기존 슬랙 워크플로 '보강계획 사전신청' 양식을 그대로 옮긴 모달.
+ * 관리자 승인 절차는 없다 — 제출 즉시 HR 시스템·보강캘린더에 등록되고,
+ * 관리자가 실근무를 확인하면 오버타임 수당으로 산정된다.
+ */
+export function makeupModalView(ctx: { empName: string; channel?: string; ratio?: boolean }) {
+  const notice = ctx.ratio
+    ? "\n\n_※ 완전비율제(위탁) 계약은 오버타임 수당 대상이 아닙니다. 일정 공유 목적으로만 등록됩니다._"
+    : "";
+  return {
+    type: "modal",
+    callback_id: "makeup_plan_submit",
+    private_metadata: JSON.stringify({ channel: ctx.channel ?? "" }),
+    title: { type: "plain_text", text: "보강계획 사전신청" },
+    submit: { type: "plain_text", text: "제출" },
+    close: { type: "plain_text", text: "닫기" },
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*${ctx.empName}* 님\n승인 절차 없이 바로 등록되며, 관리자가 실근무를 확인하면 수당으로 산정됩니다.${notice}`,
+        },
+      },
+      { type: "divider" },
+      {
+        type: "input",
+        block_id: "sdate",
+        label: { type: "plain_text", text: "보강 시작 날짜(예정)" },
+        element: { type: "datepicker", action_id: "v" },
+      },
+      {
+        type: "input",
+        block_id: "stime",
+        label: { type: "plain_text", text: "보강 시작 시간(예정)" },
+        hint: { type: "plain_text", text: "시간대: 서울" },
+        element: { type: "timepicker", action_id: "v" },
+      },
+      {
+        type: "input",
+        block_id: "edate",
+        optional: true,
+        label: { type: "plain_text", text: "보강 종료 날짜(예정)" },
+        hint: { type: "plain_text", text: "같은 날 끝나면 비워 두세요." },
+        element: { type: "datepicker", action_id: "v" },
+      },
+      {
+        type: "input",
+        block_id: "etime",
+        label: { type: "plain_text", text: "보강 종료 시간(예정)" },
+        hint: { type: "plain_text", text: "끝나는 시간이 미정인 경우에도 예상 시간은 기입해주세요." },
+        element: { type: "timepicker", action_id: "v" },
+      },
+      {
+        type: "input",
+        block_id: "category",
+        label: { type: "plain_text", text: "어떤 보강인가요?" },
+        element: {
+          type: "static_select",
+          action_id: "v",
+          placeholder: { type: "plain_text", text: "옵션을 선택하세요." },
+          options: [
+            { text: { type: "plain_text", text: "직전보강" }, value: "IMMEDIATE" },
+            { text: { type: "plain_text", text: "내신의무보강" }, value: "MANDATORY" },
+            { text: { type: "plain_text", text: "결시보강" }, value: "ABSENCE" },
+            { text: { type: "plain_text", text: "기타" }, value: "OTHER" },
+          ],
+        },
+      },
+      {
+        type: "input",
+        block_id: "target",
+        label: { type: "plain_text", text: "대상반을 써주세요(개별 보강일 경우 학생이름까지 써주세요)" },
+        hint: { type: "plain_text", text: "ex)은가람중3 또는 홍길동, 김유쌤." },
+        element: {
+          type: "plain_text_input",
+          action_id: "v",
+          placeholder: { type: "plain_text", text: "작성해 주세요." },
+        },
+      },
+      {
+        type: "input",
+        block_id: "headcount",
+        optional: true,
+        label: { type: "plain_text", text: "수강 예상인원을 기입해주세요" },
+        element: {
+          type: "number_input",
+          is_decimal_allowed: false,
+          action_id: "v",
+          placeholder: { type: "plain_text", text: "숫자를 입력하세요" },
+        },
+      },
+      {
+        type: "input",
+        block_id: "detail",
+        label: { type: "plain_text", text: "세부 보강내역을 작성해주세요" },
+        hint: { type: "plain_text", text: "ex)실전모의고사 응시 및 풀이." },
+        element: {
+          type: "plain_text_input",
+          action_id: "v",
+          multiline: true,
+          placeholder: { type: "plain_text", text: "작성해 주세요." },
+        },
+      },
+      {
+        type: "input",
+        block_id: "note",
+        optional: true,
+        label: { type: "plain_text", text: "기타 특이사항이 있다면 작성해주세요" },
+        element: {
+          type: "plain_text_input",
+          action_id: "v",
+          multiline: true,
+          placeholder: { type: "plain_text", text: "작성해 주세요." },
+        },
+      },
+    ],
+  };
+}
+
+export interface MakeupModalValues {
+  startDate: string | null;
+  startTime: string | null;
+  endDate: string | null;
+  endTime: string | null;
+  category: string;
+  targetClass: string;
+  headcount: number | null;
+  detail: string;
+  note: string;
+}
+
+export function readMakeupModal(view: any): MakeupModalValues {
+  const v = view?.state?.values ?? {};
+  const n = parseInt(v.headcount?.v?.value ?? "", 10);
+  return {
+    startDate: v.sdate?.v?.selected_date ?? null,
+    startTime: v.stime?.v?.selected_time ?? null,
+    endDate: v.edate?.v?.selected_date ?? null,
+    endTime: v.etime?.v?.selected_time ?? null,
+    category: v.category?.v?.selected_option?.value ?? "IMMEDIATE",
+    targetClass: (v.target?.v?.value ?? "").trim(),
+    headcount: Number.isFinite(n) ? n : null,
+    detail: (v.detail?.v?.value ?? "").trim(),
+    note: (v.note?.v?.value ?? "").trim(),
+  };
+}
+
+/** 등록 결과를 알리는 카드 (신청자 DM · 공유 채널 공통) */
+export function makeupRecordBlocks(args: {
+  name: string;
+  dept?: string | null;
+  categoryLabel: string;
+  dateLabel: string; // "2026-08-15(토) 09:00~16:00 (7시간)"
+  targetClass: string;
+  headcount?: number | null;
+  detail?: string | null;
+  note?: string | null;
+  calendarSynced?: boolean;
+}) {
+  const fields = [
+    `*보강종류*\n${args.categoryLabel}`,
+    `*일시*\n${args.dateLabel}`,
+    `*대상반*\n${args.targetClass}`,
+    args.headcount ? `*수강 예상인원*\n${args.headcount}명` : null,
+  ].filter(Boolean) as string[];
+  const blocks: any[] = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `📚 *보강계획이 등록되었습니다* — ${args.name}${args.dept ? ` (${args.dept})` : ""}`,
+      },
+    },
+    { type: "section", fields: fields.map((text) => ({ type: "mrkdwn", text })) },
+  ];
+  if (args.detail)
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `*세부 보강내역*\n${args.detail}` } });
+  if (args.note)
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `*기타 특이사항*\n${args.note}` } });
+  blocks.push({
+    type: "context",
+    elements: [
+      {
+        type: "mrkdwn",
+        text:
+          (args.calendarSynced ? "보강캘린더에 등록되었습니다. " : "") +
+          "실제 근무 여부는 관리자가 확인한 뒤 수당으로 산정됩니다.",
+      },
+    ],
+  });
+  return blocks;
 }
 
 /* ==================== 휴가 취소 신청 ==================== */

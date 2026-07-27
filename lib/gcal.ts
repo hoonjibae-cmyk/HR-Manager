@@ -47,6 +47,20 @@ export function gcalConfigured(): boolean {
   return !!sa.clientEmail && !!sa.privateKey && !!process.env.GOOGLE_CALENDAR_ID;
 }
 
+/**
+ * 보강 일정은 휴가와 **다른 캘린더**('보강캘린더')에 올린다.
+ * GOOGLE_MAKEUP_CALENDAR_ID 를 따로 넣어야 하며, 없으면 보강 동기화만 조용히 꺼진다
+ * (휴가 캘린더에 섞여 들어가면 안 되므로 GOOGLE_CALENDAR_ID 로 대체하지 않는다).
+ */
+export function makeupCalendarId(): string {
+  return (process.env.GOOGLE_MAKEUP_CALENDAR_ID || "").trim();
+}
+
+export function makeupCalendarConfigured(): boolean {
+  const sa = serviceAccount();
+  return !!sa.clientEmail && !!sa.privateKey && !!makeupCalendarId();
+}
+
 function privateKey(): string {
   return serviceAccount().privateKey;
 }
@@ -306,12 +320,17 @@ export async function createLeaveEvent(input: LeaveEventInput): Promise<string |
 
 /** 휴가 일정 삭제 (취소 승인 시) */
 export async function deleteLeaveEvent(eventId: string): Promise<boolean> {
+  return deleteEvent(process.env.GOOGLE_CALENDAR_ID || "", eventId);
+}
+
+async function deleteEvent(calendarId: string, eventId: string): Promise<boolean> {
   const token = await accessToken();
-  if (!token || !eventId) return false;
+  if (!token || !eventId || !calendarId) return false;
   try {
-    const calId = encodeURIComponent(process.env.GOOGLE_CALENDAR_ID || "");
     const res = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${calId}/events/${encodeURIComponent(eventId)}`,
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+        calendarId
+      )}/events/${encodeURIComponent(eventId)}`,
       { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
     );
     // 204 삭제 성공, 410 이미 삭제됨
@@ -320,4 +339,111 @@ export async function deleteLeaveEvent(eventId: string): Promise<boolean> {
     console.error("[gcal] 일정 삭제 예외:", e.message);
     return false;
   }
+}
+
+/* ==================== 보강캘린더 (휴가와 별개) ==================== */
+
+export interface MakeupEventInput {
+  name: string;
+  department?: string | null;
+  categoryLabel: string; // 직전보강 / 내신의무보강 ...
+  /** KST 벽시계 값이 UTC 필드에 담긴 Date (앱 전체 규칙) */
+  start: Date;
+  end: Date;
+  targetClass: string;
+  headcount?: number | null;
+  detail?: string | null;
+  note?: string | null;
+  statusLabel?: string; // 실근무 확정 / 미실시 ...
+}
+
+/** "2026-08-15T19:00:00" — 구글에는 시각만 주고 시간대는 Asia/Seoul 로 따로 알린다 */
+function seoulDateTime(d: Date): string {
+  return new Date(d).toISOString().slice(0, 19);
+}
+
+/** 보강 일정 본문 (테스트를 위해 분리) */
+export function buildMakeupEvent(input: MakeupEventInput) {
+  const hours = Math.round(((input.end.getTime() - input.start.getTime()) / 3600000) * 100) / 100;
+  const lines = [
+    `강사: ${input.name}${input.department ? ` (${input.department})` : ""}`,
+    `보강종류: ${input.categoryLabel}`,
+    `대상반: ${input.targetClass}`,
+    input.headcount ? `수강 예상인원: ${input.headcount}명` : "",
+    hours > 0 ? `예정 시간: ${hours}시간` : "",
+    input.detail ? `\n[세부 보강내역]\n${input.detail}` : "",
+    input.note ? `\n[기타 특이사항]\n${input.note}` : "",
+    input.statusLabel ? `\n상태: ${input.statusLabel}` : "",
+    "",
+    "※ 유쌤에듀 HR 프로그램에서 자동 등록된 일정입니다.",
+  ].filter(Boolean);
+  return {
+    summary: `[${input.categoryLabel}] ${input.name} · ${input.targetClass}`,
+    description: lines.join("\n"),
+    start: { dateTime: seoulDateTime(input.start), timeZone: "Asia/Seoul" },
+    end: { dateTime: seoulDateTime(input.end), timeZone: "Asia/Seoul" },
+  };
+}
+
+/** 보강 일정 생성 → eventId (실패 시 null, 예외를 던지지 않음) */
+export async function createMakeupEvent(input: MakeupEventInput): Promise<string | null> {
+  const calId = makeupCalendarId();
+  const token = calId ? await accessToken() : null;
+  if (!token) return null;
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(buildMakeupEvent(input)),
+      }
+    );
+    const j: any = await res.json();
+    if (!j?.id) {
+      console.error("[gcal] 보강 일정 생성 실패:", j?.error?.message);
+      return null;
+    }
+    return j.id as string;
+  } catch (e: any) {
+    console.error("[gcal] 보강 일정 생성 예외:", e.message);
+    return null;
+  }
+}
+
+/** 보강 일정 수정 (실근무 시각 확정 등). 일정이 사라졌으면 새로 만들어 새 ID 를 돌려준다 */
+export async function updateMakeupEvent(
+  eventId: string,
+  input: MakeupEventInput
+): Promise<string | null> {
+  const calId = makeupCalendarId();
+  const token = calId && eventId ? await accessToken() : null;
+  if (!token) return null;
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+        calId
+      )}/events/${encodeURIComponent(eventId)}`,
+      {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(buildMakeupEvent(input)),
+      }
+    );
+    if (res.status === 404 || res.status === 410) return createMakeupEvent(input);
+    const j: any = await res.json().catch(() => ({}));
+    if (!j?.id) {
+      console.error("[gcal] 보강 일정 수정 실패:", j?.error?.message);
+      return null;
+    }
+    return j.id as string;
+  } catch (e: any) {
+    console.error("[gcal] 보강 일정 수정 예외:", e.message);
+    return null;
+  }
+}
+
+/** 보강 일정 삭제 (신청 취소 시) */
+export async function deleteMakeupEvent(eventId: string): Promise<boolean> {
+  return deleteEvent(makeupCalendarId(), eventId);
 }

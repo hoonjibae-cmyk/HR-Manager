@@ -10,11 +10,13 @@ import {
 import {
   payslipHtml,
   incentiveDetailHtml,
+  overtimeDetailHtml,
   certEmploymentHtml,
   certCareerHtml,
   type DocPayroll,
 } from "./documents-pay";
 import { getCompany, empToDoc, contractToDoc } from "./repo";
+import { MAKEUP_CATEGORY_LABEL } from "./constants";
 import { incentiveRosterFor, rosterToStudents } from "./payroll-service";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
@@ -139,6 +141,25 @@ export async function genPayslip(payrollId: number) {
       );
     }
   }
+  // 보강 오버타임이 잡힌 달이면 '보강 오버타임 산정 내역서' 를 첨부
+  try {
+    const bd = pr.breakdown ? JSON.parse(pr.breakdown) : null;
+    if (bd?.overtime?.lines?.length) {
+      pages.push(
+        overtimeDetailHtml({
+          employee,
+          company,
+          year: pr.year,
+          month: pr.month,
+          hourlyWage: pr.hourlyWage,
+          lines: bd.overtime.lines,
+          excluded: bd.overtime.excluded ?? [],
+          categoryLabel: MAKEUP_CATEGORY_LABEL,
+        })
+      );
+    }
+  } catch {}
+
   const pdf = pages.length > 1 ? await htmlPagesToPdf(pages) : await htmlToPdf(pages[0]);
   const path = await save(pdf, `급여명세서_${pr.employee.name}_${pr.year}-${pr.month}.pdf`);
   await record(pr.employeeId, "PAYSLIP", `급여명세서 ${pr.year}.${pr.month} - ${pr.employee.name}`, path, {

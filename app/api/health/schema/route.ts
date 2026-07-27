@@ -34,6 +34,22 @@ const CHECKS: Array<{ label: string; run: () => Promise<unknown> }> = [
     label: "IncentiveStudent (인센티브 명단)",
     run: () => prisma.incentiveStudent.findFirst({ select: { id: true } }),
   },
+  {
+    label: "MakeupSession (보강계획 사전신청)",
+    run: () => prisma.makeupSession.findFirst({ select: { id: true } }),
+  },
+  {
+    label: "ExamPeriod (내신 기간)",
+    run: () => prisma.examPeriod.findFirst({ select: { id: true } }),
+  },
+  {
+    label: "OvertimePolicy (오버타임 지급 조건)",
+    run: () => prisma.overtimePolicy.findFirst({ select: { id: true } }),
+  },
+  {
+    label: "PayrollRecord.holidayOverHours (휴일 8시간 초과)",
+    run: () => prisma.payrollRecord.findFirst({ select: { holidayOverHours: true } }),
+  },
 ];
 
 export async function GET() {

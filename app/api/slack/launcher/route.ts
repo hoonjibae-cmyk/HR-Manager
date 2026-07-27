@@ -1,13 +1,21 @@
 import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { slackConfigured, postMessage, slackCall, leaveLauncherBlocks } from "@/lib/slack";
+import {
+  slackConfigured,
+  postMessage,
+  slackCall,
+  leaveLauncherBlocks,
+  makeupLauncherBlocks,
+} from "@/lib/slack";
 
 export const dynamic = "force-dynamic";
 
 /**
- * 휴가 신청 채널에 '휴가신청서 작성' 버튼 메시지를 게시(+상단 고정).
- * body: { channel?: string }  — 미지정 시 SLACK_APPROVAL_CHANNEL 사용
+ * 신청 채널에 버튼 메시지를 게시(+상단 고정).
+ * body: { channel?: string, kind?: "leave" | "makeup" }
+ *  - leave(기본): 휴가신청서 작성 — 미지정 시 SLACK_APPROVAL_CHANNEL
+ *  - makeup: 보강계획 사전신청 — 미지정 시 SLACK_MAKEUP_CHANNEL → SLACK_APPROVAL_CHANNEL
  */
 export async function POST(req: Request) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -18,18 +26,27 @@ export async function POST(req: Request) {
     );
 
   const body = await req.json().catch(() => ({}));
-  const channel = (body.channel || process.env.SLACK_APPROVAL_CHANNEL || "").trim();
+  const isMakeup = body.kind === "makeup";
+  const fallback = isMakeup
+    ? process.env.SLACK_MAKEUP_CHANNEL || process.env.SLACK_APPROVAL_CHANNEL
+    : process.env.SLACK_APPROVAL_CHANNEL;
+  const channel = (body.channel || fallback || "").trim();
   if (!channel)
     return NextResponse.json(
-      { error: "채널을 지정하거나 SLACK_APPROVAL_CHANNEL 을 설정하세요." },
+      {
+        error: isMakeup
+          ? "채널을 지정하거나 SLACK_MAKEUP_CHANNEL 을 설정하세요."
+          : "채널을 지정하거나 SLACK_APPROVAL_CHANNEL 을 설정하세요.",
+      },
       { status: 400 }
     );
 
   const company = await prisma.company.findFirst({ where: { id: 1 } });
+  const name = company?.name ?? "유쌤에듀";
   const posted: any = await postMessage(
     channel,
-    "휴가 신청",
-    leaveLauncherBlocks(company?.name ?? "유쌤에듀")
+    isMakeup ? "보강계획 사전신청" : "휴가 신청",
+    isMakeup ? makeupLauncherBlocks(name) : leaveLauncherBlocks(name)
   );
   if (!posted?.ok) {
     return NextResponse.json(

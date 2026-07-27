@@ -116,7 +116,8 @@ export interface MonthlyInput {
   extraHours?: number; // 법내연장(월): 소정 외이나 1일8h·주40h 이내 — 가산 없음(×1.0)
   overtimeHours?: number; // 법정 연장근로(월): 1일8h·주40h 초과분 — ×1.5
   nightHours?: number; // 야간근로(월, 22~06시) — +0.5 가산
-  holidayHours?: number; // 휴일근로(월, 주휴일·공휴일) — ×1.5
+  holidayHours?: number; // 휴일근로(월, 주휴일·공휴일) 8시간 이내 — ×1.5
+  holidayOverHours?: number; // 휴일근로 중 1일 8시간 초과분 — ×2.0 (근로기준법 §56②)
   studentCount?: number | null; // 인센티브용 (명단 없을 때 수동 입력 정수)
   /** 인센티브 가중 인원 — 학생 명단 기반. 월중 입학·전출·퇴원은 회차 비례(0~1)로
    *  환산되므로 소수. 지정 시 studentCount 대신 사용한다. */
@@ -454,11 +455,13 @@ export function computePayroll(
   const otH = month.overtimeHours ?? 0;
   const nightH = month.nightHours ?? 0;
   const holH = month.holidayHours ?? 0;
+  const holOverH = month.holidayOverHours ?? 0;
   const extraP = round0(exH * hourlyWage); // 법내연장 — 가산 없음
   // 포괄임금 약정분은 매월 고정 지급(일할 적용), 실적분은 그 위에 추가 가산
   const overtimeP = inclusive.overtimePay + round0(otH * hourlyWage * 1.5);
   const nightP = inclusive.nightPay + round0(nightH * hourlyWage * 0.5);
-  const holidayP = round0(holH * hourlyWage * 1.5);
+  // 휴일근로는 8시간까지 ×1.5, 그 초과분은 ×2.0 (근로기준법 §56②)
+  const holidayP = round0(holH * hourlyWage * 1.5) + round0(holOverH * hourlyWage * 2);
 
   // --- 수당 (월 정액 수당은 일할 적용) ---
   // 식대·차량유지비는 월급제/인센티브에서는 기본급에서 이미 빼 두었으므로 여기서 더해도

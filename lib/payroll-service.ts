@@ -8,6 +8,7 @@ import {
 } from "./payroll";
 import { getActiveRates, getTaxTable, empToPayInput } from "./repo";
 import { summarizeIncentive, type RosterStudent } from "./incentive";
+import { overtimeInputsFor } from "./makeup-service";
 
 export interface PayrollInputMap {
   [employeeId: number]: MonthlyInput;
@@ -316,6 +317,13 @@ export async function runPayrollMonth(
   const emps = await prisma.employee.findMany({ where });
   // 월중 계약 갱신 대비: 이 달에 적용된 계약 조건 구간(역일수) 일괄 조회
   const segMap = await wageSegmentsFor(emps, year, month);
+  // 보강 사전신청 중 '실근무 확정' 된 건 → 연장/휴일/야간 시간 자동 산출
+  // (완전비율제는 overtimeInputsFor 가 알아서 뺀다)
+  const otMap = await overtimeInputsFor(
+    year,
+    month,
+    emps.map((e) => e.id)
+  );
   // 인센티브 강사: 학생 명단(회차 비례 가중 인원) 일괄 조회
   const incEmpIds = emps.filter((e) => e.payScheme === "INCENTIVE").map((e) => e.id);
   const rosterMap = new Map<number, any[]>();
@@ -348,6 +356,14 @@ export async function runPayrollMonth(
       mInput.workedHours = existing?.workedHours ?? null;
     if (mInput.weeklyHolidayHours === undefined)
       mInput.weeklyHolidayHours = existing?.weeklyHolidayHours ?? null;
+    // 오버타임(보강 실근무 확정분) — 명시적으로 넘긴 값이 있으면 그쪽을 존중한다
+    const ot = otMap.get(emp.id);
+    if (ot) {
+      if (mInput.overtimeHours === undefined) mInput.overtimeHours = ot.overtimeHours;
+      if (mInput.holidayHours === undefined) mInput.holidayHours = ot.holidayHours;
+      if (mInput.holidayOverHours === undefined) mInput.holidayOverHours = ot.holidayOverHours;
+      if (mInput.nightHours === undefined) mInput.nightHours = ot.nightHours;
+    }
     mInput.prorationRatio = prorationRatioFor(
       year,
       month,
@@ -424,6 +440,7 @@ export async function runPayrollMonth(
       overtimeHours: mInput.overtimeHours ?? 0,
       nightHours: mInput.nightHours ?? 0,
       holidayHours: mInput.holidayHours ?? 0,
+      holidayOverHours: mInput.holidayOverHours ?? 0,
       studentCount: mInput.studentCount ?? null,
       studentUnits: mInput.studentUnits ?? null,
       classRevenue: mInput.classRevenue ?? null,
@@ -465,6 +482,17 @@ export async function runPayrollMonth(
                 nightHours: payInput.fixedNightHours ?? null,
               }
             : null,
+        // 보강 오버타임 산정 내역 — 명세서 첨부 '오버타임 산정 내역서' 가 이걸 그대로 쓴다
+        overtime: ot?.detail?.length
+          ? {
+              overtimeHours: ot.overtimeHours,
+              holidayHours: ot.holidayHours,
+              holidayOverHours: ot.holidayOverHours,
+              nightHours: ot.nightHours,
+              lines: ot.detail,
+              excluded: ot.excluded,
+            }
+          : null,
         // 인센티브 명단 산정 요약 (상세는 IncentiveStudent 테이블)
         incentive: incSummary
           ? {

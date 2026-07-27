@@ -3,6 +3,7 @@ import { prisma } from "./db";
 import { findEmployeeBySlack, autoLinkEmployeeBySlack, homeTabView, publishHomeView } from "./slack";
 import { leaveBalanceOf, leaveBalanceText, rangeLabel, RATIO_LEAVE_NOTICE } from "./leave-slack";
 import { LEAVE_TYPE_LABEL, LEAVE_STATUS_LABEL } from "./constants";
+import { upcomingMakeups } from "./makeup-slack";
 
 /** 오늘(KST) 이후로 예정된 신청·승인 건 */
 async function upcomingLeaves(employeeId: number) {
@@ -44,23 +45,27 @@ export async function refreshHomeTab(slackUserId: string) {
       })
     );
   }
+  // 완전비율제는 연차가 없지만 보강계획은 등록한다 — 연차 자리에만 안내를 넣는다
   if (emp.payScheme === "RATIO") {
     return publishHomeView(
       slackUserId,
       homeTabView({
         companyName,
         notice: RATIO_LEAVE_NOTICE,
+        makeups: await upcomingMakeups(emp.id),
       })
     );
   }
 
   const { summary, comp, eligibility, txns } = await leaveBalanceOf(emp);
+  const [upcoming, makeups] = await Promise.all([upcomingLeaves(emp.id), upcomingMakeups(emp.id)]);
   return publishHomeView(
     slackUserId,
     homeTabView({
       companyName,
       balanceText: leaveBalanceText(emp.name, summary, comp, eligibility, txns),
-      upcoming: await upcomingLeaves(emp.id),
+      upcoming,
+      makeups,
     })
   );
 }
