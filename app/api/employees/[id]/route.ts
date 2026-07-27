@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
+import { syncActiveContract } from "@/lib/contract-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -38,8 +39,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     data.schedule = typeof body.schedule === "string" ? body.schedule : JSON.stringify(body.schedule);
 
   try {
-    const emp = await prisma.employee.update({ where: { id: Number(params.id) }, data });
-    return NextResponse.json(emp);
+    const id = Number(params.id);
+    // 계약서·급여는 Contract 스냅샷을 읽으므로, 카드에서 바뀐 보수조건은 계약에도 반영한다
+    const before = await prisma.employee.findUnique({ where: { id } });
+    if (!before) return NextResponse.json({ error: "not found" }, { status: 404 });
+    const emp = await prisma.employee.update({ where: { id }, data });
+    const contractSync = await syncActiveContract(id, data, before);
+    return NextResponse.json({ ...emp, contractSync });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });
   }

@@ -4,18 +4,7 @@ import { isAuthed } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-function templateKeyOf(payScheme: string): string {
-  switch (payScheme) {
-    case "HOURLY":
-      return "HOURLY";
-    case "RATIO":
-      return "RATIO";
-    case "INCENTIVE":
-      return "INCENTIVE";
-    default:
-      return "MONTHLY";
-  }
-}
+import { templateKeyOf } from "@/lib/contract-sync";
 
 /**
  * 신규 계약 추가 생성.

@@ -5,6 +5,7 @@ import { leaveSummaryFor } from "@/lib/repo";
 import { PageHeader, Pill } from "@/components/ui";
 import DocButton from "@/components/DocButton";
 import NewContractForm from "@/components/NewContractForm";
+import ContractSyncNotice from "@/components/ContractSyncNotice";
 import {
   INCOME_TYPE_LABEL,
   PAY_SCHEME_LABEL,
@@ -14,6 +15,7 @@ import {
   DAY_KO,
 } from "@/lib/constants";
 import { won, wonUnit, ymd } from "@/lib/format";
+import { termMismatches, templateKeyOf } from "@/lib/contract-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +34,32 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
   const { summary, comp } = await leaveSummaryFor(id);
   const sched = parseSchedule(emp.schedule);
 
+  // 계약서·급여는 계약 스냅샷을 읽는다 — 카드와 어긋나면 경고해 반영을 유도
+  const activeContract = emp.contracts.find((c) => c.status === "ACTIVE") ?? null;
+  const mismatched = termMismatches(emp as any, activeContract as any);
+  if (activeContract && activeContract.templateKey !== templateKeyOf(emp.payScheme))
+    mismatched.push("payScheme" as any);
+  const fmtTerm = (f: string, v: any) =>
+    v == null
+      ? "미설정"
+      : f === "ratioPercent"
+      ? `${(Number(v) * 100).toFixed(1)}%`
+      : f === "incThreshold"
+      ? `${v}명`
+      : f === "payScheme"
+      ? PAY_SCHEME_LABEL[String(v)] ?? String(v)
+      : `${won(Number(v))}원`;
+  const mismatchDetail = mismatched.map((f) => ({
+    field: f as string,
+    card: fmtTerm(f as string, f === ("payScheme" as any) ? emp.payScheme : (emp as any)[f]),
+    contract: fmtTerm(
+      f as string,
+      f === ("payScheme" as any)
+        ? (activeContract as any)?.templateKey
+        : (activeContract as any)?.[f]
+    ),
+  }));
+
   return (
     <div>
       <PageHeader
@@ -45,6 +73,16 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
           </div>
         }
       />
+
+      {mismatched.length > 0 && (
+        <div className="mb-6">
+          <ContractSyncNotice
+            employeeId={id}
+            fields={mismatched as string[]}
+            detail={mismatchDetail}
+          />
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-6">
         {/* 좌: 기본정보 */}
