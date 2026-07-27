@@ -54,6 +54,19 @@ export default function SettingsClient() {
     );
   }
 
+  async function checkSchema() {
+    const res = await fetch("/api/health/schema");
+    const j = await res.json().catch(() => ({}));
+    const lines = (j.results ?? []).map(
+      (r: any) => `${r.ok ? "✅" : "❌"} ${r.label}${r.error ? ` — ${r.error}` : ""}`
+    );
+    alert(
+      (j.ok ? "DB 스키마가 코드와 일치합니다.\n\n" : "DB 스키마가 코드보다 오래되었습니다.\n\n") +
+        lines.join("\n") +
+        (j.hint ? `\n\n${j.hint}` : "")
+    );
+  }
+
   async function testGcal() {
     const res = await fetch("/api/gcal/test", { method: "POST" });
     const j = await res.json().catch(() => ({}));
@@ -108,6 +121,7 @@ export default function SettingsClient() {
         onPostLauncher={postLauncher}
         onCopyManifest={copyManifest}
         onTestGcal={testGcal}
+        onCheckSchema={checkSchema}
       />
     </div>
   );
@@ -361,7 +375,7 @@ function EmailLogCard({ logs }: { logs: any[] }) {
   );
 }
 
-function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyManifest, onTestGcal }: any) {
+function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyManifest, onTestGcal, onCheckSchema }: any) {
   const envHint = g.serverless
     ? "Vercel → Settings → Environment Variables 에 추가 후 재배포"
     : ".env 파일에 추가 후 서버 재시작";
@@ -423,6 +437,9 @@ function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyM
         </button>
         <button className="btn-outline" onClick={onTestGcal}>
           구글 캘린더 연결 테스트
+        </button>
+        <button className="btn-outline" onClick={onCheckSchema}>
+          DB 스키마 점검
         </button>
       </div>
       {!g.smtp && (
