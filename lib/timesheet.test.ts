@@ -4,6 +4,8 @@ import {
   computeMonthlyFromEntries,
   dominantPeriod,
   matchEmployee,
+  parseHourCell,
+  parseDateCell,
   type TimesheetEntry,
   type TimesheetPerson,
   type MonthlyTimesheetResult,
@@ -57,8 +59,9 @@ describe("dominantPeriod — 파일에서 연·월 자동 감지", () => {
           { date: "2026-02-03", hours: 5 },
           { date: "2026-01-31", hours: 5 }, // 소수의 전월 기록
         ],
+        skipped: 0,
       },
-      { rawName: "B", name: "B", entries: [{ date: "2026-02-10", hours: 4 }] },
+      { rawName: "B", name: "B", entries: [{ date: "2026-02-10", hours: 4 }], skipped: 0 },
     ];
     expect(dominantPeriod(people)).toEqual({ year: 2026, month: 2 });
   });
@@ -493,5 +496,155 @@ describe("근로시간표가 없을 때 — 옛 방식으로 갈음하고 경고
       resignDate: "2026-02-06",
     });
     expect(wk1(r).qualified).toBe(false);
+  });
+});
+
+describe("§18③ 15시간 판정 — 계약이 실제보다 적게 적혀 있을 때", () => {
+  // 계약은 주2일(9h)인데 실제로는 주4일씩 나온다 — 이다현 케이스
+  const CONTRACT_2D: ScheduleDay[] = ["mon", "thu"].map((day) => ({
+    day: day as ScheduleDay["day"],
+    work: true,
+    start: "17:00",
+    end: "22:00",
+    breakH: 0.5,
+  }));
+
+  /** 2026-02-02(월)부터 4주간, 매주 지정 요일에 6시간씩 나온 기록 */
+  const runWeeks = (perWeekDays: number[][], hoursPerDay = 6) => {
+    const entries: TimesheetEntry[] = [];
+    for (let w = 0; w < perWeekDays.length; w++)
+      for (const off of perWeekDays[w]) {
+        const d = new Date(Date.UTC(2026, 1, 2 + w * 7 + off));
+        entries.push({ date: d.toISOString().slice(0, 10), hours: hoursPerDay });
+      }
+    return entries;
+  };
+
+  it("계약은 9시간이지만 4주 평균 실근로가 15시간 이상이면 주휴가 발생한다", () => {
+    // 매주 월·화·목·금 6시간 = 체류 24h, 휴게 2h 차감 → 순 22h
+    const entries = runWeeks([[0, 1, 3, 4], [0, 1, 3, 4], [0, 1, 3, 4], [0, 1, 3, 4]]);
+    const r = computeMonthlyFromEntries(entries, {
+      year: 2026,
+      month: 2,
+      breakPaid: false,
+      schedule: CONTRACT_2D,
+      hireDate: "2025-01-01",
+      knownFrom: "2026-02-02",
+    });
+    const w = r.weeks.find((x) => x.weekStart === "2026-02-23")!;
+    expect(w.avgWeeklyActual).toBeGreaterThanOrEqual(15);
+    expect(w.eligibleBy).toBe("actual");
+    expect(w.qualified).toBe(true);
+    // 주휴시간은 4주 평균 실근로 ÷ 5 (계약 9h ÷ 5 = 1.8h 가 아니라)
+    expect(w.holidayHours).toBeCloseTo(22 / 5, 1);
+  });
+
+  it("실근로도 4주 평균 15시간 미만이면 초단시간 그대로 — 사유에 둘 다 적는다", () => {
+    // 매주 월·목 6시간 = 체류 12h, 순 11h
+    const entries = runWeeks([[0, 3], [0, 3], [0, 3], [0, 3]]);
+    const r = computeMonthlyFromEntries(entries, {
+      year: 2026,
+      month: 2,
+      breakPaid: false,
+      schedule: CONTRACT_2D,
+      hireDate: "2025-01-01",
+      knownFrom: "2026-02-02",
+    });
+    const w = r.weeks.find((x) => x.weekStart === "2026-02-23")!;
+    expect(w.eligibleBy).toBeNull();
+    expect(w.qualified).toBe(false);
+    expect(w.reason).toContain("계약 주 소정근로 9시간");
+    expect(w.reason).toContain("4주 평균 실근로 11시간");
+  });
+
+  it("계약이 15시간 이상이면 실근로가 적어도 계약 기준으로 판정한다", () => {
+    // WEEK5 = 주5일 25시간 계약. 실제로는 주5일 3시간씩(15h 미만) 나와도 계약이 기준
+    const entries = runWeeks([[0, 1, 2, 3, 4], [0, 1, 2, 3, 4], [0, 1, 2, 3, 4], [0, 1, 2, 3, 4]], 3);
+    const r = computeMonthlyFromEntries(entries, {
+      year: 2026,
+      month: 2,
+      breakPaid: false,
+      schedule: WEEK5,
+      hireDate: "2025-01-01",
+      knownFrom: "2026-02-02",
+    });
+    const w = r.weeks.find((x) => x.weekStart === "2026-02-23")!;
+    expect(w.eligibleBy).toBe("contract");
+    expect(w.holidayHours).toBeCloseTo(5, 5); // 25h ÷ 5 — 실근로(12.5h)가 아니라 계약 기준
+  });
+
+  it("계약 ↔ 실제가 다르면 scheduleMismatch 로 알린다", () => {
+    const entries = runWeeks([[0, 1, 3, 4], [0, 1, 3, 4], [0, 1, 3, 4], [0, 1, 3, 4]]);
+    const r = computeMonthlyFromEntries(entries, {
+      year: 2026,
+      month: 2,
+      breakPaid: false,
+      schedule: CONTRACT_2D,
+      hireDate: "2025-01-01",
+      knownFrom: "2026-02-02",
+    });
+    expect(r.scheduleMismatch).toEqual({
+      contractDays: 2,
+      contractHours: 9,
+      actualDays: 4,
+      actualHours: 22,
+    });
+  });
+
+  it("계약대로 일하면 scheduleMismatch 는 없다", () => {
+    // WEEK5(주5일 17~22시 = 25h) 대로 매주 5일 5시간씩
+    const entries = runWeeks([[0, 1, 2, 3, 4], [0, 1, 2, 3, 4], [0, 1, 2, 3, 4], [0, 1, 2, 3, 4]], 5);
+    const r = computeMonthlyFromEntries(entries, {
+      year: 2026,
+      month: 2,
+      breakPaid: true, // 휴게 유급 → 체류 25h 그대로
+      schedule: WEEK5,
+      hireDate: "2025-01-01",
+      knownFrom: "2026-02-02",
+    });
+    expect(r.scheduleMismatch).toBeNull();
+  });
+});
+
+describe("parseHourCell — 근무시간 칸을 못 읽어 그날이 사라지는 일 방지", () => {
+  it("엑셀 시간값(하루=1)을 시간으로 환산", () => {
+    expect(parseHourCell(0.2083333333333333)).toBeCloseTo(5, 3); // 5:00
+    expect(parseHourCell(4 / 24 + 47 / 1440 + 55 / 86400)).toBeCloseTo(4.7986, 3); // 4:47:55
+  });
+  it("사람이 손으로 적은 숫자·문자도 읽는다", () => {
+    expect(parseHourCell(5)).toBe(5); // "5" (시간)
+    expect(parseHourCell(4.5)).toBe(4.5);
+    expect(parseHourCell("5:00")).toBe(5);
+    expect(parseHourCell("4:47:55")).toBeCloseTo(4.7986, 3);
+    expect(parseHourCell("5.5")).toBe(5.5);
+    expect(parseHourCell("5시간 30분")).toBe(5.5);
+    expect(parseHourCell(new Date(Date.UTC(1899, 11, 30, 5, 30)))).toBe(5.5);
+  });
+  it("빈칸·0·합계(24시간 초과)는 버린다", () => {
+    expect(parseHourCell(undefined)).toBeNull();
+    expect(parseHourCell("")).toBeNull();
+    expect(parseHourCell(0)).toBeNull();
+    expect(parseHourCell(-1)).toBeNull();
+    expect(parseHourCell(62.5)).toBeNull(); // 월 합계 62:32
+    expect(parseHourCell("62:32:00")).toBeNull();
+    expect(parseHourCell("결근")).toBeNull();
+  });
+});
+
+describe("parseDateCell — 날짜 칸", () => {
+  it("엑셀 일련번호 / Date / 문자 날짜", () => {
+    expect(parseDateCell(46223)).toEqual({ date: "2026-07-20" });
+    expect(parseDateCell(new Date(Date.UTC(2026, 6, 20)))).toEqual({ date: "2026-07-20" });
+    expect(parseDateCell("2026-07-20")).toEqual({ date: "2026-07-20" });
+    expect(parseDateCell("2026.7.2")).toEqual({ date: "2026-07-02" });
+  });
+  it("연도 없는 표기는 월·일만 돌려준다 (나중에 연도를 채운다)", () => {
+    expect(parseDateCell("7/20")).toEqual({ month: 7, day: 20 });
+    expect(parseDateCell("7월 20일")).toEqual({ month: 7, day: 20 });
+  });
+  it("날짜가 아닌 값은 null — 1900년대로 튀는 작은 숫자 포함", () => {
+    expect(parseDateCell(20)).toBeNull(); // 일자만 적힌 칸 → 1900-01-19 로 튀지 않게
+    expect(parseDateCell("합계")).toBeNull();
+    expect(parseDateCell(undefined)).toBeNull();
   });
 });

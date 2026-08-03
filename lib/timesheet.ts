@@ -48,6 +48,11 @@ export interface TimesheetPerson {
   rawName: string; // 시트에 적힌 원문 (예: "김하연 조교_퇴직")
   name: string; // 정규화된 이름 (예: "김하연")
   entries: TimesheetEntry[];
+  /**
+   * 날짜는 읽었는데 근무시간을 못 읽어 버린 행 수.
+   * 이런 날은 '결근' 으로 잡혀 주휴가 날아가므로 **조용히 넘기지 않고 화면에 알린다**.
+   */
+  skipped: number;
 }
 
 /** "김하연 조교_퇴직" → "김하연" (공백 제거, _접미사 제거, 직책어 제거) */
@@ -64,6 +69,53 @@ const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30); // 1899-12-30
 function serialToYmd(serial: number): string {
   const ms = EXCEL_EPOCH_MS + Math.round(serial) * 86400000;
   return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * 근무시간 셀 → 시간(소수). 못 읽으면 null.
+ *
+ * 이 열은 보통 `퇴근−출근` 수식이라 엑셀 시간값(하루 = 1)으로 들어오지만,
+ * 사람이 손으로 고친 칸은 **그냥 숫자(5)** 나 **문자("5:00")** 로 들어온다.
+ * 예전에는 그런 칸을 통째로 버려서 그날이 결근으로 잡혔고, 그 주 주휴가 사라졌다.
+ */
+export function parseHourCell(v: unknown): number | null {
+  let h: number | null = null;
+  if (typeof v === "number") {
+    if (!isFinite(v) || v <= 0) return null;
+    // 1 미만이면 엑셀 시간값(하루 비율), 그 이상이면 사람이 적은 '시간' 으로 본다
+    h = v < 1 ? v * 24 : v;
+  } else if (v instanceof Date) {
+    h = v.getUTCHours() + v.getUTCMinutes() / 60 + v.getUTCSeconds() / 3600;
+  } else if (typeof v === "string") {
+    const s = v.trim();
+    if (!s) return null;
+    const hm = s.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/); // 5:00 / 5:00:00
+    if (hm) h = +hm[1] + +hm[2] / 60 + (+(hm[3] ?? 0)) / 3600;
+    else {
+      const kr = s.match(/^(\d+(?:\.\d+)?)\s*시간?\s*(?:(\d+)\s*분)?$/); // 5시간 30분
+      if (kr) h = +kr[1] + (+(kr[2] ?? 0)) / 60;
+      else if (/^\d+(\.\d+)?$/.test(s)) h = +s;
+    }
+  }
+  if (h === null || !isFinite(h) || h <= 0 || h > 24) return null; // 합계행(>24h)·이상치 제외
+  return h;
+}
+
+/** 날짜 셀 → YYYY-MM-DD. 못 읽으면 null. 연도가 없는 표기(7/20)는 나중에 채운다. */
+export function parseDateCell(v: unknown): { date?: string; month?: number; day?: number } | null {
+  if (typeof v === "number") {
+    if (!isFinite(v) || v < 36526) return null; // 2000-01-01 미만 = 날짜가 아닌 숫자(일자만 적힌 칸 등)
+    return { date: serialToYmd(v) };
+  }
+  if (v instanceof Date) return { date: new Date(v).toISOString().slice(0, 10) };
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  const full = s.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+  if (full)
+    return { date: `${full[1]}-${String(+full[2]).padStart(2, "0")}-${String(+full[3]).padStart(2, "0")}` };
+  const md = s.match(/^(\d{1,2})[-./](\d{1,2})$/) ?? s.match(/^(\d{1,2})월\s*(\d{1,2})일/);
+  if (md) return { month: +md[1], day: +md[2] };
+  return null;
 }
 
 /** 엑셀 버퍼 → 직원별 일자/근무시간 목록 (모든 시트 스캔) */
@@ -98,37 +150,52 @@ export function parseTimesheetWorkbook(buf: Buffer | Uint8Array): TimesheetPerso
         if (!rawName) continue;
 
         const entries: TimesheetEntry[] = [];
+        const partials: { month: number; day: number; hours: number }[] = []; // 연도 없는 날짜(7/20)
+        let skipped = 0;
         for (let dr = r + 1; dr <= range.e.r; dr++) {
           const dCell = ws[XLSX.utils.encode_cell({ r: dr, c })];
           // 다음 표의 시작(다시 '날짜' 헤더)이나 새 이름을 만나면 종료
           if (dCell && dCell.v === "날짜") break;
-          const hCell = ws[XLSX.utils.encode_cell({ r: dr, c: c + 3 })];
-          const isDate =
-            dCell && (typeof dCell.v === "number" || dCell.v instanceof Date);
-          if (!isDate) {
+          const parsedDate = dCell ? parseDateCell(dCell.v) : null;
+          if (!parsedDate) {
             // 날짜 없는 행: 합계/빈행 — 계속 스캔하되 연속 6행 비면 종료
             let empty = 0;
             for (let k = dr; k < dr + 6 && k <= range.e.r; k++) {
               const kd = ws[XLSX.utils.encode_cell({ r: k, c })];
-              if (!kd || (typeof kd.v !== "number" && !(kd.v instanceof Date))) empty++;
+              if (!kd || !parseDateCell(kd.v)) empty++;
               else break;
             }
             if (empty >= 6) break;
             continue;
           }
-          if (!hCell || typeof hCell.v !== "number" || hCell.v <= 0) continue;
-
-          const dateStr =
-            typeof dCell.v === "number"
-              ? serialToYmd(dCell.v)
-              : new Date(dCell.v as Date).toISOString().slice(0, 10);
-          const hours = (hCell.v as number) * 24; // 엑셀 시간값(일 비율) → 시간
-          if (hours <= 0 || hours > 24) continue; // 합계(>24h)나 이상치 제외
-          entries.push({ date: dateStr, hours });
+          const hCell = ws[XLSX.utils.encode_cell({ r: dr, c: c + 3 })];
+          const hours = parseHourCell(hCell?.v);
+          if (hours === null) {
+            skipped++; // 날짜는 있는데 근무시간을 못 읽음 — 결근으로 오인되지 않게 보고한다
+            continue;
+          }
+          if (parsedDate.date) entries.push({ date: parsedDate.date, hours });
+          else partials.push({ month: parsedDate.month!, day: parsedDate.day!, hours });
         }
 
-        if (entries.length > 0) {
-          people.push({ rawName, name: normalizeName(rawName), entries });
+        // 연도 없는 날짜는 같은 표의 온전한 날짜에서 연도를 빌려 온다
+        if (partials.length > 0) {
+          const years = entries.map((e) => Number(e.date.slice(0, 4)));
+          const year = years.length ? years[0] : null;
+          for (const p of partials) {
+            if (year === null) {
+              skipped++;
+              continue;
+            }
+            entries.push({
+              date: `${year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`,
+              hours: p.hours,
+            });
+          }
+        }
+
+        if (entries.length > 0 || skipped > 0) {
+          people.push({ rawName, name: normalizeName(rawName), entries, skipped });
         }
       }
     }
@@ -138,10 +205,12 @@ export function parseTimesheetWorkbook(buf: Buffer | Uint8Array): TimesheetPerso
   const merged = new Map<string, TimesheetPerson>();
   for (const p of people) {
     const ex = merged.get(p.name);
-    if (ex) ex.entries.push(...p.entries);
-    else merged.set(p.name, { ...p, entries: [...p.entries] });
+    if (ex) {
+      ex.entries.push(...p.entries);
+      ex.skipped += p.skipped;
+    } else merged.set(p.name, { ...p, entries: [...p.entries] });
   }
-  return [...merged.values()];
+  return [...merged.values()].filter((p) => p.entries.length > 0 || p.skipped > 0);
 }
 
 /** 기록표 전체에서 가장 많이 등장하는 연·월 감지 (화면 선택과 무관하게 파일 기준) */
@@ -210,13 +279,27 @@ export interface WeekSummary {
   attendedDates: string[];
   /** 기록이 없는 구간이 걸쳐 있어 판정이 불완전한 주 */
   partial: boolean;
+  /** 그 주 실근로시간 (달 경계를 넘어 주 전체, 휴게 차감 + 연차 유급분 포함) */
+  actualHours: number;
+  /** §18③ 판정에 쓴 4주 평균 실근로시간 */
+  avgWeeklyActual: number;
   perfect: boolean; // ㉡ 개근 (attendedDays >= requiredDays)
-  eligible: boolean; // ㉠ 주 소정근로 15시간 이상
+  eligible: boolean; // ㉠ 1주 소정근로 15시간 이상
+  /** ㉠ 을 무엇으로 통과했나 — 계약 소정근로시간 / 4주 평균 실근로 / 미달(null) */
+  eligibleBy: "contract" | "actual" | null;
   employedWholeWeek: boolean; // ㉢ 주 내내 근로관계 존속
   qualified: boolean; // 셋 다 충족
   holidayHours: number; // 부여 주휴시간
   /** 미발생 사유 (화면·명세서 설명용) */
   reason?: string;
+}
+
+/** 계약 근로시간표와 실제 근로가 다를 때의 대조표 (화면 경고용) */
+export interface ScheduleMismatch {
+  contractDays: number;
+  contractHours: number;
+  actualDays: number; // 이 달 주 평균
+  actualHours: number; // 이 달 주 평균
 }
 
 export interface MonthlyTimesheetResult {
@@ -239,10 +322,18 @@ export interface MonthlyTimesheetResult {
   noSchedule: boolean;
   /** 1일 소정근로시간 (연차 환산 기준) = 주 소정근로시간 ÷ 주 근무일수 */
   dailyContractual: number;
+  /**
+   * 계약 근로시간표가 실제와 어긋날 때의 대조표 (같으면 null).
+   * 주휴·연차 판정이 전부 계약을 기준으로 돌아가므로, 계약이 실제보다 적게 적혀 있으면
+   * 실제로는 일을 많이 한 사람이 초단시간근로자로 잡혀 주휴가 통째로 사라진다.
+   */
+  scheduleMismatch: ScheduleMismatch | null;
 }
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 const day = (s: string) => new Date(s + "T00:00:00Z");
+/** 사람이 읽을 시간 — 소수 첫째 자리 */
+const r1 = (n: number) => Math.round(n * 10) / 10;
 
 function mondayOf(dateStr: string): string {
   const d = day(dateStr);
@@ -387,6 +478,43 @@ export function computeMonthlyFromEntries(
   for (const wk of weekNet.keys()) if (!weekStarts.includes(wk)) weekStarts.push(wk);
   weekStarts.sort();
 
+  /**
+   * 그 주(월~일) 실근로시간 — 달 경계를 넘어 전 기간.
+   * 휴게 차감은 급여 산정과 같은 기준(`breakPaid`)을 쓴다 — 유급휴게는 근로시간에 산입되므로
+   * 여기서만 따로 빼면 계약 소정시간과 견줄 수 없다. 연차는 1일 소정시간을 채운 것으로 본다.
+   */
+  const actualWeek = (ws: string) => {
+    let h = 0;
+    for (let i = 0; i < 7; i++) {
+      const date = addDays(ws, i);
+      const raw = allDaily.get(date) ?? 0;
+      if (raw > 0) h += opts.breakPaid ? raw : Math.max(raw - Math.min(0.5, raw), 0);
+      h += (leaveByDate.get(date) ?? 0) * dailyContractual;
+    }
+    return h;
+  };
+
+  /**
+   * §18③ '4주 동안(4주 미만이면 그 기간)을 평균하여 1주 소정근로시간'.
+   * 계약이 15시간 미만이어도 **실근로가 계속·반복적으로 그것을 넘으면** 소정근로시간이
+   * 묵시적으로 변경된 것으로 본다 — 계약서 글자만 보고 초단시간으로 분류하면 체불이 된다.
+   * 기록이 없는 주·입사 전 주는 평균에서 뺀다(0으로 깔면 평균이 부당하게 내려간다).
+   */
+  const avg4Weeks = (weekStart: string) => {
+    let sum = 0;
+    let n = 0;
+    for (let k = 0; k < 4; k++) {
+      const ws = addDays(weekStart, -7 * k);
+      if (opts.knownFrom && ws < opts.knownFrom) continue;
+      if (opts.hireDate && ws < opts.hireDate) continue;
+      if (opts.resignDate && ws > opts.resignDate) continue;
+      sum += actualWeek(ws);
+      n++;
+    }
+    // 창 안에 아는 주가 하나도 없으면(첫 업로드 달의 첫 주 등) 그 주 자체로 갈음한다
+    return n > 0 ? sum / n : actualWeek(weekStart);
+  };
+
   const weeks: WeekSummary[] = weekStarts.map((weekStart) => {
     const weekEnd = addDays(weekStart, 6);
     const hours = weekNet.get(weekStart) ?? 0;
@@ -413,6 +541,8 @@ export function computeMonthlyFromEntries(
     }
     const attendedDays = attendedDates.length;
     const partial = unknownDays > 0;
+    const actualHours = actualWeek(weekStart);
+    const avgWeeklyActual = avg4Weeks(weekStart);
 
     if (!hasSchedule) {
       // 근로시간표가 없으면 채워야 할 일수를 알 수 없다 — 옛 방식(실근로 15시간 초과)으로 갈음
@@ -428,8 +558,11 @@ export function computeMonthlyFromEntries(
         leaveDays: weekLeave,
         attendedDates,
         partial,
+        actualHours: r1(actualHours),
+        avgWeeklyActual: r1(avgWeeklyActual),
         perfect: eligible,
         eligible,
+        eligibleBy: eligible ? ("actual" as const) : null,
         employedWholeWeek,
         qualified,
         holidayHours: qualified ? Math.min(hours / 5, 8) : 0,
@@ -444,8 +577,14 @@ export function computeMonthlyFromEntries(
     // ㉡ 개근 — 요일이 아니라 **일수**로 본다. 그 주 공휴일수만큼 채울 일수가 줄어든다
     const requiredDays = Math.max(plan.days - weekHolidays, 0);
     const perfect = attendedDays >= requiredDays;
-    // ㉠ 15시간 — 계약상 소정근로시간 기준 (§18③ '미만' 제외 → 15시간 정각은 대상)
-    const eligible = plan.hours >= 15;
+    // ㉠ 15시간 (§18③ '미만' 이 제외 → 15시간 정각은 대상).
+    //   1순위는 계약 소정근로시간. 계약이 15시간 미만이어도 4주 평균 실근로가 15시간 이상이면
+    //   소정근로시간이 실질적으로 그만큼으로 바뀐 것으로 보고 대상에 넣는다.
+    const eligibleBy: "contract" | "actual" | null =
+      plan.hours >= 15 ? "contract" : avgWeeklyActual >= 15 ? "actual" : null;
+    const eligible = eligibleBy !== null;
+    // 주휴시간의 기준이 되는 '1주 소정근로시간'
+    const basisHours = eligibleBy === "actual" ? avgWeeklyActual : plan.hours;
     // 기록이 없는 날이 걸쳐 있으면 개근을 판정할 수 없다 —
     // 모르는 날을 결근으로 치면 과소지급, 출근으로 치면 과다지급이라 **보류하고 사람이 본다**.
     const qualified = eligible && perfect && employedWholeWeek && !partial;
@@ -460,15 +599,18 @@ export function computeMonthlyFromEntries(
       leaveDays: weekLeave,
       attendedDates,
       partial,
+      actualHours: r1(actualHours),
+      avgWeeklyActual: r1(avgWeeklyActual),
       perfect,
       eligible,
+      eligibleBy,
       employedWholeWeek,
       qualified,
-      holidayHours: qualified ? Math.min(plan.hours / 5, 8) : 0,
+      holidayHours: qualified ? Math.min(basisHours / 5, 8) : 0,
       reason: qualified
         ? undefined
         : !eligible
-        ? `주 소정근로 ${plan.hours}시간 (15시간 미만)`
+        ? `계약 주 소정근로 ${r1(plan.hours)}시간 · 4주 평균 실근로 ${r1(avgWeeklyActual)}시간 — 둘 다 15시간 미만(§18③ 초단시간)`
         : !employedWholeWeek
         ? opts.resignDate && opts.resignDate < weekEnd
           ? `퇴사일(${opts.resignDate})이 주휴일(${weekEnd}) 이전`
@@ -486,8 +628,27 @@ export function computeMonthlyFromEntries(
     .filter((w) => w.weekEnd.startsWith(prefix))
     .reduce((s, w) => s + w.holidayHours, 0);
 
+  // 계약 근로시간표 ↔ 실제 근로 대조. 어긋나면 주휴·연차 판정이 통째로 틀어지므로 화면에 띄운다.
+  // 판정이 온전한 주(기록 완전 + 출근 있음 + 주휴일이 이 달)만 평균에 넣는다.
+  const solid = weeks.filter(
+    (w) => w.weekEnd.startsWith(prefix) && !w.partial && w.employedWholeWeek && w.attendedDays > 0
+  );
+  let scheduleMismatch: ScheduleMismatch | null = null;
+  if (hasSchedule && solid.length >= 2) {
+    const aDays = solid.reduce((s, w) => s + w.attendedDays, 0) / solid.length;
+    const aHours = solid.reduce((s, w) => s + w.actualHours, 0) / solid.length;
+    if (Math.abs(aDays - plan.days) >= 0.5 || Math.abs(aHours - plan.hours) >= 1)
+      scheduleMismatch = {
+        contractDays: plan.days,
+        contractHours: r1(plan.hours),
+        actualDays: r1(aDays),
+        actualHours: r1(aHours),
+      };
+  }
+
   const r2 = (n: number) => Math.round(n * 1000) / 1000;
   return {
+    scheduleMismatch,
     stayHours: r2(stayHours),
     breakHours: r2(breakHours),
     netHours: r2(netHours),

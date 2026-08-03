@@ -195,6 +195,10 @@ export async function POST(req: Request) {
       workHours: r.paidHours,
       weeklyHolidayHours: Math.round(r.weeklyHolidayHours * 100) / 100,
       noSchedule: r.noSchedule,
+      // 계약 근로시간표가 실제와 다르면 주휴·연차 판정이 통째로 틀어진다 — 화면에 띄운다
+      scheduleMismatch: r.scheduleMismatch,
+      // 날짜는 있는데 근무시간을 못 읽어 버린 행 (결근으로 오인될 수 있다)
+      skippedRows: p.skipped,
       weeks: r.weeks.map((w) => ({
         weekStart: w.weekStart,
         weekEnd: w.weekEnd,
@@ -205,6 +209,9 @@ export async function POST(req: Request) {
         leaveDays: w.leaveDays,
         attendedDates: w.attendedDates,
         partial: w.partial,
+        actualHours: w.actualHours,
+        avgWeeklyActual: w.avgWeeklyActual,
+        eligibleBy: w.eligibleBy,
         qualified: w.qualified,
         // 주휴일이 다음 달인 주는 이 달 합계에 넣지 않는다 (다음 달에서 센다)
         carriedToNextMonth: !w.weekEnd.startsWith(
