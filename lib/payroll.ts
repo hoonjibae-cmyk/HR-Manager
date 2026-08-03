@@ -385,19 +385,19 @@ export function computePayroll(
         ? month.workedHours // 실제 근로시간 입력 시 그대로 사용(일할 이미 반영됨)
         : weeklyContractual * WEEKS_PER_MONTH * prorate; // 스케줄 기반 추정
     baseP = round0(emp.baseWage * monthHours);
-    // 시급제 주휴수당 — 요건은 lib/timesheet.ts 에서 판정한다
-    // (주 소정근로 15시간 이상 + 소정근로일 개근 + 1주 근로관계 존속)
+    // 시급제 주휴수당 — 요건은 lib/timesheet.ts 에서 **1주 단위**로 판정한다
+    // (그 주 실근로 15시간 이상 + 그 주 내내 근로관계 존속)
     if (month.weeklyHolidayHours != null) {
       weeklyHolidayP = round0(emp.baseWage * month.weeklyHolidayHours);
       notes.push(
         month.weeklyHolidayHours > 0
-          ? `주휴수당: 주휴시간 ${month.weeklyHolidayHours.toFixed(2)}시간 (소정근로일을 개근한 주만 부여)`
-          : "주휴수당: 요건을 갖춘 주가 없어 미발생 (개근·주 15시간·1주 근로관계 존속)"
+          ? `주휴수당: 주휴시간 ${month.weeklyHolidayHours.toFixed(2)}시간 (그 주 근로 15시간 이상인 주만 부여)`
+          : "주휴수당: 주 15시간 이상 근로한 주가 없어 미발생"
       );
     } else {
       weeklyHolidayP = round0(emp.baseWage * weeklyHoliday * WEEKS_PER_MONTH * prorate);
       if (weeklyHoliday === 0) notes.push("주 소정근로 15시간 미만으로 주휴수당 미발생");
-      else notes.push("주휴수당: 근로시간표 기준 추정 (시간기록표를 올리면 개근 여부까지 반영된다)");
+      else notes.push("주휴수당: 근로시간표 기준 추정 (시간기록표를 올리면 주별 실근로로 판정된다)");
     }
   } else if (emp.payScheme === "RATIO") {
     const rev = month.classRevenue ?? 0;

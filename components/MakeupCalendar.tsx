@@ -285,7 +285,16 @@ export default function MakeupCalendar({
                       <span className="font-semibold text-slate-700">{t.name}</span>
                       <div className="text-xs text-slate-400">{t.department}</div>
                       {t.excludedByScheme && (
-                        <span className="pill bg-slate-100 text-slate-500">완전비율제 · 수당 대상 아님</span>
+                        <span
+                          className="pill bg-slate-100 text-slate-500"
+                          title={
+                            t.payScheme === "HOURLY"
+                              ? "시급제는 보강 시간이 출퇴근 기록에 이미 잡혀 실근로시간으로 지급됩니다 — 여기서 또 얹으면 이중 지급이 됩니다."
+                              : "완전비율제는 시간 단위 수당 개념이 없습니다."
+                          }
+                        >
+                          {t.payScheme === "HOURLY" ? "시급제 · 실근로에 이미 반영" : "완전비율제 · 수당 대상 아님"}
+                        </span>
                       )}
                       {t.missingSchedule && !t.excludedByScheme && (
                         <span className="pill bg-amber-50 text-amber-700">근로시간표 없음</span>

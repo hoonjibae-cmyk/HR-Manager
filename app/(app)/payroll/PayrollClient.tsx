@@ -300,41 +300,29 @@ export default function PayrollClient() {
                   <td className="text-right tnum font-semibold">{m.weeklyHolidayHours ? fmtHM(m.weeklyHolidayHours) : "-"}</td>
                   <td className="pl-3">{m.breakPaid ? "유급(그대로)" : "무급(−30분/일)"}</td>
                   <td className="text-slate-500">
-                    {m.noSchedule && (
+                    {m.noSchedule && m.leaveDays > 0 && (
                       <div className="text-amber-700 mb-0.5">
-                        ⚠️ 근로시간표 없음 — 개근 여부를 판정하지 못해 실근로 기준으로 갈음했습니다
+                        ⚠️ 근로시간표 없음 — 연차 사용일의 유급 시간을 환산하지 못했습니다
                       </div>
                     )}
                     {m.skippedRows > 0 && (
                       <div className="text-rose-700 mb-0.5">
-                        ⚠️ 근무시간을 못 읽은 행 {m.skippedRows}건 — 그날이 <b>결근</b>으로 잡힙니다.
+                        ⚠️ 근무시간을 못 읽은 행 {m.skippedRows}건 — 그날 근로시간이 통째로 빠져
+                        그 주 15시간 판정이 틀어질 수 있습니다.
                         해당 칸이 <code>4:47:55</code> 같은 시간 값인지 확인하세요.
-                      </div>
-                    )}
-                    {m.scheduleMismatch && (
-                      <div className="text-amber-800 bg-amber-50 border border-amber-200 rounded px-1.5 py-1 mb-1">
-                        ⚠️ <b>계약 근로시간표가 실제와 다릅니다</b> —
-                        계약 <b className="tnum">주{m.scheduleMismatch.contractDays}일 · {m.scheduleMismatch.contractHours}h</b>
-                        {" / "}실제 <b className="tnum">주{m.scheduleMismatch.actualDays}일 · {m.scheduleMismatch.actualHours}h</b>
-                        {m.scheduleMismatch.contractHours < 15 && (
-                          <>
-                            <br />
-                            계약이 <b>주 15시간 미만</b>이라 §18③ 초단시간근로자로 분류돼{" "}
-                            <b>주휴·연차가 적용되지 않습니다</b>. 실제 근로가 맞다면{" "}
-                            <a href={`/employees/${m.employeeId}`} className="underline font-semibold">
-                              계약 근로시간표를 실제에 맞게 고쳐 주세요
-                            </a>.
-                          </>
-                        )}
                       </div>
                     )}
                     <div className="space-y-0.5">
                       {m.weeks.map((w: any) => (
                         <div key={w.weekStart}>
                           <span className="tnum">{w.weekStart.slice(5)}~{w.weekEnd.slice(5)}</span>{" "}
-                          <span className="tnum" title={w.attendedDates?.length ? `출근·연차: ${w.attendedDates.map((d: string) => d.slice(5)).join(", ")}` : undefined}>
-                            {w.requiredDays > 0 ? `${w.attendedDays}/${w.requiredDays}일` : fmtHM(w.hours)}
-                          </span>{" "}
+                          <span
+                            className={`tnum ${w.eligible ? "font-semibold text-slate-600" : ""}`}
+                            title={w.attendedDates?.length ? `출근·연차: ${w.attendedDates.map((d: string) => d.slice(5)).join(", ")}` : undefined}
+                          >
+                            {fmtHM(w.actualHours)}
+                          </span>
+                          <span className="text-slate-300"> · {w.attendedDays}일</span>{" "}
                           {w.qualified ? (
                             w.carriedToNextMonth ? (
                               <span className="text-slate-400">
@@ -343,11 +331,6 @@ export default function PayrollClient() {
                             ) : (
                               <span className="text-emerald-700 font-semibold">
                                 ✓ 주휴 {fmtHM(w.holidayHours)}
-                                {w.eligibleBy === "actual" && (
-                                  <span className="font-normal text-emerald-600">
-                                    {" "}(계약은 15h 미만이나 4주 평균 실근로 {w.avgWeeklyActual}h 로 인정)
-                                  </span>
-                                )}
                               </span>
                             )
                           ) : (
@@ -551,11 +534,21 @@ export default function PayrollClient() {
             · <b>야간h</b>: 22시~06시 근무시간 → 야간가산(+0.5)
           </p>
           <p>
-            · <b>주휴수당(시급제)</b>: ① 1주 소정근로 15시간 이상 ② <b>그 주 근무일수를 채움(개근)</b>
-            ③ 1주(월~일) 근로관계 존속 — 셋을 모두 갖춘 주에만 발생한다 (근로기준법 §55·시행령 §30).
-            개근은 <b>요일이 아니라 일수</b>로 본다 — 계약 주3일이면 어느 요일이든 3일 이상 나오면 개근.
-            연차 사용일은 출근으로 세고, 그 주 공휴일수만큼 채울 일수가 줄어든다. 지각·조퇴는 결근이 아니다.
+            · <b>주휴수당(시급제)</b>: <b>1주 단위</b>로 판정한다 — ① 그 주 근로시간이 <b>15시간 이상</b>이고
+            ② 그 주(월~일) 내내 근로관계가 있으면 <b>그 주에 한해</b> 발생한다 (근로기준법 §55·§18③).
+            다른 주가 15시간에 못 미쳐도 상관없다. 주휴시간 = 그 주 근로시간 ÷ 5 (상한 8h).
             주휴일(일요일) 전에 퇴사하면 그 주는 미발생.
+          </p>
+          <p>
+            · 이 학원 시급제는 <b>매월 학원이 짜서 공지하는 근로계획표가 그 달의 소정근로</b>이므로,
+            계약서의 주당 근로일이 아니라 <b>그 주 실제 근로시간</b>을 소정근로로 본다.
+            계획표대로 나온 결과가 실근로이므로 별도의 근무일수 개근 판정은 두지 않는다.
+            연차 사용일은 1일 소정근로시간(계약 주 시간 ÷ 주 근무일수)을 채운 것으로 센다.
+          </p>
+          <p>
+            · <b>시급제에는 연장·휴일 가산을 붙이지 않는다</b> — 15시간을 넘긴 주마다 주휴를 인정하는 것이
+            그 자리를 대신해 왔고, 1일 4.5시간 내외라 법정 가산 요건(1일 8h·주 40h 초과)에 닿지 않는다.
+            보강 근무분만 <b>보강·오버타임</b> 화면에서 따로 산정된다.
           </p>
           <p>
             · <b>달을 걸친 주</b>는 <b>주휴일(일요일)이 속한 달</b>에서 한 번만 지급된다 —
@@ -563,14 +556,9 @@ export default function PayrollClient() {
             업로드한 일별 기록은 저장돼 있어서 <b>다음 달 파일에 앞달 며칠이 없어도</b> 개근을 판정할 수 있다.
           </p>
           <p>
-            · <b>⏸ 판정 보류</b>: 그 주의 일부 날짜가 아직 한 번도 업로드된 적이 없어 결근인지 알 수 없는 경우다.
-            추측해서 주지도, 빼지도 않는다 — 그 주가 포함된 앞달 기록표를 한 번 올리면 자동으로 확정된다.
-          </p>
-          <p>
-            · <b>15시간 판정(§18③)</b>은 계약 소정근로시간이 1순위지만, 계약이 15시간 미만이어도
-            <b> 4주 평균 실근로가 15시간 이상</b>이면 소정근로시간이 실질적으로 그만큼 바뀐 것으로 보고 대상에 넣는다.
-            계약 글자만 보고 초단시간으로 분류하면 체불이 되기 때문. 이 경우 주휴시간은 4주 평균 실근로 ÷ 5 로 계산한다.
-            <b> 계약과 실제가 다르면 위 표에 ⚠️ 로 뜬다</b> — 계약 근로시간표를 실제에 맞게 고치는 게 근본 해결이다.
+            · <b>⏸ 판정 보류</b>: 그 주의 일부 날짜가 아직 한 번도 업로드된 적이 없어 그 주 근로시간을
+            다 알 수 없는 경우다. 모르는 날을 0으로 깔면 15시간에 못 미쳐 주휴가 부당하게 빠지므로
+            추측하지 않고 보류한다 — 그 주가 포함된 앞달 기록표를 한 번 올리면 자동으로 확정된다.
           </p>
           <p>
             · <b>체류 / 순 근로 / 산정시간</b>: 체류는 출근~퇴근 기록 그대로, 순 근로는 휴게 30분을 뺀 시간.

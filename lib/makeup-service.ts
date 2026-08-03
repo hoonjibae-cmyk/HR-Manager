@@ -172,7 +172,12 @@ export async function overtimeForMonth(
     result.holidayOverHours = sum((l) => l.kind === "HOLIDAY" && !!l.over);
     result.nightHours = sum((l) => l.night);
 
-    const excludedByScheme = emp.payScheme === "RATIO";
+    // 수당 산정 제외 —
+    //  · RATIO: 완전비율제 프리랜서라 시간 단위 수당 개념이 없다
+    //  · HOURLY: 보강 시간이 이미 출퇴근 기록(시간기록표)에 잡혀 실근로시간으로 지급된다.
+    //    여기서 또 얹으면 같은 시간을 두 번 주는 셈이다. 시급제는 15시간을 넘긴 주마다
+    //    주휴를 인정하는 것으로 초과근로분을 갈음해 왔다(lib/timesheet.ts 머리말).
+    const excludedByScheme = emp.payScheme === "RATIO" || emp.payScheme === "HOURLY";
     const hourlyWage = excludedByScheme ? 0 : hourlyWageOf(emp, segMap.get(employeeId));
     if (excludedByScheme) {
       result.extraHours = 0;

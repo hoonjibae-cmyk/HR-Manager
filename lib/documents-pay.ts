@@ -227,12 +227,13 @@ export function payslipHtml(args: {
           ? p.weeklyHolidayHours
           : p.weeklyHolidayP / p.hourlyWage;
       holidayNote = `<div class="small">· 주휴수당 = 주휴시간 <b>${hm(whHours)}</b> × 시급 ${won(p.hourlyWage)}원 = <b>${won(p.weeklyHolidayP)}원</b>
-        &nbsp;(1주 소정근로시간이 15시간 이상이고 <b>그 주 소정근로일수를 채운(개근)</b> 주에 한해 부여 —
-        근로기준법 제55조·시행령 제30조. 근무 요일이 바뀌어도 <b>주당 근무일수</b>로 판정하며,
-        연차 사용일은 출근으로 봅니다. 주휴시간 = 주 소정근로시간 ÷ 5, 주당 최대 8시간)</div>`;
+        &nbsp;(<b>1주 단위</b>로 판정 — 그 주 근로시간이 <b>15시간 이상</b>이고 그 주 내내 근로관계가 있으면
+        그 주에 한해 부여합니다. 근로기준법 제55조·제18조제3항. 매월 공지되는 근로계획표가 그 달의
+        소정근로이므로 <b>그 주 실제 근로시간</b>을 기준으로 하며, 연차 사용일은 1일 소정근로시간을
+        채운 것으로 봅니다. 주휴시간 = 그 주 근로시간 ÷ 5, 주당 최대 8시간)</div>`;
     } else if (p.weeklyHolidayP === 0) {
-      holidayNote = `<div class="small">· 주휴수당: 요건(주 소정근로 15시간 이상 + 소정근로일 개근 + 1주간 근로관계 존속)을
-        갖춘 주가 없어 미발생 — 근로기준법 제55조·시행령 제30조</div>`;
+      holidayNote = `<div class="small">· 주휴수당: <b>주 15시간 이상 근로한 주</b>가 없어 미발생 —
+        근로기준법 제55조·제18조제3항</div>`;
     }
   }
 

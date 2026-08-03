@@ -10,22 +10,29 @@
 //  - 기록표 근무시간은 출퇴근 기준이며, 직원별 계약에 따라
 //    휴게 30분 유급(breakPaid=true → 그대로 인정) / 무급(false → 근무일마다 0.5h 차감)
 //
-// 주휴수당 (근로기준법 §55①, 시행령 §30①, §18③) — 요건 세 가지를 모두 만족해야 발생한다.
-//  ㉠ 1주 **소정근로시간 15시간 이상** (§18③ — 15시간 '미만' 이 제외이므로 15시간 정각은 대상)
-//     판정 기준은 실근로가 아니라 **계약상 소정근로시간**이다.
-//  ㉡ 그 주 **소정근로일 개근** (시행령 §30①) — **근무일수로 센다**.
-//     계약이 주3일이면 그 주에 3일 이상 나왔는지만 본다. **어느 요일인지는 보지 않는다** —
-//     이 학원은 학원 사정으로 근무 요일이 달마다 바뀌어(월수 → 월목 → 화수) 요일을 맞추면
-//     실제로는 개근한 사람이 결근으로 잡힌다.
-//     · 연차 사용일은 출근으로 센다 · 그 주 공휴일 수만큼 채워야 할 일수가 줄어든다
-//     · 지각·조퇴는 결근이 아니다(근기 68207-1465) — 기록이 있으면 하루로 센다
-//  ㉢ 그 주(월~일) 내내 **근로관계 존속** — 주휴일 전에 퇴사하거나 주 중간에 입사하면 미발생
+// 주휴수당 (근로기준법 §55①, §18③) — **1주 단위로, 그 주 실근로시간만 보고 판정한다**.
+//
+//  이 학원의 시급제는 계약서의 '주당 근로일' 이 문서화용 형식일 뿐이고, **매월 말에 학원이 다음 달
+//  근로계획표를 짜서 공지하는 것이 그 달의 소정근로**다. 계획표는 달마다 바뀌고 주마다 다르다.
+//  그래서 계약서 주 근무일수로 개근을 따지면 실제와 어긋나고, 4주 평균을 내면 특정 주에
+//  많이 일한 사실이 묻힌다. **그 주에 실제로 몇 시간 일했는지가 그 주의 소정근로시간**이다.
+//
+//  ㉠ 그 주 소정(=실)근로 **15시간 이상** (§18③ — 15시간 '미만' 이 제외이므로 15시간 정각은 대상)
+//     한 주라도 15시간을 채우면 **그 주에 한해** 주휴가 발생한다. 다른 주가 미달이어도 상관없다.
+//     계획표대로 나온 결과가 실근로이므로 실근로 충족 자체가 개근을 겸한다 —
+//     별도의 '근무일수 개근' 판정을 두지 않는다(요일·일수가 매달 바뀌어 판정이 불가능하다).
+//     · 연차 사용일은 1일 소정근로시간을 채운 것으로 세고 · 지각·조퇴는 시간만큼만 줄어든다
+//  ㉡ 그 주(월~일) 내내 **근로관계 존속** — 주휴일 전에 퇴사하거나 주 중간에 입사하면 미발생
 //     (2021.8.4. 임금근로시간과-1736 로 행정해석이 바뀌어, 주휴일까지만 재직하면 8일째
 //      근로관계가 없어도 발생한다. '퇴사 주는 무조건 미지급' 은 옛 해석이라 체불이 될 수 있다.)
-//  주휴시간 = min(주 소정근로시간 / 5, 8). 실근로가 많다고 주휴가 늘지는 않는다.
+//  주휴시간 = min(그 주 근로시간 / 5, 8) — 통상근로자 주 소정근로일수(5일)로 나눈 1일분.
 //
-//  근로시간표(Employee.schedule)가 비어 있으면 소정근로일수를 알 수 없다 →
-//  옛 방식(실근로 15시간 초과)으로 갈음하고 결과에 경고를 남긴다.
+//  **시급제에는 연장·휴일 가산을 따로 붙이지 않는다.** 주 15시간을 넘긴 주마다 주휴를 인정해 주는
+//  것이 그 자리를 대신해 온 구조이고, 1일 4.5시간 내외·주 20시간 안쪽이라 법정 가산 요건
+//  (1일 8시간·주 40시간 초과)에 애초에 닿지 않는다. 보강 오버타임(lib/overtime.ts)만 별도 산정한다.
+//
+//  근로시간표(Employee.schedule)는 이제 주휴 판정에 쓰지 않는다 — **연차를 쓴 날 몇 시간을
+//  채운 것으로 볼지**(1일 소정근로시간) 계산에만 쓴다.
 //
 // 연차(유급휴가): 연차를 쓴 날은 기록표가 비지만 **1일 소정근로시간을 채운 것으로 본다**.
 //  그만큼 급여 산정시간에 더하고 개근에도 출근으로 센다. 반차는 0.5일로 비례한다.
@@ -279,27 +286,17 @@ export interface WeekSummary {
   attendedDates: string[];
   /** 기록이 없는 구간이 걸쳐 있어 판정이 불완전한 주 */
   partial: boolean;
-  /** 그 주 실근로시간 (달 경계를 넘어 주 전체, 휴게 차감 + 연차 유급분 포함) */
+  /**
+   * 그 주 소정(=실)근로시간 — 달 경계를 넘어 주 전체. 휴게는 `breakPaid` 기준으로 차감하고
+   * 연차 사용일은 1일 소정근로시간을 채운 것으로 본다. **주휴 판정의 유일한 근거**.
+   */
   actualHours: number;
-  /** §18③ 판정에 쓴 4주 평균 실근로시간 */
-  avgWeeklyActual: number;
-  perfect: boolean; // ㉡ 개근 (attendedDays >= requiredDays)
-  eligible: boolean; // ㉠ 1주 소정근로 15시간 이상
-  /** ㉠ 을 무엇으로 통과했나 — 계약 소정근로시간 / 4주 평균 실근로 / 미달(null) */
-  eligibleBy: "contract" | "actual" | null;
-  employedWholeWeek: boolean; // ㉢ 주 내내 근로관계 존속
-  qualified: boolean; // 셋 다 충족
-  holidayHours: number; // 부여 주휴시간
+  eligible: boolean; // ㉠ 그 주 소정(=실)근로 15시간 이상
+  employedWholeWeek: boolean; // ㉡ 주 내내 근로관계 존속
+  qualified: boolean; // 둘 다 충족
+  holidayHours: number; // 부여 주휴시간 = 그 주 근로시간 ÷ 5 (상한 8h)
   /** 미발생 사유 (화면·명세서 설명용) */
   reason?: string;
-}
-
-/** 계약 근로시간표와 실제 근로가 다를 때의 대조표 (화면 경고용) */
-export interface ScheduleMismatch {
-  contractDays: number;
-  contractHours: number;
-  actualDays: number; // 이 달 주 평균
-  actualHours: number; // 이 달 주 평균
 }
 
 export interface MonthlyTimesheetResult {
@@ -320,14 +317,8 @@ export interface MonthlyTimesheetResult {
   weeks: WeekSummary[];
   /** 근로시간표가 없어 옛 방식(실근로 기준)으로 갈음했는가 */
   noSchedule: boolean;
-  /** 1일 소정근로시간 (연차 환산 기준) = 주 소정근로시간 ÷ 주 근무일수 */
+  /** 1일 소정근로시간 (연차 환산 기준) = 계약 주 근로시간 ÷ 주 근무일수 */
   dailyContractual: number;
-  /**
-   * 계약 근로시간표가 실제와 어긋날 때의 대조표 (같으면 null).
-   * 주휴·연차 판정이 전부 계약을 기준으로 돌아가므로, 계약이 실제보다 적게 적혀 있으면
-   * 실제로는 일을 많이 한 사람이 초단시간근로자로 잡혀 주휴가 통째로 사라진다.
-   */
-  scheduleMismatch: ScheduleMismatch | null;
 }
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
@@ -494,27 +485,6 @@ export function computeMonthlyFromEntries(
     return h;
   };
 
-  /**
-   * §18③ '4주 동안(4주 미만이면 그 기간)을 평균하여 1주 소정근로시간'.
-   * 계약이 15시간 미만이어도 **실근로가 계속·반복적으로 그것을 넘으면** 소정근로시간이
-   * 묵시적으로 변경된 것으로 본다 — 계약서 글자만 보고 초단시간으로 분류하면 체불이 된다.
-   * 기록이 없는 주·입사 전 주는 평균에서 뺀다(0으로 깔면 평균이 부당하게 내려간다).
-   */
-  const avg4Weeks = (weekStart: string) => {
-    let sum = 0;
-    let n = 0;
-    for (let k = 0; k < 4; k++) {
-      const ws = addDays(weekStart, -7 * k);
-      if (opts.knownFrom && ws < opts.knownFrom) continue;
-      if (opts.hireDate && ws < opts.hireDate) continue;
-      if (opts.resignDate && ws > opts.resignDate) continue;
-      sum += actualWeek(ws);
-      n++;
-    }
-    // 창 안에 아는 주가 하나도 없으면(첫 업로드 달의 첫 주 등) 그 주 자체로 갈음한다
-    return n > 0 ? sum / n : actualWeek(weekStart);
-  };
-
   const weeks: WeekSummary[] = weekStarts.map((weekStart) => {
     const weekEnd = addDays(weekStart, 6);
     const hours = weekNet.get(weekStart) ?? 0;
@@ -541,85 +511,41 @@ export function computeMonthlyFromEntries(
     }
     const attendedDays = attendedDates.length;
     const partial = unknownDays > 0;
+    // 그 달 소정근로시간 = 그 주 실근로시간. 학원이 매월 짜 주는 근로계획표대로 나온 결과이므로
+    // 실근로가 곧 그 주의 소정근로다.
     const actualHours = actualWeek(weekStart);
-    const avgWeeklyActual = avg4Weeks(weekStart);
 
-    if (!hasSchedule) {
-      // 근로시간표가 없으면 채워야 할 일수를 알 수 없다 — 옛 방식(실근로 15시간 초과)으로 갈음
-      const eligible = hours > 15;
-      const qualified = eligible && employedWholeWeek && !partial;
-      return {
-        weekStart,
-        weekEnd,
-        hours,
-        contractualHours: hours,
-        requiredDays: 0,
-        attendedDays,
-        leaveDays: weekLeave,
-        attendedDates,
-        partial,
-        actualHours: r1(actualHours),
-        avgWeeklyActual: r1(avgWeeklyActual),
-        perfect: eligible,
-        eligible,
-        eligibleBy: eligible ? ("actual" as const) : null,
-        employedWholeWeek,
-        qualified,
-        holidayHours: qualified ? Math.min(hours / 5, 8) : 0,
-        reason: qualified
-          ? undefined
-          : !employedWholeWeek
-          ? "1주 근로관계 미존속 (주 중간 입·퇴사)"
-          : "근로시간표 없음 — 실근로 15시간 이하",
-      };
-    }
-
-    // ㉡ 개근 — 요일이 아니라 **일수**로 본다. 그 주 공휴일수만큼 채울 일수가 줄어든다
-    const requiredDays = Math.max(plan.days - weekHolidays, 0);
-    const perfect = attendedDays >= requiredDays;
-    // ㉠ 15시간 (§18③ '미만' 이 제외 → 15시간 정각은 대상).
-    //   1순위는 계약 소정근로시간. 계약이 15시간 미만이어도 4주 평균 실근로가 15시간 이상이면
-    //   소정근로시간이 실질적으로 그만큼으로 바뀐 것으로 보고 대상에 넣는다.
-    const eligibleBy: "contract" | "actual" | null =
-      plan.hours >= 15 ? "contract" : avgWeeklyActual >= 15 ? "actual" : null;
-    const eligible = eligibleBy !== null;
-    // 주휴시간의 기준이 되는 '1주 소정근로시간'
-    const basisHours = eligibleBy === "actual" ? avgWeeklyActual : plan.hours;
-    // 기록이 없는 날이 걸쳐 있으면 개근을 판정할 수 없다 —
-    // 모르는 날을 결근으로 치면 과소지급, 출근으로 치면 과다지급이라 **보류하고 사람이 본다**.
-    const qualified = eligible && perfect && employedWholeWeek && !partial;
+    // ㉠ 그 주 소정(=실)근로 15시간 이상 (§18③ '미만' 이 제외 → 15시간 정각은 대상)
+    const eligible = actualHours >= 15;
+    // 기록이 없는 날이 걸쳐 있으면 그 주 근로시간을 다 알 수 없다 —
+    // 모르는 날을 0으로 깔면 15시간에 못 미쳐 주휴가 부당하게 빠지므로 **보류하고 사람이 본다**.
+    const qualified = eligible && employedWholeWeek && !partial;
 
     return {
       weekStart,
       weekEnd,
       hours,
-      contractualHours: plan.hours,
-      requiredDays,
+      contractualHours: hasSchedule ? plan.hours : hours,
+      requiredDays: hasSchedule ? plan.days : 0,
       attendedDays,
       leaveDays: weekLeave,
       attendedDates,
       partial,
       actualHours: r1(actualHours),
-      avgWeeklyActual: r1(avgWeeklyActual),
-      perfect,
       eligible,
-      eligibleBy,
       employedWholeWeek,
       qualified,
-      holidayHours: qualified ? Math.min(basisHours / 5, 8) : 0,
+      // 주휴시간 = 그 주 소정근로시간 ÷ 통상근로자 주 소정근로일수(5), 상한 8시간
+      holidayHours: qualified ? Math.min(actualHours / 5, 8) : 0,
       reason: qualified
         ? undefined
-        : !eligible
-        ? `계약 주 소정근로 ${r1(plan.hours)}시간 · 4주 평균 실근로 ${r1(avgWeeklyActual)}시간 — 둘 다 15시간 미만(§18③ 초단시간)`
+        : partial
+        ? `앞달 기록 ${unknownDays}일이 없어 판정 보류 (확인된 근로 ${r1(actualHours)}시간 / 15시간)`
         : !employedWholeWeek
         ? opts.resignDate && opts.resignDate < weekEnd
           ? `퇴사일(${opts.resignDate})이 주휴일(${weekEnd}) 이전`
           : `입사일(${opts.hireDate})이 주 시작(${weekStart}) 이후`
-        : partial
-        ? `앞달 기록 ${unknownDays}일이 없어 개근 판정 보류 (확인된 근무 ${attendedDays}일 / 필요 ${requiredDays}일)`
-        : requiredDays === 0
-        ? "그 주 소정근로일 없음"
-        : `근무 ${attendedDays}일 / 필요 ${requiredDays}일`,
+        : `주 근로 ${r1(actualHours)}시간 (15시간 미만 — §18③)`,
     };
   });
 
@@ -628,27 +554,8 @@ export function computeMonthlyFromEntries(
     .filter((w) => w.weekEnd.startsWith(prefix))
     .reduce((s, w) => s + w.holidayHours, 0);
 
-  // 계약 근로시간표 ↔ 실제 근로 대조. 어긋나면 주휴·연차 판정이 통째로 틀어지므로 화면에 띄운다.
-  // 판정이 온전한 주(기록 완전 + 출근 있음 + 주휴일이 이 달)만 평균에 넣는다.
-  const solid = weeks.filter(
-    (w) => w.weekEnd.startsWith(prefix) && !w.partial && w.employedWholeWeek && w.attendedDays > 0
-  );
-  let scheduleMismatch: ScheduleMismatch | null = null;
-  if (hasSchedule && solid.length >= 2) {
-    const aDays = solid.reduce((s, w) => s + w.attendedDays, 0) / solid.length;
-    const aHours = solid.reduce((s, w) => s + w.actualHours, 0) / solid.length;
-    if (Math.abs(aDays - plan.days) >= 0.5 || Math.abs(aHours - plan.hours) >= 1)
-      scheduleMismatch = {
-        contractDays: plan.days,
-        contractHours: r1(plan.hours),
-        actualDays: r1(aDays),
-        actualHours: r1(aHours),
-      };
-  }
-
   const r2 = (n: number) => Math.round(n * 1000) / 1000;
   return {
-    scheduleMismatch,
     stayHours: r2(stayHours),
     breakHours: r2(breakHours),
     netHours: r2(netHours),
