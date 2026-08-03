@@ -206,6 +206,10 @@ export interface WeekSummary {
   attendedDays: number;
   /** 그 주 연차 사용일수 */
   leaveDays: number;
+  /** 출근·연차로 센 날짜들 (왜 개근/결근인지 화면에서 바로 보이게) */
+  attendedDates: string[];
+  /** 기록이 없는 구간이 걸쳐 있어 판정이 불완전한 주 */
+  partial: boolean;
   perfect: boolean; // ㉡ 개근 (attendedDays >= requiredDays)
   eligible: boolean; // ㉠ 주 소정근로 15시간 이상
   employedWholeWeek: boolean; // ㉢ 주 내내 근로관계 존속
@@ -293,6 +297,12 @@ export interface MonthlyOptions {
   hireDate?: string | null;
   /** 퇴사일 — 주휴일 전에 퇴사하면 그 주 주휴 미발생 */
   resignDate?: string | null;
+  /**
+   * 이 직원의 기록이 존재하는 가장 이른 날짜 (YYYY-MM-DD).
+   * 이보다 앞선 날은 '결근' 이 아니라 '기록 없음' 이므로 개근 판정에서 빼고 partial 로 표시한다.
+   * (첫 업로드 달의 첫 주처럼 앞달 기록이 아예 없는 경우)
+   */
+  knownFrom?: string | null;
 }
 
 /** 계약 근로시간표에서 주 소정근로시간·주 근무일수를 뽑는다 */
@@ -387,24 +397,27 @@ export function computeMonthlyFromEntries(
       (!opts.resignDate || opts.resignDate >= weekEnd);
 
     // 그 주의 출근일수·연차일수·공휴일수
-    let attendedDays = 0;
+    const attendedDates: string[] = [];
     let weekLeave = 0;
     let weekHolidays = 0;
+    let unknownDays = 0; // 기록이 아예 없는 구간 (앞달을 안 올린 경우)
     for (let i = 0; i < 7; i++) {
       const date = addDays(weekStart, i);
       const worked = (allDaily.get(date) ?? 0) > 0;
       const lv = leaveByDate.get(date) ?? 0;
-      if (worked) attendedDays++;
-      else if (lv > 0) attendedDays++; // 연차는 출근으로 본다
+      if (worked || lv > 0) attendedDates.push(date); // 연차는 출근으로 본다
       if (lv > 0) weekLeave += lv;
       // 일요일 공휴일은 원래 휴무라 근무일수를 줄이지 않는다
       if (holidays.has(date) && day(date).getUTCDay() !== 0) weekHolidays++;
+      if (opts.knownFrom && date < opts.knownFrom && !worked && lv <= 0) unknownDays++;
     }
+    const attendedDays = attendedDates.length;
+    const partial = unknownDays > 0;
 
     if (!hasSchedule) {
       // 근로시간표가 없으면 채워야 할 일수를 알 수 없다 — 옛 방식(실근로 15시간 초과)으로 갈음
       const eligible = hours > 15;
-      const qualified = eligible && employedWholeWeek;
+      const qualified = eligible && employedWholeWeek && !partial;
       return {
         weekStart,
         weekEnd,
@@ -413,6 +426,8 @@ export function computeMonthlyFromEntries(
         requiredDays: 0,
         attendedDays,
         leaveDays: weekLeave,
+        attendedDates,
+        partial,
         perfect: eligible,
         eligible,
         employedWholeWeek,
@@ -431,7 +446,9 @@ export function computeMonthlyFromEntries(
     const perfect = attendedDays >= requiredDays;
     // ㉠ 15시간 — 계약상 소정근로시간 기준 (§18③ '미만' 제외 → 15시간 정각은 대상)
     const eligible = plan.hours >= 15;
-    const qualified = eligible && perfect && employedWholeWeek;
+    // 기록이 없는 날이 걸쳐 있으면 개근을 판정할 수 없다 —
+    // 모르는 날을 결근으로 치면 과소지급, 출근으로 치면 과다지급이라 **보류하고 사람이 본다**.
+    const qualified = eligible && perfect && employedWholeWeek && !partial;
 
     return {
       weekStart,
@@ -441,6 +458,8 @@ export function computeMonthlyFromEntries(
       requiredDays,
       attendedDays,
       leaveDays: weekLeave,
+      attendedDates,
+      partial,
       perfect,
       eligible,
       employedWholeWeek,
@@ -454,6 +473,8 @@ export function computeMonthlyFromEntries(
         ? opts.resignDate && opts.resignDate < weekEnd
           ? `퇴사일(${opts.resignDate})이 주휴일(${weekEnd}) 이전`
           : `입사일(${opts.hireDate})이 주 시작(${weekStart}) 이후`
+        : partial
+        ? `앞달 기록 ${unknownDays}일이 없어 개근 판정 보류 (확인된 근무 ${attendedDays}일 / 필요 ${requiredDays}일)`
         : requiredDays === 0
         ? "그 주 소정근로일 없음"
         : `근무 ${attendedDays}일 / 필요 ${requiredDays}일`,

@@ -363,6 +363,110 @@ describe("주 단위 집계 · 달 경계", () => {
   });
 });
 
+describe("달을 걸친 주 — 앞달 기록을 함께 봐야 이월분이 살아난다", () => {
+  const W3: ScheduleDay[] = ["mon", "tue", "wed"].map((day) => ({
+    day: day as ScheduleDay["day"],
+    work: true,
+    start: "16:00",
+    end: "22:00",
+    breakH: 0,
+  })); // 주3일 18시간
+  const b3 = { breakPaid: true, schedule: W3, knownFrom: "2026-07-27" };
+  const july = [
+    { date: "2026-07-27", hours: 6 },
+    { date: "2026-07-28", hours: 6 },
+    { date: "2026-07-29", hours: 6 },
+  ];
+  const aug = [
+    { date: "2026-08-03", hours: 6 },
+    { date: "2026-08-04", hours: 6 },
+    { date: "2026-08-05", hours: 6 },
+  ];
+
+  it("7월에는 주휴일이 8월이라 이 달 합계에서 뺀다", () => {
+    const r = computeMonthlyFromEntries(july, { ...b3, year: 2026, month: 7 });
+    const w = r.weeks.find((x) => x.weekStart === "2026-07-27")!;
+    expect(w.weekEnd).toBe("2026-08-02");
+    expect(w.qualified).toBe(true);
+    expect(r.weeklyHolidayHours).toBe(0);
+  });
+
+  it("8월 계산에 7월 기록을 함께 넘기면 그 주 주휴가 8월에 지급된다", () => {
+    const r = computeMonthlyFromEntries([...july, ...aug], { ...b3, year: 2026, month: 8 });
+    const w = r.weeks.find((x) => x.weekStart === "2026-07-27")!;
+    expect(w.attendedDays).toBe(3);
+    expect(w.qualified).toBe(true);
+    expect(r.weeklyHolidayHours).toBeCloseTo(18 / 5 + 18 / 5, 5); // 이월분 + 8/3 주
+    expect(r.stayHours).toBe(18); // 실근로는 8월분만
+  });
+
+  it("8월 파일만 있으면 그 주가 결근으로 잡혀 이월분이 사라진다 (고치기 전 동작)", () => {
+    const r = computeMonthlyFromEntries(aug, { breakPaid: true, schedule: W3, year: 2026, month: 8 });
+    expect(r.weeks.find((x) => x.weekStart === "2026-07-27")!.qualified).toBe(false);
+  });
+});
+
+describe("기록이 없는 구간 — 결근으로 몰지 않고 판정을 보류한다", () => {
+  const W3: ScheduleDay[] = ["mon", "tue", "wed"].map((day) => ({
+    day: day as ScheduleDay["day"],
+    work: true,
+    start: "16:00",
+    end: "22:00",
+    breakH: 0,
+  }));
+
+  it("첫 업로드 달의 첫 주는 앞달 기록이 없어 보류된다", () => {
+    const r = computeMonthlyFromEntries(
+      [
+        { date: "2026-07-01", hours: 6 },
+        { date: "2026-07-02", hours: 6 },
+      ],
+      { year: 2026, month: 7, breakPaid: true, schedule: W3, knownFrom: "2026-07-01" }
+    );
+    const w = r.weeks.find((x) => x.weekStart === "2026-06-29")!;
+    expect(w.partial).toBe(true);
+    expect(w.qualified).toBe(false);
+    expect(w.reason).toContain("개근 판정 보류");
+  });
+
+  it("기록이 아예 없는 주에 주휴가 붙지 않는다", () => {
+    const r = computeMonthlyFromEntries(
+      [{ date: "2026-07-27", hours: 6 }],
+      { year: 2026, month: 7, breakPaid: true, schedule: W3, knownFrom: "2026-07-27" }
+    );
+    // 7월 앞쪽 주들은 전부 knownFrom 이전 → 보류이지 지급이 아니다
+    expect(r.weeklyHolidayHours).toBe(0);
+    expect(r.weeks.filter((w) => w.qualified).length).toBe(0);
+  });
+
+  it("knownFrom 이후의 무단결근은 그대로 결근이다", () => {
+    const r = computeMonthlyFromEntries(
+      [
+        { date: "2026-07-06", hours: 6 },
+        { date: "2026-07-07", hours: 6 },
+      ],
+      { year: 2026, month: 7, breakPaid: true, schedule: W3, knownFrom: "2026-07-01" }
+    );
+    const w = r.weeks.find((x) => x.weekStart === "2026-07-06")!;
+    expect(w.partial).toBe(false);
+    expect(w.reason).toBe("근무 2일 / 필요 3일");
+  });
+
+  it("출근한 날짜를 그대로 돌려줘 왜 결근인지 볼 수 있다", () => {
+    const r = computeMonthlyFromEntries(
+      [
+        { date: "2026-07-06", hours: 6 },
+        { date: "2026-07-08", hours: 6 },
+      ],
+      { year: 2026, month: 7, breakPaid: true, schedule: W3, knownFrom: "2026-07-01" }
+    );
+    expect(r.weeks.find((x) => x.weekStart === "2026-07-06")!.attendedDates).toEqual([
+      "2026-07-06",
+      "2026-07-08",
+    ]);
+  });
+});
+
 describe("근로시간표가 없을 때 — 옛 방식으로 갈음하고 경고", () => {
   it("실근로 15시간 초과면 주휴를 주되 noSchedule 로 알린다", () => {
     const r = computeMonthlyFromEntries(days(5), { year: 2026, month: 2, breakPaid: true });

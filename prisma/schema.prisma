@@ -137,6 +137,7 @@ model Employee {
   leaveReqs         LeaveRequest[]
   documents         Document[]
   makeups           MakeupSession[]
+  timesheetDays     TimesheetDay[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -501,4 +502,21 @@ model OvertimePolicy {
   otherDefault     Boolean @default(false)
 
   updatedAt DateTime @updatedAt
+}
+
+/// 시간기록표 일별 원본 — 업로드할 때마다 upsert 한다.
+/// 주휴 개근 판정은 월~일 한 주를 통째로 봐야 하는데 기록표는 달 단위로 올라와,
+/// 달을 걸친 주(예: 7/27~8/2)를 다음 달에 계산할 때 앞달 출근 기록이 없어
+/// 결근으로 잘못 잡혔다. 그래서 올린 기록을 남겨 두고 앞뒤 달을 함께 본다.
+model TimesheetDay {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date       DateTime
+  /// 기록표 원본 시간 (출근~퇴근, 휴게 차감 전)
+  hours      Float
+  updatedAt  DateTime @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([date])
 }

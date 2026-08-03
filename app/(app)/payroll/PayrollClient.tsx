@@ -309,7 +309,7 @@ export default function PayrollClient() {
                       {m.weeks.map((w: any) => (
                         <div key={w.weekStart}>
                           <span className="tnum">{w.weekStart.slice(5)}~{w.weekEnd.slice(5)}</span>{" "}
-                          <span className="tnum">
+                          <span className="tnum" title={w.attendedDates?.length ? `출근·연차: ${w.attendedDates.map((d: string) => d.slice(5)).join(", ")}` : undefined}>
                             {w.requiredDays > 0 ? `${w.attendedDays}/${w.requiredDays}일` : fmtHM(w.hours)}
                           </span>{" "}
                           {w.qualified ? (
@@ -323,7 +323,14 @@ export default function PayrollClient() {
                               </span>
                             )
                           ) : (
-                            <span className="text-slate-400">✕ {w.reason}</span>
+                            <span className={w.partial ? "text-amber-700" : "text-slate-400"}>
+                              {w.partial ? "⏸" : "✕"} {w.reason}
+                            </span>
+                          )}
+                          {w.attendedDates?.length > 0 && (
+                            <span className="text-slate-300 tnum">
+                              {" "}({w.attendedDates.map((d: string) => d.slice(8)).join("·")}일)
+                            </span>
                           )}
                         </div>
                       ))}
@@ -521,6 +528,15 @@ export default function PayrollClient() {
             개근은 <b>요일이 아니라 일수</b>로 본다 — 계약 주3일이면 어느 요일이든 3일 이상 나오면 개근.
             연차 사용일은 출근으로 세고, 그 주 공휴일수만큼 채울 일수가 줄어든다. 지각·조퇴는 결근이 아니다.
             주휴일(일요일) 전에 퇴사하면 그 주는 미발생.
+          </p>
+          <p>
+            · <b>달을 걸친 주</b>는 <b>주휴일(일요일)이 속한 달</b>에서 한 번만 지급된다 —
+            그 달 화면에 "다음 달에 반영"으로 뜨고, 다음 달을 산정할 때 그 주의 주휴가 실제로 붙는다.
+            업로드한 일별 기록은 저장돼 있어서 <b>다음 달 파일에 앞달 며칠이 없어도</b> 개근을 판정할 수 있다.
+          </p>
+          <p>
+            · <b>⏸ 판정 보류</b>: 그 주의 일부 날짜가 아직 한 번도 업로드된 적이 없어 결근인지 알 수 없는 경우다.
+            추측해서 주지도, 빼지도 않는다 — 그 주가 포함된 앞달 기록표를 한 번 올리면 자동으로 확정된다.
           </p>
           <p>
             · <b>체류 / 순 근로 / 산정시간</b>: 체류는 출근~퇴근 기록 그대로, 순 근로는 휴게 30분을 뺀 시간.

@@ -92,6 +92,32 @@ export async function POST(req: Request) {
     leaveByEmp.set(t.employeeId, arr);
   }
 
+  // 이미 올려 둔 일별 기록 — 달을 걸친 주(예: 7/27~8/2)의 개근을 판정하려면 앞뒤 달이 필요하다
+  const savedDays = await prisma.timesheetDay.findMany({
+    where: {
+      employeeId: { in: employees.map((e) => e.id) },
+      date: {
+        gte: new Date(monthStart.getTime() - 14 * 86400000),
+        lte: new Date(monthEnd.getTime() + 14 * 86400000),
+      },
+    },
+    select: { employeeId: true, date: true, hours: true },
+  });
+  const savedByEmp = new Map<number, Array<{ date: string; hours: number }>>();
+  for (const d of savedDays) {
+    const arr = savedByEmp.get(d.employeeId) ?? [];
+    arr.push({ date: ymd(d.date), hours: d.hours });
+    savedByEmp.set(d.employeeId, arr);
+  }
+  // 직원별 '기록이 시작되는 날' — 이보다 앞은 결근이 아니라 기록 없음으로 본다
+  const firstDayRows = await prisma.timesheetDay.groupBy({
+    by: ["employeeId"],
+    where: { employeeId: { in: employees.map((e) => e.id) } },
+    _min: { date: true },
+  });
+  const firstDay = new Map<number, string>();
+  for (const r of firstDayRows) if (r._min.date) firstDay.set(r.employeeId, ymd(r._min.date));
+
   const inputs: PayrollInputMap = {};
   const matched: any[] = [];
   const unmatched: string[] = []; // 직원 카드 없음 / 동명 모호
@@ -108,7 +134,19 @@ export async function POST(req: Request) {
       continue;
     }
     const emp = m.emp;
-    const r = computeMonthlyFromEntries(p.entries, {
+    // 이번에 올린 파일의 일별 합계 (같은 날 여러 줄이면 합산)
+    const fileByDate = new Map<string, number>();
+    for (const e of p.entries) fileByDate.set(e.date, (fileByDate.get(e.date) ?? 0) + e.hours);
+    // 지난번에 올려 둔 기록 위에 이번 파일을 덮는다 (같은 날은 새 파일이 이긴다)
+    const mergedByDate = new Map<string, number>();
+    for (const d of savedByEmp.get(emp.id) ?? []) mergedByDate.set(d.date, d.hours);
+    for (const [date, hours] of fileByDate) mergedByDate.set(date, hours);
+
+    // 기록이 시작되는 날 — 이보다 앞선 날은 결근이 아니라 '기록 없음' 으로 본다
+    const known =
+      [firstDay.get(emp.id), ...fileByDate.keys()].filter(Boolean).sort()[0] ?? null;
+
+    const r = computeMonthlyFromEntries([...mergedByDate].map(([date, hours]) => ({ date, hours })), {
       year,
       month,
       breakPaid: emp.breakPaid,
@@ -122,6 +160,7 @@ export async function POST(req: Request) {
       ),
       hireDate: ymd(emp.hireDate),
       resignDate: emp.resignDate ? ymd(emp.resignDate) : null,
+      knownFrom: known,
     });
     if (r.workedDays === 0) {
       noRecords.push(p.rawName);
@@ -164,6 +203,8 @@ export async function POST(req: Request) {
         requiredDays: w.requiredDays,
         attendedDays: w.attendedDays,
         leaveDays: w.leaveDays,
+        attendedDates: w.attendedDates,
+        partial: w.partial,
         qualified: w.qualified,
         // 주휴일이 다음 달인 주는 이 달 합계에 넣지 않는다 (다음 달에서 센다)
         carriedToNextMonth: !w.weekEnd.startsWith(
@@ -189,6 +230,22 @@ export async function POST(req: Request) {
   }
 
   const ids = matched.map((m) => m.employeeId);
+
+  // 올린 일별 기록을 남긴다 — 다음 달에 달을 걸친 주를 판정할 때 쓴다
+  for (const p of people) {
+    const m = matchEmployee(p.rawName, employees);
+    if (!m.emp || !ids.includes(m.emp.id)) continue;
+    const byDate = new Map<string, number>();
+    for (const e of p.entries) byDate.set(e.date, (byDate.get(e.date) ?? 0) + e.hours);
+    for (const [date, hours] of byDate) {
+      await prisma.timesheetDay.upsert({
+        where: { employeeId_date: { employeeId: m.emp.id, date: new Date(`${date}T00:00:00Z`) } },
+        update: { hours },
+        create: { employeeId: m.emp.id, date: new Date(`${date}T00:00:00Z`), hours },
+      });
+    }
+  }
+
   await runPayrollMonth(year, month, inputs, ids);
   await prisma.auditLog.create({
     data: {
