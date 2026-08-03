@@ -277,7 +277,10 @@ export default function PayrollClient() {
               <tr className="text-slate-500">
                 <th className="text-left py-1">직원</th>
                 <th className="text-right">근무일</th>
-                <th className="text-right">실근로</th>
+                <th className="text-right">체류</th>
+                <th className="text-right">순 근로</th>
+                <th className="text-right">연차</th>
+                <th className="text-right">산정시간</th>
                 <th className="text-right">주휴시간</th>
                 <th className="text-left pl-3">휴게 30분</th>
                 <th className="text-left">주별 주휴 판정</th>
@@ -288,7 +291,12 @@ export default function PayrollClient() {
                 <tr key={m.employeeId} className="border-t border-emerald-100">
                   <td className="py-1 font-semibold">{m.name}</td>
                   <td className="text-right tnum">{m.workedDays}일</td>
-                  <td className="text-right tnum">{fmtHM(m.workHours)}</td>
+                  <td className="text-right tnum text-slate-500">{fmtHM(m.stayHours)}</td>
+                  <td className="text-right tnum">{fmtHM(m.netHours)}</td>
+                  <td className="text-right tnum text-slate-500">
+                    {m.leaveHours ? `${fmtHM(m.leaveHours)} (${m.leaveDays}일)` : "-"}
+                  </td>
+                  <td className="text-right tnum font-semibold">{fmtHM(m.workHours)}</td>
                   <td className="text-right tnum font-semibold">{m.weeklyHolidayHours ? fmtHM(m.weeklyHolidayHours) : "-"}</td>
                   <td className="pl-3">{m.breakPaid ? "유급(그대로)" : "무급(−30분/일)"}</td>
                   <td className="text-slate-500">
@@ -301,7 +309,9 @@ export default function PayrollClient() {
                       {m.weeks.map((w: any) => (
                         <div key={w.weekStart}>
                           <span className="tnum">{w.weekStart.slice(5)}~{w.weekEnd.slice(5)}</span>{" "}
-                          <span className="tnum">{fmtHM(w.hours)}</span>{" "}
+                          <span className="tnum">
+                            {w.requiredDays > 0 ? `${w.attendedDays}/${w.requiredDays}일` : fmtHM(w.hours)}
+                          </span>{" "}
                           {w.qualified ? (
                             w.carriedToNextMonth ? (
                               <span className="text-slate-400">
@@ -506,10 +516,16 @@ export default function PayrollClient() {
             · <b>야간h</b>: 22시~06시 근무시간 → 야간가산(+0.5)
           </p>
           <p>
-            · <b>주휴수당(시급제)</b>: ① 주 소정근로 15시간 이상 ② <b>그 주 소정근로일 개근</b>
+            · <b>주휴수당(시급제)</b>: ① 주 소정근로 15시간 이상 ② <b>그 주 근무일수를 채움(개근)</b>
             ③ 1주(월~일) 근로관계 존속 — 셋을 모두 갖춘 주에만 발생한다 (근로기준법 §55·시행령 §30).
-            연차 사용일은 출근으로, 공휴일은 소정근로일이 아닌 것으로 본다. 지각·조퇴는 결근이 아니다.
+            개근은 <b>요일이 아니라 일수</b>로 본다 — 계약 주3일이면 어느 요일이든 3일 이상 나오면 개근.
+            연차 사용일은 출근으로 세고, 그 주 공휴일수만큼 채울 일수가 줄어든다. 지각·조퇴는 결근이 아니다.
             주휴일(일요일) 전에 퇴사하면 그 주는 미발생.
+          </p>
+          <p>
+            · <b>체류 / 순 근로 / 산정시간</b>: 체류는 출근~퇴근 기록 그대로, 순 근로는 휴게 30분을 뺀 시간.
+            급여는 휴게가 <b>유급이면 체류</b>, <b>무급이면 순 근로</b> 기준으로 산정하며, 여기에
+            <b>연차 유급시간</b>(연차 일수 × 1일 소정근로시간)을 더한 것이 산정시간이다.
           </p>
           <p>
             · <b>상여</b>: 특별상여 금액(원) &nbsp;

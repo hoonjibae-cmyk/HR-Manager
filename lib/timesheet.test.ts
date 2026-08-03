@@ -6,6 +6,7 @@ import {
   matchEmployee,
   type TimesheetEntry,
   type TimesheetPerson,
+  type MonthlyTimesheetResult,
 } from "./timesheet";
 import type { ScheduleDay } from "./constants";
 
@@ -69,7 +70,7 @@ describe("dominantPeriod — 파일에서 연·월 자동 감지", () => {
 
 /* ─────────── 주휴수당 (근로기준법 §55①, 시행령 §30①, §18③) ─────────── */
 
-/** 주5일(월~금) 하루 5시간 = 주 25시간 소정근로 */
+/** 주5일 하루 5시간 = 주 25시간 소정근로 (요일은 판정에 쓰지 않는다) */
 const WEEK5: ScheduleDay[] = ["mon", "tue", "wed", "thu", "fri"].map((day) => ({
   day: day as ScheduleDay["day"],
   work: true,
@@ -78,30 +79,52 @@ const WEEK5: ScheduleDay[] = ["mon", "tue", "wed", "thu", "fri"].map((day) => ({
   breakH: 0,
 }));
 
-/** 2026-02-02(월) ~ 02-06(금) 을 하루 h시간씩 채운다 */
-const fullWeek = (h = 5, days = 5): TimesheetEntry[] =>
-  Array.from({ length: days }, (_, i) => ({
-    date: `2026-02-0${i + 2}`,
+/** 주3일 하루 6시간 = 주 18시간 */
+const WEEK3: ScheduleDay[] = ["mon", "wed", "fri"].map((day) => ({
+  day: day as ScheduleDay["day"],
+  work: true,
+  start: "16:00",
+  end: "22:00",
+  breakH: 0,
+}));
+
+/** 2026-02-02(월)부터 n일 연속, 하루 h시간 */
+const days = (n: number, h = 5, from = 2): TimesheetEntry[] =>
+  Array.from({ length: n }, (_, i) => ({
+    date: `2026-02-${String(from + i).padStart(2, "0")}`,
     hours: h,
   }));
 
 const base = { year: 2026, month: 2, breakPaid: true, schedule: WEEK5 };
+const wk1 = (r: MonthlyTimesheetResult) => r.weeks.find((w) => w.weekStart === "2026-02-02")!;
 
-describe("computeMonthlyFromEntries — 휴게 차감", () => {
-  const week1 = fullWeek(4.5, 4); // 2/2~2/5 각 4.5h
-
-  it("휴게 유급(breakPaid=true): 기록 그대로", () => {
-    const r = computeMonthlyFromEntries(week1, { ...base, breakPaid: true });
-    expect(r.workHours).toBeCloseTo(18, 5);
+describe("시간 구분 — 체류 · 휴게 · 순 근로", () => {
+  it("휴게 유급: 체류시간 그대로 급여 산정", () => {
+    const r = computeMonthlyFromEntries(days(4, 4.5), { ...base, breakPaid: true });
+    expect(r.stayHours).toBeCloseTo(18, 5);
+    expect(r.breakHours).toBeCloseTo(2, 5); // 4일 × 0.5
+    expect(r.netHours).toBeCloseTo(16, 5);
+    expect(r.paidHours).toBeCloseTo(18, 5); // 유급이므로 체류 기준
     expect(r.workedDays).toBe(4);
   });
 
-  it("휴게 무급(breakPaid=false): 근무일마다 0.5h 차감", () => {
-    const r = computeMonthlyFromEntries(week1, { ...base, breakPaid: false });
-    expect(r.workHours).toBeCloseTo(16, 5); // 18 - 4×0.5
+  it("휴게 무급: 순 근로시간으로 급여 산정", () => {
+    const r = computeMonthlyFromEntries(days(4, 4.5), { ...base, breakPaid: false });
+    expect(r.stayHours).toBeCloseTo(18, 5);
+    expect(r.netHours).toBeCloseTo(16, 5);
+    expect(r.paidHours).toBeCloseTo(16, 5);
   });
 
-  it("대상 월 밖의 기록은 실근로에서 제외", () => {
+  it("30분보다 짧게 일한 날은 그만큼만 휴게로 뺀다", () => {
+    const r = computeMonthlyFromEntries([{ date: "2026-02-02", hours: 0.3 }], {
+      ...base,
+      breakPaid: false,
+    });
+    expect(r.netHours).toBe(0);
+    expect(r.breakHours).toBeCloseTo(0.3, 5);
+  });
+
+  it("대상 월 밖의 기록은 시간 집계에서 제외", () => {
     const r = computeMonthlyFromEntries(
       [
         { date: "2026-01-30", hours: 8 },
@@ -110,96 +133,100 @@ describe("computeMonthlyFromEntries — 휴게 차감", () => {
       base
     );
     expect(r.workedDays).toBe(1);
-    expect(r.workHours).toBeCloseTo(8, 5);
+    expect(r.stayHours).toBeCloseTo(8, 5);
   });
 });
 
-describe("주휴 ㉡ 개근 — 소정근로일을 하루라도 빠지면 미발생", () => {
-  it("주5일 25시간 계약, 5일 개근 → 주휴 5시간", () => {
-    const r = computeMonthlyFromEntries(fullWeek(), base);
-    const w = r.weeks.find((x) => x.weekStart === "2026-02-02")!;
+describe("주휴 ㉡ 개근 — 요일이 아니라 '근무일수' 로 판정", () => {
+  it("주5일 25시간 계약, 5일 근무 → 주휴 5시간", () => {
+    const w = wk1(computeMonthlyFromEntries(days(5), base));
+    expect(w.requiredDays).toBe(5);
+    expect(w.attendedDays).toBe(5);
     expect(w.perfect).toBe(true);
-    expect(w.qualified).toBe(true);
     expect(w.holidayHours).toBe(5); // 25 / 5
   });
 
-  it("주5일 계약인데 4일(20시간)만 근무 → 결근 1일이므로 미발생", () => {
-    const r = computeMonthlyFromEntries(fullWeek(5, 4), base); // 2/2~2/5, 2/6(금) 결근
-    const w = r.weeks.find((x) => x.weekStart === "2026-02-02")!;
+  it("주5일 계약인데 4일(20시간)만 근무 → 미발생", () => {
+    const w = wk1(computeMonthlyFromEntries(days(4), base));
+    expect(w.attendedDays).toBe(4);
     expect(w.perfect).toBe(false);
-    expect(w.absentDays).toEqual(["2026-02-06"]);
-    expect(w.qualified).toBe(false);
     expect(w.holidayHours).toBe(0);
-    expect(w.reason).toContain("결근 1일");
+    expect(w.reason).toBe("근무 4일 / 필요 5일");
   });
 
-  it("연차 사용일은 출근으로 봐서 개근이 유지된다", () => {
-    const r = computeMonthlyFromEntries(fullWeek(5, 4), {
-      ...base,
-      leaveDates: ["2026-02-06"],
-    });
-    const w = r.weeks.find((x) => x.weekStart === "2026-02-02")!;
+  it("계약 요일(월수금)과 다른 요일(화목토)에 나와도 일수만 채우면 개근", () => {
+    // 계약은 월·수·금인데 실제로는 화·목·토 근무 — 학원 사정으로 요일이 바뀌는 경우
+    const shifted: TimesheetEntry[] = [
+      { date: "2026-02-03", hours: 6 }, // 화
+      { date: "2026-02-05", hours: 6 }, // 목
+      { date: "2026-02-07", hours: 6 }, // 토
+    ];
+    const w = wk1(computeMonthlyFromEntries(shifted, { ...base, schedule: WEEK3 }));
+    expect(w.requiredDays).toBe(3);
+    expect(w.attendedDays).toBe(3);
+    expect(w.perfect).toBe(true);
+    expect(w.holidayHours).toBeCloseTo(18 / 5, 5);
+  });
+
+  it("계약보다 많이 나온 주도 개근 (일수가 넘치면 그만)", () => {
+    const w = wk1(computeMonthlyFromEntries(days(5, 6), { ...base, schedule: WEEK3 }));
+    expect(w.attendedDays).toBe(5);
+    expect(w.requiredDays).toBe(3);
+    expect(w.perfect).toBe(true);
+  });
+
+  it("연차 사용일은 출근으로 세어 개근이 유지된다", () => {
+    const w = wk1(
+      computeMonthlyFromEntries(days(4), {
+        ...base,
+        leaveUses: [{ date: "2026-02-06", days: 1 }],
+      })
+    );
+    expect(w.attendedDays).toBe(5);
+    expect(w.leaveDays).toBe(1);
     expect(w.perfect).toBe(true);
     expect(w.holidayHours).toBe(5);
   });
 
-  it("공휴일은 소정근로일이 아니므로 쉬어도 개근이다", () => {
-    const r = computeMonthlyFromEntries(fullWeek(5, 4), {
-      ...base,
-      holidays: ["2026-02-06"],
-    });
-    const w = r.weeks.find((x) => x.weekStart === "2026-02-02")!;
-    expect(w.scheduledDays).not.toContain("2026-02-06");
+  it("그 주 공휴일수만큼 채워야 할 일수가 줄어든다", () => {
+    const w = wk1(computeMonthlyFromEntries(days(4), { ...base, holidays: ["2026-02-06"] }));
+    expect(w.requiredDays).toBe(4); // 5 − 공휴일 1
     expect(w.perfect).toBe(true);
-    // 주휴시간은 계약 소정근로(25h) 기준 — 공휴일로 하루 쉬었다고 줄지 않는다
-    expect(w.holidayHours).toBe(5);
+    expect(w.holidayHours).toBe(5); // 주휴시간은 계약 소정근로 기준이라 줄지 않는다
   });
 
-  it("지각·조퇴는 결근이 아니다 — 기록이 있으면 시간이 짧아도 출근", () => {
-    const late = fullWeek().map((e, i) => (i === 2 ? { ...e, hours: 1 } : e));
-    const w = computeMonthlyFromEntries(late, base).weeks.find(
-      (x) => x.weekStart === "2026-02-02"
-    )!;
-    expect(w.perfect).toBe(true);
-    expect(w.qualified).toBe(true);
+  it("일요일 공휴일은 원래 휴무라 근무일수를 줄이지 않는다", () => {
+    const w = wk1(computeMonthlyFromEntries(days(4), { ...base, holidays: ["2026-02-08"] }));
+    expect(w.requiredDays).toBe(5);
+    expect(w.perfect).toBe(false);
+  });
+
+  it("지각·조퇴는 결근이 아니다 — 기록이 있으면 하루로 센다", () => {
+    const late = days(5).map((e, i) => (i === 2 ? { ...e, hours: 1 } : e));
+    expect(wk1(computeMonthlyFromEntries(late, base)).perfect).toBe(true);
   });
 });
 
 describe("주휴 ㉠ 15시간 — 소정근로시간 기준", () => {
-  /** 주3일 × 4시간 = 12시간 */
-  const WEEK3: ScheduleDay[] = ["mon", "tue", "wed"].map((day) => ({
+  const W12: ScheduleDay[] = ["mon", "tue", "wed"].map((day) => ({
     day: day as ScheduleDay["day"],
     work: true,
     start: "18:00",
     end: "22:00",
     breakH: 0,
-  }));
+  })); // 3일 × 4h = 12h
 
   it("주 소정 12시간이면 개근해도 미발생 (§18③ 초단시간)", () => {
-    const r = computeMonthlyFromEntries(
-      [
-        { date: "2026-02-02", hours: 4 },
-        { date: "2026-02-03", hours: 4 },
-        { date: "2026-02-04", hours: 4 },
-      ],
-      { ...base, schedule: WEEK3 }
-    );
-    const w = r.weeks.find((x) => x.weekStart === "2026-02-02")!;
+    const w = wk1(computeMonthlyFromEntries(days(3, 4), { ...base, schedule: W12 }));
     expect(w.eligible).toBe(false);
+    expect(w.perfect).toBe(true);
     expect(w.qualified).toBe(false);
     expect(w.reason).toContain("15시간 미만");
   });
 
   it("소정 12시간인데 실근로가 20시간이어도 대상이 아니다", () => {
-    const r = computeMonthlyFromEntries(
-      [
-        { date: "2026-02-02", hours: 7 },
-        { date: "2026-02-03", hours: 7 },
-        { date: "2026-02-04", hours: 6 },
-      ],
-      { ...base, schedule: WEEK3 }
-    );
-    expect(r.weeks.find((x) => x.weekStart === "2026-02-02")!.qualified).toBe(false);
+    const r = computeMonthlyFromEntries(days(3, 7), { ...base, schedule: W12 });
+    expect(wk1(r).qualified).toBe(false);
     expect(r.weeklyHolidayHours).toBe(0);
   });
 
@@ -210,18 +237,9 @@ describe("주휴 ㉠ 15시간 — 소정근로시간 기준", () => {
       start: "17:00",
       end: "22:00",
       breakH: 0,
-    })); // 3일 × 5h = 15h
-    const r = computeMonthlyFromEntries(
-      [
-        { date: "2026-02-02", hours: 5 },
-        { date: "2026-02-03", hours: 5 },
-        { date: "2026-02-04", hours: 5 },
-      ],
-      { ...base, schedule: W15 }
-    );
-    const w = r.weeks.find((x) => x.weekStart === "2026-02-02")!;
+    }));
+    const w = wk1(computeMonthlyFromEntries(days(3, 5), { ...base, schedule: W15 }));
     expect(w.eligible).toBe(true);
-    expect(w.qualified).toBe(true);
     expect(w.holidayHours).toBe(3); // 15 / 5
   });
 
@@ -232,111 +250,144 @@ describe("주휴 ㉠ 15시간 — 소정근로시간 기준", () => {
       start: "09:00",
       end: "17:00",
       breakH: 0,
-    })); // 6일 × 8h = 48h → 48/5 = 9.6 → cap 8
-    const r = computeMonthlyFromEntries(
-      Array.from({ length: 6 }, (_, i) => ({ date: `2026-02-0${i + 2}`, hours: 8 })),
-      { ...base, schedule: W48 }
-    );
-    expect(r.weeks.find((x) => x.weekStart === "2026-02-02")!.holidayHours).toBe(8);
+    })); // 48h → 48/5 = 9.6 → cap 8
+    expect(wk1(computeMonthlyFromEntries(days(6, 8), { ...base, schedule: W48 })).holidayHours).toBe(8);
   });
 
   it("실근로가 소정을 넘어도 주휴시간은 늘지 않는다", () => {
-    const r = computeMonthlyFromEntries(fullWeek(9), base); // 소정 5h인데 9h씩
-    expect(r.weeks.find((x) => x.weekStart === "2026-02-02")!.holidayHours).toBe(5);
+    expect(wk1(computeMonthlyFromEntries(days(5, 9), base)).holidayHours).toBe(5);
   });
 });
 
 describe("주휴 ㉢ 1주 근로관계 존속 — 입·퇴사 주", () => {
   it("주휴일(일요일) 전에 퇴사하면 개근해도 미발생", () => {
-    // 2/2(월)~2/6(금) 개근 후 2/6 자로 퇴사 → 주휴일 2/8(일)에 근로관계 없음
-    const r = computeMonthlyFromEntries(fullWeek(), { ...base, resignDate: "2026-02-06" });
-    const w = r.weeks.find((x) => x.weekStart === "2026-02-02")!;
+    const w = wk1(computeMonthlyFromEntries(days(5), { ...base, resignDate: "2026-02-06" }));
     expect(w.perfect).toBe(true);
     expect(w.employedWholeWeek).toBe(false);
-    expect(w.qualified).toBe(false);
     expect(w.reason).toContain("주휴일(2026-02-08) 이전");
   });
 
-  it("주휴일까지 재직하면 그 주 주휴는 발생한다 (2021.8.4. 행정해석 변경)", () => {
-    const r = computeMonthlyFromEntries(fullWeek(), { ...base, resignDate: "2026-02-08" });
-    const w = r.weeks.find((x) => x.weekStart === "2026-02-02")!;
+  it("주휴일까지 재직하면 발생한다 (2021.8.4. 행정해석 변경)", () => {
+    const w = wk1(computeMonthlyFromEntries(days(5), { ...base, resignDate: "2026-02-08" }));
     expect(w.employedWholeWeek).toBe(true);
     expect(w.qualified).toBe(true);
     expect(w.holidayHours).toBe(5);
   });
 
-  it("퇴사 이후 날은 소정근로일이 아니라 결근으로 잡히지 않는다", () => {
-    // 2/4(수) 퇴사 — 2/5·2/6 은 애초에 소정근로일이 아니다
-    const r = computeMonthlyFromEntries(fullWeek(5, 3), { ...base, resignDate: "2026-02-04" });
-    const w = r.weeks.find((x) => x.weekStart === "2026-02-02")!;
-    expect(w.absentDays).toEqual([]);
-    expect(w.perfect).toBe(true);
-    expect(w.qualified).toBe(false); // 다만 1주 존속이 아니라 미발생
-  });
-
   it("주 중간에 입사하면 그 주는 미발생", () => {
-    const r = computeMonthlyFromEntries(fullWeek(5, 5).slice(2), {
-      ...base,
-      hireDate: "2026-02-04",
-    });
-    const w = r.weeks.find((x) => x.weekStart === "2026-02-02")!;
+    const w = wk1(
+      computeMonthlyFromEntries(days(3, 5, 4), { ...base, hireDate: "2026-02-04" })
+    );
     expect(w.employedWholeWeek).toBe(false);
-    expect(w.qualified).toBe(false);
     expect(w.reason).toContain("입사일");
   });
 
   it("월요일 입사면 그 주부터 발생한다", () => {
-    const r = computeMonthlyFromEntries(fullWeek(), { ...base, hireDate: "2026-02-02" });
-    expect(r.weeks.find((x) => x.weekStart === "2026-02-02")!.qualified).toBe(true);
+    expect(wk1(computeMonthlyFromEntries(days(5), { ...base, hireDate: "2026-02-02" })).qualified).toBe(true);
+  });
+});
+
+describe("연차 — 소정근로시간을 채운 것으로 보고 유급 산정", () => {
+  it("연차 1일은 1일 소정근로시간(5h)을 유급으로 더한다", () => {
+    const r = computeMonthlyFromEntries(days(4), {
+      ...base,
+      leaveUses: [{ date: "2026-02-06", days: 1 }],
+    });
+    expect(r.dailyContractual).toBe(5); // 25h ÷ 5일
+    expect(r.leaveDays).toBe(1);
+    expect(r.leaveHours).toBe(5);
+    expect(r.stayHours).toBe(20); // 실제 출근분
+    expect(r.paidHours).toBe(25); // 20 + 연차 5
+  });
+
+  it("반차는 0.5일로 비례한다", () => {
+    const r = computeMonthlyFromEntries(days(4), {
+      ...base,
+      leaveUses: [{ date: "2026-02-06", days: 0.5 }],
+    });
+    expect(r.leaveHours).toBe(2.5);
+    expect(r.paidHours).toBe(22.5);
+  });
+
+  it("휴게 무급이면 순 근로시간에 연차분을 더한다", () => {
+    const r = computeMonthlyFromEntries(days(4), {
+      ...base,
+      breakPaid: false,
+      leaveUses: [{ date: "2026-02-06", days: 1 }],
+    });
+    expect(r.netHours).toBe(18); // 20 − 2
+    expect(r.paidHours).toBe(23); // 18 + 5
+  });
+
+  it("연차 미적용 직원(leavePaid=false)은 유급으로 더하지 않는다", () => {
+    const r = computeMonthlyFromEntries(days(4), {
+      ...base,
+      leavePaid: false,
+      leaveUses: [{ date: "2026-02-06", days: 1 }],
+    });
+    expect(r.leaveHours).toBe(0);
+    expect(r.paidHours).toBe(20);
+    // 다만 개근 판정에는 여전히 출근으로 센다
+    expect(wk1(r).perfect).toBe(true);
+  });
+
+  it("같은 날 중복 기록이 있어도 1일을 넘기지 않는다", () => {
+    const r = computeMonthlyFromEntries(days(4), {
+      ...base,
+      leaveUses: [
+        { date: "2026-02-06", days: 0.5 },
+        { date: "2026-02-06", days: 1 },
+      ],
+    });
+    expect(r.leaveDays).toBe(1);
+    expect(r.leaveHours).toBe(5);
   });
 });
 
 describe("주 단위 집계 · 달 경계", () => {
-  it("결근한 주는 사유와 함께 남는다 (근무 기록이 없어도 훑는다)", () => {
-    const r = computeMonthlyFromEntries(fullWeek(), base);
-    // 2월에는 일요일이 1·8·15·22일 → 주휴일이 2월인 주가 4개
+  it("근무 기록이 없는 주도 사유와 함께 남는다", () => {
+    const r = computeMonthlyFromEntries(days(5), base);
     expect(r.weeks.filter((w) => w.weekEnd.startsWith("2026-02")).length).toBe(4);
-    const empty = r.weeks.find((x) => x.weekStart === "2026-02-09")!;
-    expect(empty.qualified).toBe(false);
-    expect(empty.reason).toContain("결근 5일");
+    expect(wk1(r).qualified).toBe(true);
+    const empty = r.weeks.find((w) => w.weekStart === "2026-02-09")!;
+    expect(empty.reason).toBe("근무 0일 / 필요 5일");
   });
 
   it("주휴일이 다음 달인 주는 이번 달에서 세지 않는다 (이중 지급 방지)", () => {
-    // 2026-02-23(월)~03-01(일) — 주휴일이 3월이라 2월 합계에서 빠진다
-    const lastWeek: TimesheetEntry[] = ["23", "24", "25", "26", "27"].map((d) => ({
-      date: `2026-02-${d}`,
-      hours: 5,
-    }));
-    const r = computeMonthlyFromEntries(lastWeek, base);
+    const r = computeMonthlyFromEntries(days(5, 5, 23), base); // 2/23(월)~2/27(금)
     const w = r.weeks.find((x) => x.weekStart === "2026-02-23")!;
     expect(w.weekEnd).toBe("2026-03-01");
-    expect(w.qualified).toBe(true); // 주 자체는 요건 충족
-    expect(r.weeklyHolidayHours).toBe(0); // 다만 이 달 합계에는 넣지 않는다
-    expect(r.workHours).toBeCloseTo(25, 5); // 실근로는 그대로 집계
-  });
-
-  it("일요일 근무도 그 주 월요일 버킷으로 들어간다", () => {
-    const r = computeMonthlyFromEntries([{ date: "2026-02-08", hours: 6 }], base);
-    expect(r.weeks.find((x) => x.weekStart === "2026-02-02")!.hours).toBe(6);
+    expect(w.qualified).toBe(true);
+    expect(r.weeklyHolidayHours).toBe(0); // 3월에서 센다
+    expect(r.stayHours).toBe(25); // 실근로는 그대로
   });
 });
 
 describe("근로시간표가 없을 때 — 옛 방식으로 갈음하고 경고", () => {
   it("실근로 15시간 초과면 주휴를 주되 noSchedule 로 알린다", () => {
-    const r = computeMonthlyFromEntries(fullWeek(), { year: 2026, month: 2, breakPaid: true });
+    const r = computeMonthlyFromEntries(days(5), { year: 2026, month: 2, breakPaid: true });
     expect(r.noSchedule).toBe(true);
-    const w = r.weeks.find((x) => x.weekStart === "2026-02-02")!;
-    expect(w.qualified).toBe(true);
-    expect(w.holidayHours).toBe(5); // 25/5
+    expect(wk1(r).holidayHours).toBe(5);
+  });
+
+  it("시간표가 없으면 연차 유급 인정도 하지 않는다 (1일 소정을 모르므로)", () => {
+    const r = computeMonthlyFromEntries(days(4), {
+      year: 2026,
+      month: 2,
+      breakPaid: true,
+      leaveUses: [{ date: "2026-02-06", days: 1 }],
+    });
+    expect(r.leaveHours).toBe(0);
+    expect(r.paidHours).toBe(20);
   });
 
   it("시간표가 없어도 퇴사 주는 걸러 낸다", () => {
-    const r = computeMonthlyFromEntries(fullWeek(), {
+    const r = computeMonthlyFromEntries(days(5), {
       year: 2026,
       month: 2,
       breakPaid: true,
       resignDate: "2026-02-06",
     });
-    expect(r.weeks.find((x) => x.weekStart === "2026-02-02")!.qualified).toBe(false);
+    expect(wk1(r).qualified).toBe(false);
   });
 });

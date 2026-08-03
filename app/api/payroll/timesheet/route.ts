@@ -9,6 +9,8 @@ import {
 } from "@/lib/timesheet";
 import { runPayrollMonth, type PayrollInputMap } from "@/lib/payroll-service";
 import { parseSchedule } from "@/lib/constants";
+import { computeWeeklyHours } from "@/lib/payroll";
+import { isLeaveEligible } from "@/lib/leave";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -79,14 +81,14 @@ export async function POST(req: Request) {
         },
         type: { in: ["USE", "PAYOUT"] },
       },
-      select: { employeeId: true, date: true },
+      select: { employeeId: true, date: true, days: true },
     }),
   ]);
   const holidays = holidayRows.map((h) => ymd(h.date));
-  const leaveByEmp = new Map<number, string[]>();
+  const leaveByEmp = new Map<number, Array<{ date: string; days: number }>>();
   for (const t of leaveRows) {
     const arr = leaveByEmp.get(t.employeeId) ?? [];
-    arr.push(ymd(t.date));
+    arr.push({ date: ymd(t.date), days: Math.abs(t.days) });
     leaveByEmp.set(t.employeeId, arr);
   }
 
@@ -112,7 +114,12 @@ export async function POST(req: Request) {
       breakPaid: emp.breakPaid,
       schedule: parseSchedule(emp.schedule),
       holidays,
-      leaveDates: leaveByEmp.get(emp.id) ?? [],
+      leaveUses: leaveByEmp.get(emp.id) ?? [],
+      // 연차 유급 인정은 연차 발생 대상 직원에게만 (초단시간은 §18③ 으로 연차 미적용)
+      leavePaid: isLeaveEligible(
+        computeWeeklyHours(parseSchedule(emp.schedule)).weeklyContractual,
+        (emp as any).leaveEligible
+      ),
       hireDate: ymd(emp.hireDate),
       resignDate: emp.resignDate ? ymd(emp.resignDate) : null,
     });
@@ -121,15 +128,32 @@ export async function POST(req: Request) {
       continue;
     }
     inputs[emp.id] = {
-      workedHours: Math.round(r.workHours * 100) / 100,
+      workedHours: Math.round(r.paidHours * 100) / 100,
       weeklyHolidayHours: Math.round(r.weeklyHolidayHours * 100) / 100,
+      // 명세서에 '체류 / 휴게 / 순 근로 / 연차' 를 나눠 적기 위한 근거
+      timesheet: {
+        stayHours: r.stayHours,
+        breakHours: r.breakHours,
+        netHours: r.netHours,
+        leaveHours: r.leaveHours,
+        leaveDays: r.leaveDays,
+        paidHours: r.paidHours,
+        workedDays: r.workedDays,
+        breakPaid: emp.breakPaid,
+        dailyContractual: r.dailyContractual,
+      },
     };
     matched.push({
       employeeId: emp.id,
       name: emp.name,
       breakPaid: emp.breakPaid,
       workedDays: r.workedDays,
-      workHours: Math.round(r.workHours * 100) / 100,
+      stayHours: r.stayHours,
+      breakHours: r.breakHours,
+      netHours: r.netHours,
+      leaveHours: r.leaveHours,
+      leaveDays: r.leaveDays,
+      workHours: r.paidHours,
       weeklyHolidayHours: Math.round(r.weeklyHolidayHours * 100) / 100,
       noSchedule: r.noSchedule,
       weeks: r.weeks.map((w) => ({
@@ -137,7 +161,9 @@ export async function POST(req: Request) {
         weekEnd: w.weekEnd,
         hours: Math.round(w.hours * 100) / 100,
         contractualHours: Math.round(w.contractualHours * 100) / 100,
-        absentDays: w.absentDays,
+        requiredDays: w.requiredDays,
+        attendedDays: w.attendedDays,
+        leaveDays: w.leaveDays,
         qualified: w.qualified,
         // 주휴일이 다음 달인 주는 이 달 합계에 넣지 않는다 (다음 달에서 센다)
         carriedToNextMonth: !w.weekEnd.startsWith(

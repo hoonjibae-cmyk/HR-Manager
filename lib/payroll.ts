@@ -109,9 +109,24 @@ export function blendWageTerms(segments: WageSegment[]): BlendedWage | null {
   };
 }
 
+/** 시간기록표 근거 — 계산에는 쓰이지 않고 명세서 표기용으로 breakdown 에 실려 간다 */
+export interface TimesheetMeta {
+  stayHours: number; // 학원 체류시간 (출근~퇴근)
+  breakHours: number; // 차감 휴게시간
+  netHours: number; // 순 근로시간 = 체류 − 휴게
+  leaveHours: number; // 연차 유급 인정시간
+  leaveDays: number;
+  paidHours: number; // 급여 산정 기준 시간
+  workedDays: number;
+  breakPaid: boolean;
+  dailyContractual: number;
+}
+
 export interface MonthlyInput {
   workedHours?: number | null; // 시급제 실근로시간(월). 없으면 스케줄로 추정
   weeklyHolidayHours?: number | null; // 시급제 주휴시간(월 합계) — 시간기록표 기반. 지정 시 스케줄 추정 대신 사용
+  /** 시간기록표 근거 (명세서 표기용 — 금액 계산에는 쓰지 않는다) */
+  timesheet?: TimesheetMeta | null;
   prorationRatio?: number; // 일할계산 비율(월중 입/퇴사). 1=만근월. 월급·수당·추정근로시간에 적용
   extraHours?: number; // 법내연장(월): 소정 외이나 1일8h·주40h 이내 — 가산 없음(×1.0)
   overtimeHours?: number; // 법정 연장근로(월): 1일8h·주40h 초과분 — ×1.5

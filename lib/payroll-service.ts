@@ -356,6 +356,16 @@ export async function runPayrollMonth(
       mInput.workedHours = existing?.workedHours ?? null;
     if (mInput.weeklyHolidayHours === undefined)
       mInput.weeklyHolidayHours = existing?.weeklyHolidayHours ?? null;
+    // 시간기록표 근거도 배치 재실행 시 보존 (새로 올리면 그때 교체)
+    if (mInput.timesheet === undefined) {
+      try {
+        mInput.timesheet = existing?.breakdown
+          ? JSON.parse(existing.breakdown)?.timesheet ?? null
+          : null;
+      } catch {
+        mInput.timesheet = null;
+      }
+    }
     // 오버타임(보강 실근무 확정분) — 명시적으로 넘긴 값이 있으면 그쪽을 존중한다
     const ot = otMap.get(emp.id);
     if (ot) {
@@ -483,6 +493,8 @@ export async function runPayrollMonth(
                 nightHours: payInput.fixedNightHours ?? null,
               }
             : null,
+        // 시간기록표 근거 — 명세서의 체류/휴게/순 근로/연차 구분 표기용
+        timesheet: mInput.timesheet ?? null,
         // 보강 오버타임 산정 내역 — 명세서 첨부 '오버타임 산정 내역서' 가 이걸 그대로 쓴다
         overtime: ot?.detail?.length
           ? {

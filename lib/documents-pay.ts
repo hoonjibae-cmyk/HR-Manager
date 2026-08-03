@@ -157,6 +157,7 @@ export function payslipHtml(args: {
   };
   let hoursRow = "";
   let holidayNote = "";
+  let timeNote = "";
   // 보강 오버타임 — 첨부 내역서를 보기 전에도 몇 시간이 어떤 구분으로 잡혔는지 명세서 1장에서 알 수 있게
   const otParts = [
     (p.extraHours ?? 0) > 0 ? `연장 ${p.extraHours}시간` : "",
@@ -169,6 +170,12 @@ export function payslipHtml(args: {
     !isHourly && otParts.length
       ? `<tr><th>오버타임</th><td colspan="3">${otParts.join(" · ")} <span class="muted">(산정 근거는 별첨 「보강 오버타임 산정 내역서」)</span></td></tr>`
       : "";
+  // 시간기록표 근거 (체류/휴게/순 근로/연차) — 있으면 명세서에 나눠 적는다
+  let ts: any = null;
+  try {
+    ts = p.breakdown ? JSON.parse(p.breakdown)?.timesheet ?? null : null;
+  } catch {}
+
   if (isHourly) {
     const baseHours =
       p.workedHours != null && p.workedHours > 0
@@ -190,6 +197,29 @@ export function payslipHtml(args: {
     ].filter(Boolean);
     hoursRow = `<tr><th>총 근로시간</th><td colspan="3"><b>${hm(total)}</b> <span class="muted">( ${parts.join(" · ")} )</span></td></tr>`;
 
+    // 체류시간과 순 근로시간을 나눠 보여 준다 — 출퇴근 기록과 급여 시간이 왜 다른지가 한눈에 보이게
+    if (ts) {
+      hoursRow =
+        `<tr><th>학원 체류시간</th><td>${hm(ts.stayHours)} <span class="muted">(출근~퇴근 ${ts.workedDays}일)</span></td>` +
+        `<th>휴게시간</th><td>− ${hm(ts.breakHours)} <span class="muted">(${ts.breakPaid ? "유급" : "무급"})</span></td></tr>` +
+        `<tr><th>순 근로시간</th><td><b>${hm(ts.netHours)}</b> <span class="muted">(체류 − 휴게)</span></td>` +
+        `<th>연차 유급시간</th><td>${ts.leaveHours > 0 ? `${hm(ts.leaveHours)} <span class="muted">(${ts.leaveDays}일 × ${hm(ts.dailyContractual)})</span>` : "-"}</td></tr>` +
+        hoursRow;
+
+      timeNote =
+        `<div class="small">· <b>학원 체류시간</b>은 출근~퇴근 기록 그대로이고, 여기서 휴게시간을 뺀 것이 <b>순 근로시간</b>입니다.</div>` +
+        `<div class="small">· 휴게시간은 근무일마다 30분이며, 근로계약에 따라 <b>${
+          ts.breakPaid ? "유급(급여에 포함)" : "무급(급여에서 제외)"
+        }</b>으로 처리됩니다 — 이 명세서의 기본급은 <b>${
+          ts.breakPaid ? "체류시간" : "순 근로시간"
+        }</b> 기준으로 산정되었습니다.</div>` +
+        (ts.leaveHours > 0
+          ? `<div class="small">· 연차를 사용한 날은 출근 기록이 없지만 <b>1일 소정근로시간(${hm(
+              ts.dailyContractual
+            )})을 근무한 것으로 보아 유급</b>으로 산정합니다 (근로기준법 제60조 — 연차휴가는 유급휴가).</div>`
+          : "");
+    }
+
     // 주휴수당 계산 과정 표기
     if (p.weeklyHolidayP > 0 && p.hourlyWage > 0) {
       const whHours =
@@ -197,8 +227,9 @@ export function payslipHtml(args: {
           ? p.weeklyHolidayHours
           : p.weeklyHolidayP / p.hourlyWage;
       holidayNote = `<div class="small">· 주휴수당 = 주휴시간 <b>${hm(whHours)}</b> × 시급 ${won(p.hourlyWage)}원 = <b>${won(p.weeklyHolidayP)}원</b>
-        &nbsp;(1주 소정근로시간이 15시간 이상이고 <b>그 주 소정근로일을 개근</b>한 주에 한해 부여 —
-        근로기준법 제55조·시행령 제30조. 주휴시간 = 주 소정근로시간 ÷ 5, 주당 최대 8시간)</div>`;
+        &nbsp;(1주 소정근로시간이 15시간 이상이고 <b>그 주 소정근로일수를 채운(개근)</b> 주에 한해 부여 —
+        근로기준법 제55조·시행령 제30조. 근무 요일이 바뀌어도 <b>주당 근무일수</b>로 판정하며,
+        연차 사용일은 출근으로 봅니다. 주휴시간 = 주 소정근로시간 ÷ 5, 주당 최대 8시간)</div>`;
     } else if (p.weeklyHolidayP === 0) {
       holidayNote = `<div class="small">· 주휴수당: 요건(주 소정근로 15시간 이상 + 소정근로일 개근 + 1주간 근로관계 존속)을
         갖춘 주가 없어 미발생 — 근로기준법 제55조·시행령 제30조</div>`;
@@ -314,6 +345,7 @@ export function payslipHtml(args: {
     ${isHourly ? `<div class="small">· 기본급 = 기본 근로시간 × 시급</div>` : ""}
     <div class="small">· 추가근로수당(연장) = 연장근로시간 × 통상시급 <span class="muted">(주 40시간 이내 — 가산 없음)</span> &nbsp; · 연장근로수당(법정초과) = 1일 8시간·주 40시간 초과시간 × 통상시급 × 1.5</div>
     <div class="small">· 휴일근로수당 = 휴일근로시간 × 통상시급 × 1.5 <span class="muted">(1일 8시간 초과분은 × 2.0)</span> &nbsp; · 야간근로수당 = 야간근로시간 × 통상시급 × 0.5</div>
+    ${timeNote}
     ${holidayNote}
     ${isFree
       ? `<div class="small">· 사업소득 원천징수: 지급총액의 3.3%(소득세 3% + 지방소득세 0.3%) 공제</div>`
