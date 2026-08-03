@@ -11,6 +11,7 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - `npm run db:clear-employees` — 직원 데이터 전체 삭제 미리보기 (실제 삭제는 `CONFIRM=DELETE` 필요).
   설정(회사·요율·세액표·공휴일)은 남긴다.
 - `npm run db:fix-contracts` — 계약 이력 앞뒤 맞추기 미리보기 (실제 반영은 `APPLY=1`). 멱등.
+- `node scripts/db-deploy.mjs` — 배포용 스키마 반영 (Vercel 빌드가 자동 실행. 안전장치 포함)
 - `npx tsc --noEmit` — 타입 체크
 - 로그인 비밀번호: `.env` 의 `ADMIN_PASSWORD` (기본 `yoossam2025`)
 
@@ -64,6 +65,11 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - 미래 시작 계약을 만들어도 발효일 전까지는 카드·급여에 반영되지 않는다(지배 계약이 아직 이전 계약).
 - 이식성을 위해 Prisma **enum 대신 문자열** + `lib/constants.ts` 의 상수/라벨 사용.
 - DB는 Postgres. 스키마 변경 시 `npx prisma db push`(DIRECT_URL 사용). 서버리스 런타임은 pgbouncer(DATABASE_URL).
+  **Vercel 배포는 빌드가 알아서 맞춘다** — `vercel-build` 가 `scripts/db-deploy.mjs` 를 먼저 돌린다
+  (Vercel 은 `build` 보다 `vercel-build` 를 우선한다. 로컬 `npm run build` 는 그대로 DB 를 건드리지 않는다).
+  DB 주소가 없거나 preview/development 배포거나 `SKIP_DB_PUSH=1` 이면 조용히 건너뛴다.
+  **`--accept-data-loss` 는 일부러 넣지 않았다** — 데이터가 있는 열을 지우는 변경이면 빌드가
+  멈추고 배포가 나가지 않는다(조용히 지우느니 멈추는 게 낫다). 그럴 땐 로컬에서 확인 후 직접 반영한다.
 - 서버리스(Vercel)에서는 파일 저장 대신 PDF를 버퍼로 스트리밍/첨부. 예약발송은 Vercel Cron → `/api/cron`.
 - 금액은 정수(원). 공제는 10원 절사(`floor10`). 통상시급은 `(주소정+주휴)*4.345` 환산시간 기준.
 - **월급제·인센티브의 `baseWage` 는 '월 지급 총액'이고 식대·차량유지비(비과세)가 그 안에 포함**된다.

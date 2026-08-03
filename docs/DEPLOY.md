@@ -68,7 +68,40 @@ npm run seed            # 회사정보·요율·간이세액표·공휴일·데�
 6. 그 주소로 접속 → `ADMIN_PASSWORD` 로 로그인 → 데이터가 보이면 성공입니다.
 
 > 이후에는 **코드를 GitHub에 push할 때마다 Vercel이 자동 재배포**합니다.
-> 스키마(모델)를 변경했을 때만 로컬에서 `npx prisma db push` 를 다시 실행하면 됩니다.
+> **DB 스키마도 배포할 때 자동으로 맞춰집니다** — 아래 3-A 참고.
+
+### 3-A. DB 스키마 자동 반영 (설정 불필요)
+
+표·열이 추가되는 변경이 있어도 따로 손댈 일이 없습니다. Vercel 이 빌드를 시작할 때
+`scripts/db-deploy.mjs` 가 먼저 돌아 **DB 를 코드에 맞춰 줍니다**.
+
+빌드 로그에서 이렇게 보이면 정상입니다.
+```
+[db-deploy] prisma db push — DB 스키마를 코드에 맞춥니다…
+[db-deploy] ✅ 스키마 반영 완료
+```
+
+**아무것도 하지 않고 넘어가는 경우** (모두 정상 — 지금까지와 똑같이 동작합니다)
+
+| 로그 | 뜻 |
+|---|---|
+| `건너뜀 — DIRECT_URL·DATABASE_URL 이 없음` | 연결할 DB 가 없음 |
+| `건너뜀 — Vercel preview 배포` | 운영 배포에서만 반영 (미완성 스키마로 운영 DB 를 밀지 않기 위함) |
+| `건너뜀 — SKIP_DB_PUSH=1` | 수동으로 꺼 둔 경우 |
+
+**빌드가 멈추는 경우**
+
+데이터가 지워질 수 있는 변경(값이 들어 있는 열 삭제 등)이면 **일부러 배포를 중단**합니다.
+조용히 지우는 것보다 멈추는 편이 안전하기 때문입니다.
+```
+⚠️  There might be data loss when applying the changes:
+  • You are about to drop the column `xxx` on the `Employee` table, which still contains N non-null values.
+[db-deploy] ❌ 스키마 반영에 실패해 배포를 중단합니다.
+```
+이때는 로컬에서 내용을 확인한 뒤 직접 반영하세요. 이번 배포만 넘기려면
+Vercel 환경변수에 `SKIP_DB_PUSH=1` 을 넣고 다시 배포하면 됩니다 (반영이 필요하면 나중에 꼭 지우세요).
+
+> 로컬 `npm run build` 는 DB 를 건드리지 않습니다. Vercel 만 `vercel-build` 를 씁니다.
 
 ---
 
