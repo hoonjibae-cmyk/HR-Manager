@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="유쌤에듀 HR">
+  <!-- 유쌤에듀 HR 앱 아이콘 — 브랜드 블루 스퀘어클 + 'Y' 모노그램.
+       탭에서 16px 로 줄어들어도 알아볼 수 있도록 획을 굵게(56) 두고 장식을 뺐다. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3366ff"/>
+      <stop offset="1" stop-color="#1733e1"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-width="56" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M168 148 L256 268 L344 148"/>
+    <path d="M256 268 L256 372"/>
+  </g>
+</svg>

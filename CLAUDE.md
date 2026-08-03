@@ -18,6 +18,10 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - **엔진(순수 함수, DB 무관, 테스트 있음)**: `lib/payroll.ts`(급여), `lib/leave.ts`(연차, 근로기준법 §60),
   `lib/overtime.ts`(보강 오버타임, 근로기준법 §56).
   UI/API 는 이 엔진을 호출만 한다. 계산 로직 변경은 여기서.
+- **앱 아이콘**: `app/icon.svg`(파비콘) 가 원본이고, `app/apple-icon.png`·`public/icon-*.png` 는
+  거기서 뽑은 래스터다 — 모양을 바꾸면 SVG 를 고친 뒤 PNG 를 다시 뽑아야 한다.
+  `app/manifest.ts` 로 홈 화면 추가(PWA)를 지원한다. 학원 로고(`Company.logo`)와는 별개다 —
+  로고는 가로로 길어 16px 파비콘으로는 읽히지 않는다.
 - **학원 로고**: `Company.logo` 에 **data URI 로 담는다**(파일 아님) — 서버리스는 쓸 수 있는 파일 경로가
   없고 재배포 없이 화면에서 바꿔야 하기 때문. 설정 화면(`components/LogoUpload.tsx`)이 브라우저에서
   긴 변 320px 로 줄여 올리므로 원본 png 를 그대로 골라도 된다. 문서 머리글은 `logoImg(company)`,
