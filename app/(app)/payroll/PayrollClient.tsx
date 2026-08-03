@@ -280,7 +280,7 @@ export default function PayrollClient() {
                 <th className="text-right">실근로</th>
                 <th className="text-right">주휴시간</th>
                 <th className="text-left pl-3">휴게 30분</th>
-                <th className="text-left">주별 (15h 초과 ✓)</th>
+                <th className="text-left">주별 주휴 판정</th>
               </tr>
             </thead>
             <tbody>
@@ -292,7 +292,32 @@ export default function PayrollClient() {
                   <td className="text-right tnum font-semibold">{m.weeklyHolidayHours ? fmtHM(m.weeklyHolidayHours) : "-"}</td>
                   <td className="pl-3">{m.breakPaid ? "유급(그대로)" : "무급(−30분/일)"}</td>
                   <td className="text-slate-500">
-                    {m.weeks.map((w: any) => `${w.weekStart.slice(5)}주 ${fmtHM(w.hours)}${w.qualified ? "✓" : ""}`).join(" · ")}
+                    {m.noSchedule && (
+                      <div className="text-amber-700 mb-0.5">
+                        ⚠️ 근로시간표 없음 — 개근 여부를 판정하지 못해 실근로 기준으로 갈음했습니다
+                      </div>
+                    )}
+                    <div className="space-y-0.5">
+                      {m.weeks.map((w: any) => (
+                        <div key={w.weekStart}>
+                          <span className="tnum">{w.weekStart.slice(5)}~{w.weekEnd.slice(5)}</span>{" "}
+                          <span className="tnum">{fmtHM(w.hours)}</span>{" "}
+                          {w.qualified ? (
+                            w.carriedToNextMonth ? (
+                              <span className="text-slate-400">
+                                주휴 {fmtHM(w.holidayHours)} → 다음 달에 반영
+                              </span>
+                            ) : (
+                              <span className="text-emerald-700 font-semibold">
+                                ✓ 주휴 {fmtHM(w.holidayHours)}
+                              </span>
+                            )
+                          ) : (
+                            <span className="text-slate-400">✕ {w.reason}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -479,6 +504,12 @@ export default function PayrollClient() {
           <p>
             · <b>휴일h</b>: 일요일(주휴일)·공휴일 근무시간 → 휴일근로수당(×1.5) &nbsp;
             · <b>야간h</b>: 22시~06시 근무시간 → 야간가산(+0.5)
+          </p>
+          <p>
+            · <b>주휴수당(시급제)</b>: ① 주 소정근로 15시간 이상 ② <b>그 주 소정근로일 개근</b>
+            ③ 1주(월~일) 근로관계 존속 — 셋을 모두 갖춘 주에만 발생한다 (근로기준법 §55·시행령 §30).
+            연차 사용일은 출근으로, 공휴일은 소정근로일이 아닌 것으로 본다. 지각·조퇴는 결근이 아니다.
+            주휴일(일요일) 전에 퇴사하면 그 주는 미발생.
           </p>
           <p>
             · <b>상여</b>: 특별상여 금액(원) &nbsp;

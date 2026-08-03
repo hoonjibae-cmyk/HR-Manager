@@ -8,6 +8,7 @@ import {
   matchEmployee,
 } from "@/lib/timesheet";
 import { runPayrollMonth, type PayrollInputMap } from "@/lib/payroll-service";
+import { parseSchedule } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -49,12 +50,45 @@ export async function POST(req: Request) {
 
   // 시급제 직원 (해당 월 중 퇴사자 포함)
   const monthStart = new Date(Date.UTC(year, month - 1, 1));
+  const monthEnd = new Date(Date.UTC(year, month, 0, 23, 59, 59));
   const employees = await prisma.employee.findMany({
     where: {
       payScheme: "HOURLY",
       OR: [{ active: true }, { resignDate: { gte: monthStart } }],
     },
   });
+
+  // 주휴 개근 판정에 필요한 재료 — 공휴일(소정근로일에서 제외)과 연차(출근으로 간주).
+  // 주가 달을 걸치므로 앞뒤로 한 주씩 넉넉히 읽는다.
+  const ymd = (d: Date) => d.toISOString().slice(0, 10);
+  const [holidayRows, leaveRows] = await Promise.all([
+    prisma.holiday.findMany({
+      where: {
+        date: {
+          gte: new Date(monthStart.getTime() - 7 * 86400000),
+          lte: new Date(monthEnd.getTime() + 7 * 86400000),
+        },
+      },
+    }),
+    prisma.leaveTransaction.findMany({
+      where: {
+        employeeId: { in: employees.map((e) => e.id) },
+        date: {
+          gte: new Date(monthStart.getTime() - 7 * 86400000),
+          lte: new Date(monthEnd.getTime() + 7 * 86400000),
+        },
+        type: { in: ["USE", "PAYOUT"] },
+      },
+      select: { employeeId: true, date: true },
+    }),
+  ]);
+  const holidays = holidayRows.map((h) => ymd(h.date));
+  const leaveByEmp = new Map<number, string[]>();
+  for (const t of leaveRows) {
+    const arr = leaveByEmp.get(t.employeeId) ?? [];
+    arr.push(ymd(t.date));
+    leaveByEmp.set(t.employeeId, arr);
+  }
 
   const inputs: PayrollInputMap = {};
   const matched: any[] = [];
@@ -76,6 +110,11 @@ export async function POST(req: Request) {
       year,
       month,
       breakPaid: emp.breakPaid,
+      schedule: parseSchedule(emp.schedule),
+      holidays,
+      leaveDates: leaveByEmp.get(emp.id) ?? [],
+      hireDate: ymd(emp.hireDate),
+      resignDate: emp.resignDate ? ymd(emp.resignDate) : null,
     });
     if (r.workedDays === 0) {
       noRecords.push(p.rawName);
@@ -92,11 +131,20 @@ export async function POST(req: Request) {
       workedDays: r.workedDays,
       workHours: Math.round(r.workHours * 100) / 100,
       weeklyHolidayHours: Math.round(r.weeklyHolidayHours * 100) / 100,
+      noSchedule: r.noSchedule,
       weeks: r.weeks.map((w) => ({
         weekStart: w.weekStart,
+        weekEnd: w.weekEnd,
         hours: Math.round(w.hours * 100) / 100,
+        contractualHours: Math.round(w.contractualHours * 100) / 100,
+        absentDays: w.absentDays,
         qualified: w.qualified,
+        // 주휴일이 다음 달인 주는 이 달 합계에 넣지 않는다 (다음 달에서 센다)
+        carriedToNextMonth: !w.weekEnd.startsWith(
+          `${year}-${String(month).padStart(2, "0")}-`
+        ),
         holidayHours: Math.round(w.holidayHours * 100) / 100,
+        reason: w.reason ?? null,
       })),
     });
   }

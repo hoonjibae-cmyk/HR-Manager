@@ -9,11 +9,23 @@
 // 유쌤에듀 규칙:
 //  - 기록표 근무시간은 출퇴근 기준이며, 직원별 계약에 따라
 //    휴게 30분 유급(breakPaid=true → 그대로 인정) / 무급(false → 근무일마다 0.5h 차감)
-//  - 주휴수당: 1주(월~일) 실근로시간(휴게 차감 후)이 15시간을 "초과"하면 지급.
-//    계약상 소정근로가 15시간 미만이어도 실근로 기준으로 판단.
-//    주휴시간 = min(주 실근로 / 5, 8) — 초과분에 대한 별도 가산수당은 없음(시급 100%).
+//
+// 주휴수당 (근로기준법 §55①, 시행령 §30①, §18③) — 요건 세 가지를 모두 만족해야 발생한다.
+//  ㉠ 1주 **소정근로시간 15시간 이상** (§18③ — 15시간 '미만' 이 제외이므로 15시간 정각은 대상)
+//     판정 기준은 실근로가 아니라 **계약상 소정근로시간**이다.
+//  ㉡ 그 주 **소정근로일 개근** (시행령 §30①)
+//     · 연차 사용일은 출근으로 본다 · 공휴일은 애초에 소정근로일이 아니다
+//     · 지각·조퇴는 결근이 아니다(근기 68207-1465) — 기록이 있으면 출근으로 센다
+//  ㉢ 그 주(월~일) 내내 **근로관계 존속** — 주휴일 전에 퇴사하거나 주 중간에 입사하면 미발생
+//     (2021.8.4. 임금근로시간과-1736 로 행정해석이 바뀌어, 주휴일까지만 재직하면 8일째
+//      근로관계가 없어도 발생한다. '퇴사 주는 무조건 미지급' 은 옛 해석이라 체불이 될 수 있다.)
+//  주휴시간 = min(주 소정근로시간 / 5, 8). 실근로가 많다고 주휴가 늘지는 않는다.
+//
+//  근로시간표(Employee.schedule)가 비어 있으면 소정근로일을 알 수 없다 →
+//  옛 방식(실근로 15시간 초과)으로 갈음하고 결과에 경고를 남긴다.
 
 import * as XLSX from "xlsx";
+import type { ScheduleDay } from "./constants";
 
 export interface TimesheetEntry {
   date: string; // YYYY-MM-DD
@@ -172,9 +184,21 @@ export function matchEmployee<T extends { name: string }>(
 
 export interface WeekSummary {
   weekStart: string; // 해당 주 월요일 (YYYY-MM-DD)
+  weekEnd: string; // 해당 주 일요일 = 주휴일
   hours: number; // 주 실근로(휴게 차감 후)
-  qualified: boolean; // 15시간 초과 여부
+  /** 그 주 소정근로시간 (계약 근로시간표 기준). 시간표가 없으면 실근로로 갈음 */
+  contractualHours: number;
+  /** 그 주 소정근로일 (공휴일·재직기간 밖 제외) */
+  scheduledDays: string[];
+  /** 소정근로일인데 출근 기록도 연차도 없는 날 */
+  absentDays: string[];
+  perfect: boolean; // ㉡ 개근
+  eligible: boolean; // ㉠ 주 소정근로 15시간 이상
+  employedWholeWeek: boolean; // ㉢ 주 내내 근로관계 존속
+  qualified: boolean; // 셋 다 충족
   holidayHours: number; // 부여 주휴시간
+  /** 미발생 사유 (화면·명세서 설명용) */
+  reason?: string;
 }
 
 export interface MonthlyTimesheetResult {
@@ -182,53 +206,192 @@ export interface MonthlyTimesheetResult {
   workedDays: number;
   weeklyHolidayHours: number; // 월 주휴시간 합계
   weeks: WeekSummary[];
+  /** 근로시간표가 없어 옛 방식(실근로 기준)으로 갈음했는가 */
+  noSchedule: boolean;
 }
 
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
+const day = (s: string) => new Date(s + "T00:00:00Z");
+
 function mondayOf(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00Z");
+  const d = day(dateStr);
   const dow = d.getUTCDay(); // 0=일
   const diff = dow === 0 ? -6 : 1 - dow;
   d.setUTCDate(d.getUTCDate() + diff);
-  return d.toISOString().slice(0, 10);
+  return ymd(d);
+}
+
+function addDays(dateStr: string, n: number): string {
+  const d = day(dateStr);
+  d.setUTCDate(d.getUTCDate() + n);
+  return ymd(d);
+}
+
+const DOW_KEY: ScheduleDay["day"][] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+/** "HH:MM" → 시(소수) */
+function hhmm(s: string): number {
+  const [h, m] = String(s || "0:00").split(":").map((n) => parseInt(n, 10));
+  return (h || 0) + (m || 0) / 60;
+}
+
+/** 그 요일의 소정근로시간 (휴게 제외). 근무일이 아니면 0 */
+function scheduledHoursOn(schedule: ScheduleDay[], dow: number): number {
+  const d = schedule.find((x) => x.day === DOW_KEY[dow]);
+  if (!d?.work) return 0;
+  let dur = hhmm(d.end) - hhmm(d.start);
+  if (dur <= 0) dur += 24;
+  return Math.max(dur - (d.breakH || 0), 0);
+}
+
+export interface MonthlyOptions {
+  year: number;
+  month: number;
+  /** 휴게 30분 유급 여부 (false 면 근무일마다 0.5h 차감) */
+  breakPaid: boolean;
+  /** 계약 근로시간표 — 소정근로일·소정근로시간의 근거. 없으면 옛 방식으로 갈음 */
+  schedule?: ScheduleDay[];
+  /** 공휴일 (YYYY-MM-DD) — 소정근로일에서 뺀다 */
+  holidays?: string[];
+  /** 연차·유급휴가 사용일 (YYYY-MM-DD) — 개근 판정에서 출근으로 본다 */
+  leaveDates?: string[];
+  /** 입사일 (YYYY-MM-DD) — 이전은 소정근로일이 아니고, 주 중간 입사면 그 주 주휴 미발생 */
+  hireDate?: string | null;
+  /** 퇴사일 (YYYY-MM-DD) — 주휴일 전에 퇴사하면 그 주 주휴 미발생 */
+  resignDate?: string | null;
 }
 
 /**
- * 한 직원의 월 집계.
- * @param entries 기록표 일별 시간
- * @param opts.year/month 대상 연·월 (그 달의 기록만 집계)
- * @param opts.breakPaid 휴게 30분 유급 여부 (false 면 근무일마다 0.5h 차감)
+ * 한 직원의 월 집계 (실근로시간 + 주휴수당).
+ *
+ * 주휴는 파일 첫머리 주석의 세 요건(㉠15시간 ㉡개근 ㉢1주 존속)을 모두 만족한 주에만 붙는다.
+ * 달을 걸친 주는 **주휴일(일요일)이 속한 달**에서 한 번만 센다 — 양쪽 달에서 각각 세면
+ * 이중 지급이 되고, 어느 쪽에서도 안 세면 누락된다.
  */
 export function computeMonthlyFromEntries(
   entries: TimesheetEntry[],
-  opts: { year: number; month: number; breakPaid: boolean }
+  opts: MonthlyOptions
 ): MonthlyTimesheetResult {
   const prefix = `${opts.year}-${String(opts.month).padStart(2, "0")}-`;
-  const daily = new Map<string, number>(); // 같은 날 중복 기록은 합산
-  for (const e of entries) {
-    if (!e.date.startsWith(prefix)) continue;
-    daily.set(e.date, (daily.get(e.date) ?? 0) + e.hours);
-  }
+  const schedule = opts.schedule ?? [];
+  const hasSchedule = schedule.some((d) => d.work);
+  const holidays = new Set(opts.holidays ?? []);
+  const leaves = new Set(opts.leaveDates ?? []);
+
+  // 출근 기록 — 개근 판정에는 달 밖의 기록도 쓴다 (달을 걸친 주 때문에)
+  const allDaily = new Map<string, number>();
+  for (const e of entries) allDaily.set(e.date, (allDaily.get(e.date) ?? 0) + e.hours);
 
   let workHours = 0;
   let workedDays = 0;
-  const byWeek = new Map<string, number>();
-  for (const [date, raw] of daily) {
+  const weekWorked = new Map<string, number>(); // 주별 실근로 (대상 월 기록만)
+  for (const [date, raw] of allDaily) {
+    if (!date.startsWith(prefix)) continue;
     const adj = Math.max(raw - (opts.breakPaid ? 0 : 0.5), 0);
     if (adj <= 0) continue;
     workHours += adj;
     workedDays++;
     const wk = mondayOf(date);
-    byWeek.set(wk, (byWeek.get(wk) ?? 0) + adj);
+    weekWorked.set(wk, (weekWorked.get(wk) ?? 0) + adj);
   }
 
-  const weeks: WeekSummary[] = [...byWeek.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([weekStart, hours]) => {
-      const qualified = hours > 15; // 15시간 '초과' 시 지급
-      const holidayHours = qualified ? Math.min(hours / 5, 8) : 0;
-      return { weekStart, hours, qualified, holidayHours };
-    });
+  // 판정할 주 = 주휴일(일요일)이 이 달에 있는 주 전부.
+  // 근무 기록이 하나도 없는 주라도 '결근으로 미발생' 이라는 사실을 남겨야 하므로 함께 훑는다.
+  const monthEnd = new Date(Date.UTC(opts.year, opts.month, 0));
+  const weekStarts: string[] = [];
+  for (let d = 1; d <= monthEnd.getUTCDate(); d++) {
+    const date = `${prefix}${String(d).padStart(2, "0")}`;
+    if (day(date).getUTCDay() !== 0) continue; // 일요일만
+    weekStarts.push(mondayOf(date));
+  }
+  // 기록이 있는데 위 목록에 없는 주(= 일요일이 다음 달) 도 실근로 집계에는 남는다
+  for (const wk of weekWorked.keys()) if (!weekStarts.includes(wk)) weekStarts.push(wk);
+  weekStarts.sort();
 
-  const weeklyHolidayHours = weeks.reduce((s, w) => s + w.holidayHours, 0);
-  return { workHours, workedDays, weeklyHolidayHours, weeks };
+  const weeks: WeekSummary[] = weekStarts.map((weekStart) => {
+    const weekEnd = addDays(weekStart, 6);
+    const hours = weekWorked.get(weekStart) ?? 0;
+
+    // ㉢ 1주 내내 근로관계 존속 (주 중간 입사·주휴일 전 퇴사면 불충족)
+    const employedWholeWeek =
+      (!opts.hireDate || opts.hireDate <= weekStart) &&
+      (!opts.resignDate || opts.resignDate >= weekEnd);
+
+    // 근로시간표가 없으면 소정근로일을 알 수 없다 — 옛 방식(실근로 15시간 초과)으로 갈음
+    if (!hasSchedule) {
+      const eligible = hours > 15;
+      const qualified = eligible && employedWholeWeek;
+      return {
+        weekStart,
+        weekEnd,
+        hours,
+        contractualHours: hours,
+        scheduledDays: [],
+        absentDays: [],
+        perfect: eligible,
+        eligible,
+        employedWholeWeek,
+        qualified,
+        holidayHours: qualified ? Math.min(hours / 5, 8) : 0,
+        reason: qualified
+          ? undefined
+          : !employedWholeWeek
+          ? "1주 근로관계 미존속 (주 중간 입·퇴사)"
+          : "근로시간표 없음 — 실근로 15시간 이하",
+      };
+    }
+
+    // 그 주 소정근로일 (공휴일·재직기간 밖 제외)
+    const scheduledDays: string[] = [];
+    let contractualHours = 0;
+    for (let i = 0; i < 7; i++) {
+      const date = addDays(weekStart, i);
+      const dow = day(date).getUTCDay();
+      if (scheduledHoursOn(schedule, dow) <= 0) continue;
+      contractualHours += scheduledHoursOn(schedule, dow);
+      if (holidays.has(date)) continue; // 공휴일 = 소정근로일 아님
+      if (opts.hireDate && date < opts.hireDate) continue;
+      if (opts.resignDate && date > opts.resignDate) continue;
+      scheduledDays.push(date);
+    }
+
+    // ㉡ 개근 — 소정근로일에 출근 기록 또는 연차가 있어야 한다
+    const absentDays = scheduledDays.filter((d) => !allDaily.has(d) && !leaves.has(d));
+    const perfect = scheduledDays.length > 0 && absentDays.length === 0;
+    // ㉠ 15시간 — 계약상 소정근로시간 기준 (§18③ '미만' 제외 → 15시간 정각은 대상)
+    const eligible = contractualHours >= 15;
+    const qualified = eligible && perfect && employedWholeWeek;
+
+    return {
+      weekStart,
+      weekEnd,
+      hours,
+      contractualHours,
+      scheduledDays,
+      absentDays,
+      perfect,
+      eligible,
+      employedWholeWeek,
+      qualified,
+      holidayHours: qualified ? Math.min(contractualHours / 5, 8) : 0,
+      reason: qualified
+        ? undefined
+        : !eligible
+        ? `주 소정근로 ${contractualHours}시간 (15시간 미만)`
+        : !employedWholeWeek
+        ? opts.resignDate && opts.resignDate < weekEnd
+          ? `퇴사일(${opts.resignDate})이 주휴일(${weekEnd}) 이전`
+          : `입사일(${opts.hireDate})이 주 시작(${weekStart}) 이후`
+        : scheduledDays.length === 0
+        ? "그 주 소정근로일 없음"
+        : `결근 ${absentDays.length}일 (${absentDays.join(", ")})`,
+    };
+  });
+
+  // 주휴는 '주휴일이 이 달에 있는 주' 만 이 달에 싣는다 (달을 걸친 주의 이중 지급 방지)
+  const weeklyHolidayHours = weeks
+    .filter((w) => w.weekEnd.startsWith(prefix))
+    .reduce((s, w) => s + w.holidayHours, 0);
+
+  return { workHours, workedDays, weeklyHolidayHours, weeks, noSchedule: !hasSchedule };
 }

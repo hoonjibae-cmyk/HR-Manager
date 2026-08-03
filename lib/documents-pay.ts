@@ -197,9 +197,11 @@ export function payslipHtml(args: {
           ? p.weeklyHolidayHours
           : p.weeklyHolidayP / p.hourlyWage;
       holidayNote = `<div class="small">· 주휴수당 = 주휴시간 <b>${hm(whHours)}</b> × 시급 ${won(p.hourlyWage)}원 = <b>${won(p.weeklyHolidayP)}원</b>
-        &nbsp;(1주 실근로가 15시간을 초과한 주에 한해 부여, 주휴시간 = 해당 주 실근로 ÷ 5, 주당 최대 8시간)</div>`;
+        &nbsp;(1주 소정근로시간이 15시간 이상이고 <b>그 주 소정근로일을 개근</b>한 주에 한해 부여 —
+        근로기준법 제55조·시행령 제30조. 주휴시간 = 주 소정근로시간 ÷ 5, 주당 최대 8시간)</div>`;
     } else if (p.weeklyHolidayP === 0) {
-      holidayNote = `<div class="small">· 주휴수당: 실근로 15시간을 초과한 주가 없어 미발생</div>`;
+      holidayNote = `<div class="small">· 주휴수당: 요건(주 소정근로 15시간 이상 + 소정근로일 개근 + 1주간 근로관계 존속)을
+        갖춘 주가 없어 미발생 — 근로기준법 제55조·시행령 제30조</div>`;
     }
   }
 
