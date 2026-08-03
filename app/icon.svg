@@ -1,15 +1,52 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="유쌤에듀 HR">
-  <!-- 유쌤에듀 HR 앱 아이콘 — 브랜드 블루 스퀘어클 + 'Y' 모노그램.
-       탭에서 16px 로 줄어들어도 알아볼 수 있도록 획을 굵게(56) 두고 장식을 뺐다. -->
+  <!-- 유쌤에듀 HR 앱 아이콘 — 3인 그룹 실루엣 + 'HR' 말풍선.
+       홈 화면(120~192px)에서 제대로 보이는 게 우선이고, 브라우저 탭(16~20px)에서는 글자가
+       읽히지 않으므로 그 크기에서도 '파란 판 위 흰 띠 + 흰 덩어리' 로 알아보게
+       요소를 셋(말풍선·가운데 사람·양옆 사람)만 두고 굵게 그렸다.
+       HR 글자는 폰트에 기대지 않고 패스로 그린다 — 환경마다 글꼴이 달라지면 안 되기 때문. -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#3366ff"/>
       <stop offset="1" stop-color="#1733e1"/>
     </linearGradient>
+    <linearGradient id="lead" x1="0.25" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dbe6ff"/>
+    </linearGradient>
+    <linearGradient id="side" x1="0.25" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.72"/>
+      <stop offset="1" stop-color="#c6d6ff" stop-opacity="0.55"/>
+    </linearGradient>
   </defs>
+
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <g fill="none" stroke="#ffffff" stroke-width="56" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M168 148 L256 268 L344 148"/>
-    <path d="M256 268 L256 372"/>
+
+  <!-- 뒤쪽 두 사람 -->
+  <g fill="url(#side)">
+    <circle cx="108" cy="272" r="44"/>
+    <path d="M36 410a72 72 0 0 1 144 0z"/>
+    <circle cx="404" cy="272" r="44"/>
+    <path d="M332 410a72 72 0 0 1 144 0z"/>
+  </g>
+
+  <!-- 가운데 사람 — 뒤 사람과 겹치는 자리를 배경색으로 한 번 끊어 실루엣이 뭉치지 않게 한다 -->
+  <g fill="url(#bg)">
+    <circle cx="256" cy="264" r="76"/>
+    <path d="M146 466a110 110 0 0 1 220 0z"/>
+  </g>
+  <g fill="url(#lead)">
+    <circle cx="256" cy="264" r="62"/>
+    <path d="M158 466a98 98 0 0 1 196 0z"/>
+  </g>
+
+  <!-- 'HR' 말풍선 -->
+  <path d="M150 34h212a30 30 0 0 1 30 30v76a30 30 0 0 1-30 30h-76l-30 32-30-32h-76a30 30 0 0 1-30-30V64a30 30 0 0 1 30-30z"
+        fill="#ffffff"/>
+  <g fill="none" stroke="#1733e1" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <!-- H -->
+    <path d="M188 70v64M242 70v64M188 102h54"/>
+    <!-- R -->
+    <path d="M290 134V70h28a20 20 0 0 1 0 40h-28"/>
+    <path d="M308 110l26 24"/>
   </g>
 </svg>
