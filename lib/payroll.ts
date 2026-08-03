@@ -386,13 +386,13 @@ export function computePayroll(
         : weeklyContractual * WEEKS_PER_MONTH * prorate; // 스케줄 기반 추정
     baseP = round0(emp.baseWage * monthHours);
     // 시급제 주휴수당 — 요건은 lib/timesheet.ts 에서 **1주 단위**로 판정한다
-    // (그 주 실근로 15시간 이상 + 그 주 내내 근로관계 존속)
+    // (주5일 계약=계약 근무요일 개근 / 주2~4일=그 주 실근로 15시간, 둘 다 1주 근로관계 존속 필요)
     if (month.weeklyHolidayHours != null) {
       weeklyHolidayP = round0(emp.baseWage * month.weeklyHolidayHours);
       notes.push(
         month.weeklyHolidayHours > 0
-          ? `주휴수당: 주휴시간 ${month.weeklyHolidayHours.toFixed(2)}시간 (그 주 근로 15시간 이상인 주만 부여)`
-          : "주휴수당: 주 15시간 이상 근로한 주가 없어 미발생"
+          ? `주휴수당: 주휴시간 ${month.weeklyHolidayHours.toFixed(2)}시간 (요건을 갖춘 주만 부여)`
+          : "주휴수당: 요건을 갖춘 주가 없어 미발생 (계약 근무요일 개근 또는 주 15시간 이상)"
       );
     } else {
       weeklyHolidayP = round0(emp.baseWage * weeklyHoliday * WEEKS_PER_MONTH * prorate);

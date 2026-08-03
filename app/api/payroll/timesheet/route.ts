@@ -195,6 +195,9 @@ export async function POST(req: Request) {
       workHours: r.paidHours,
       weeklyHolidayHours: Math.round(r.weeklyHolidayHours * 100) / 100,
       noSchedule: r.noSchedule,
+      // 주휴를 어떤 기준으로 봤는가 — fixed=계약 근무요일 개근(주5일), actual=그 주 실근로 15시간
+      weekMode: r.weekMode,
+      contractualHours: Math.round((r.weeks[0]?.contractualHours ?? 0) * 100) / 100,
       // 날짜는 있는데 근무시간을 못 읽어 버린 행 (그날 근로시간이 통째로 빠진다)
       skippedRows: p.skipped,
       weeks: r.weeks.map((w) => ({
@@ -202,7 +205,9 @@ export async function POST(req: Request) {
         weekEnd: w.weekEnd,
         hours: Math.round(w.hours * 100) / 100,
         contractualHours: Math.round(w.contractualHours * 100) / 100,
+        mode: w.mode,
         requiredDays: w.requiredDays,
+        missingDates: w.missingDates,
         attendedDays: w.attendedDays,
         leaveDays: w.leaveDays,
         attendedDates: w.attendedDates,
