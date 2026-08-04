@@ -2,7 +2,12 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { won } from "@/lib/format";
-import { PAY_SCHEME_LABEL, INCOME_TYPE_LABEL, PAYROLL_STATUS_LABEL } from "@/lib/constants";
+import {
+  PAY_SCHEME_LABEL,
+  INCOME_TYPE_LABEL,
+  PAYROLL_STATUS_LABEL,
+  isContractorContract,
+} from "@/lib/constants";
 import { Pill } from "@/components/ui";
 
 interface Rec {
@@ -41,7 +46,13 @@ interface Rec {
   otherD: number;
   otherItems: string | null;
   prorationRatio: number;
-  employee: { name: string; empNo: string; department: string | null; position: string | null };
+  employee: {
+    name: string;
+    empNo: string;
+    department: string | null;
+    position: string | null;
+    isContractor?: boolean;
+  };
 }
 
 const now = new Date();
@@ -464,6 +475,17 @@ export default function PayrollClient() {
                     <div className="flex flex-col items-start gap-1">
                       <Pill kind={r.payScheme}>{PAY_SCHEME_LABEL[r.payScheme]}</Pill>
                       <Pill kind={r.incomeType}>{r.incomeType === "FREELANCE" ? "사업소득" : "근로소득"}</Pill>
+                      {isContractorContract({
+                        payScheme: r.payScheme,
+                        isContractor: r.employee?.isContractor,
+                      }) && (
+                        <span
+                          className="pill bg-amber-50 text-amber-700"
+                          title="위탁계약(프리랜서) — 주휴수당·연차·퇴직금·4대보험·법정가산을 적용하지 않습니다."
+                        >
+                          위탁 · 근로기준법 미적용
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="td">
@@ -482,12 +504,24 @@ export default function PayrollClient() {
                       {r.payScheme === "RATIO" && (
                         <InlineInput label="매출" value={inputs[r.employeeId]?.classRevenue ?? ""} onChange={(v) => setInput(r.employeeId, "classRevenue", v)} wide />
                       )}
-                      <InlineInput label="추가h" value={inputs[r.employeeId]?.extraHours ?? ""} onChange={(v) => setInput(r.employeeId, "extraHours", v)} />
-                      <InlineInput label="연장h" value={inputs[r.employeeId]?.overtimeHours ?? ""} onChange={(v) => setInput(r.employeeId, "overtimeHours", v)} />
-                      <InlineInput label="휴일h" value={inputs[r.employeeId]?.holidayHours ?? ""} onChange={(v) => setInput(r.employeeId, "holidayHours", v)} />
-                      <InlineInput label="야간h" value={inputs[r.employeeId]?.nightHours ?? ""} onChange={(v) => setInput(r.employeeId, "nightHours", v)} />
+                      {!isContractorContract({
+                        payScheme: r.payScheme,
+                        isContractor: r.employee?.isContractor,
+                      }) && (
+                        <>
+                          <InlineInput label="추가h" value={inputs[r.employeeId]?.extraHours ?? ""} onChange={(v) => setInput(r.employeeId, "extraHours", v)} />
+                          <InlineInput label="연장h" value={inputs[r.employeeId]?.overtimeHours ?? ""} onChange={(v) => setInput(r.employeeId, "overtimeHours", v)} />
+                          <InlineInput label="휴일h" value={inputs[r.employeeId]?.holidayHours ?? ""} onChange={(v) => setInput(r.employeeId, "holidayHours", v)} />
+                          <InlineInput label="야간h" value={inputs[r.employeeId]?.nightHours ?? ""} onChange={(v) => setInput(r.employeeId, "nightHours", v)} />
+                        </>
+                      )}
                       <InlineInput label="상여" value={inputs[r.employeeId]?.bonus ?? ""} onChange={(v) => setInput(r.employeeId, "bonus", v)} wide />
-                      <InlineInput label="미사용연차(일)" value={inputs[r.employeeId]?.unusedLeaveDays ?? ""} onChange={(v) => setInput(r.employeeId, "unusedLeaveDays", v)} />
+                      {!isContractorContract({
+                        payScheme: r.payScheme,
+                        isContractor: r.employee?.isContractor,
+                      }) && (
+                        <InlineInput label="미사용연차(일)" value={inputs[r.employeeId]?.unusedLeaveDays ?? ""} onChange={(v) => setInput(r.employeeId, "unusedLeaveDays", v)} />
+                      )}
                       <button
                         className="btn-primary py-1 px-2.5 text-xs self-end disabled:opacity-40"
                         disabled={!!busy || r.status === "SENT"}

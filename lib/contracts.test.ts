@@ -133,10 +133,21 @@ describe("mirrorFromContract — 카드에 비출 값", () => {
       incPerStudent: null,
       ratioPercent: 0.4,
       ratioMinGuarantee: null,
+      isContractor: true, // 완전비율제는 성질상 언제나 위탁계약
       fixedBaseHours: null,
       fixedOtHours: null,
       fixedNightHours: null,
     });
+  });
+
+  it("위탁계약 체크는 계약에서 카드로 그대로 옮겨진다", () => {
+    const c = ct(1, "2026-01-01", null, { templateKey: "HOURLY", isContractor: true });
+    expect(mirrorFromContract(c).isContractor).toBe(true);
+  });
+
+  it("체크하지 않은 근로계약은 위탁이 아니다", () => {
+    const c = ct(1, "2026-01-01", null, { templateKey: "HOURLY" });
+    expect(mirrorFromContract(c).isContractor).toBe(false);
   });
 
   it("계약에 세무구분이 없으면 카드 값을 유지한다", () => {

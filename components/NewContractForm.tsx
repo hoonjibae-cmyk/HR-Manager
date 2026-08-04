@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CONTRACT_STAGE_LABEL, PAY_SCHEME_LABEL, INCOME_TYPE_LABEL } from "@/lib/constants";
 import FixedHoursFields from "./FixedHoursFields";
+import ContractorField from "./ContractorField";
 
 /** 계약 단계별 수습 기본값 — 신규(단기/파트)만 수습 포함, 갱신·정규는 제외 */
 function defaultProbation(stage: string): boolean {
@@ -51,6 +52,7 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
     incPerStudent: emp.incPerStudent ?? "",
     ratioPercent: emp.ratioPercent != null ? emp.ratioPercent * 100 : "",
     ratioMinGuarantee: emp.ratioMinGuarantee ?? "",
+    isContractor: !!(emp as any).isContractor,
     fixedBaseHours: emp.fixedBaseHours ?? "",
     fixedOtHours: emp.fixedOtHours ?? "",
     fixedNightHours: emp.fixedNightHours ?? "",
@@ -83,6 +85,7 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
         incPerStudent: f.incPerStudent === "" ? null : Number(f.incPerStudent),
         ratioPercent: f.ratioPercent === "" ? null : Number(f.ratioPercent) / 100,
         ratioMinGuarantee: f.ratioMinGuarantee === "" ? null : Number(f.ratioMinGuarantee),
+        isContractor: f.payScheme === "RATIO" ? true : !!f.isContractor,
         fixedBaseHours: f.fixedBaseHours === "" ? null : Number(f.fixedBaseHours),
         fixedOtHours: f.fixedOtHours === "" ? null : Number(f.fixedOtHours),
         fixedNightHours: f.fixedNightHours === "" ? null : Number(f.fixedNightHours),
@@ -201,7 +204,14 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
         <L label="업무내용"><input className="input" value={f.duty} onChange={(e) => set("duty", e.target.value)} /></L>
       </div>
 
-      {isMonthly && <FixedHoursFields f={f} set={set} />}
+      <ContractorField
+        checked={!!f.isContractor}
+        payScheme={f.payScheme}
+        onChange={(v) => set("isContractor", v)}
+      />
+      {isMonthly && !f.isContractor && f.payScheme !== "RATIO" && (
+        <FixedHoursFields f={f} set={set} />
+      )}
 
       <L label="메모 (선택)">
         <input className="input" placeholder="예: 연봉 조정 재계약" value={f.note} onChange={(e) => set("note", e.target.value)} />

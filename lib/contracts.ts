@@ -96,6 +96,8 @@ export interface ContractLike {
   incPerStudent: number | null;
   ratioPercent: number | null;
   ratioMinGuarantee?: number | null;
+  /** 위탁계약(프리랜서) — 근로기준법 항목 일절 미적용 */
+  isContractor?: boolean | null;
   fixedBaseHours?: number | null;
   fixedOtHours?: number | null;
   fixedNightHours?: number | null;
@@ -238,6 +240,8 @@ export function mirrorFromContract(c: ContractLike): Record<string, any> {
     incPerStudent: c.incPerStudent ?? null,
     ratioPercent: c.ratioPercent ?? null,
     ratioMinGuarantee: c.ratioMinGuarantee ?? null,
+    // 위탁계약 여부도 계약이 진실 — 완전비율제는 성질상 언제나 위탁이다
+    isContractor: c.isContractor === true || paySchemeOf(c.templateKey) === "RATIO",
     fixedBaseHours: c.fixedBaseHours ?? null,
     fixedOtHours: c.fixedOtHours ?? null,
     fixedNightHours: c.fixedNightHours ?? null,

@@ -28,6 +28,31 @@ export const PAY_SCHEME_LABEL: Record<string, string> = {
   RATIO: "완전비율제(위탁)",
 };
 
+/**
+ * **위탁계약(프리랜서)인가 — 근로기준법 항목을 일절 적용하지 않는 대상인가.**
+ *
+ * 근로자가 아니라 도급·위탁 관계이므로 주휴수당(§55)·연차(§60)·퇴직(유보)금·4대보험·
+ * 법정가산(§56)이 모두 적용되지 않고, **계약서에 적힌 시급 또는 비율로만** 지급한다.
+ * 주 15시간을 넘겨도 마찬가지다 — 15시간은 근로자일 때 따지는 기준이다.
+ *
+ * 완전비율제(RATIO)는 성질상 언제나 위탁계약(위탁계약서 템플릿)이라 플래그와 무관하게 포함한다.
+ * 세무구분(`incomeType`)과는 **별개**다 — 사업소득으로 신고해도 실질이 근로자면 근로기준법이
+ * 적용되므로, 세금 처리 방식만 보고 자동으로 판단하지 않고 계약에 명시적으로 체크하게 한다.
+ *
+ * 새 제외 지점을 만들 때는 `payScheme === "RATIO"` 를 직접 쓰지 말고 반드시 이 함수를 쓴다.
+ */
+export function isContractorContract(
+  e: { payScheme?: string | null; isContractor?: boolean | null } | null | undefined
+): boolean {
+  if (!e) return false;
+  return e.isContractor === true || e.payScheme === PAY_SCHEME.RATIO;
+}
+
+/** 위탁계약이라 근로기준법 항목이 빠진다는 안내 문구 (화면·슬랙 공용) */
+export const CONTRACTOR_NOTICE =
+  "위탁계약(프리랜서)이라 주휴수당·연차·퇴직금·4대보험이 적용되지 않습니다. " +
+  "계약서에 정한 시급 또는 비율로만 지급됩니다.";
+
 /** 계약 단계 (학원 계약 구조: 1년 단기 → 1년 추가 → 정규, 또는 1년 단기 → 정규) */
 export const CONTRACT_STAGE = {
   SHORT_TERM_1: "SHORT_TERM_1", // 1년 단기계약

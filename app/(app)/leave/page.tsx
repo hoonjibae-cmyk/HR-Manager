@@ -32,9 +32,9 @@ export default async function LeavePage({
     : new Date(Date.UTC(year, 11, 31, 23, 59, 59));
 
   const [employees, txns, pending] = await Promise.all([
-    // 완전비율제(위탁)는 프리랜서 계약으로 연차 미적용 → 연차 관리 대상 제외
+    // 위탁계약(프리랜서·완전비율제)은 근로기준법 미적용 → 연차 관리 대상에서 제외
     prisma.employee.findMany({
-      where: { active: true, payScheme: { not: "RATIO" } },
+      where: { active: true, payScheme: { not: "RATIO" }, isContractor: false },
       orderBy: { empNo: "asc" },
     }),
     prisma.leaveTransaction.findMany(),

@@ -18,6 +18,7 @@ import {
   submitLeaveRequest,
   rangeLabel,
 } from "@/lib/leave-slack";
+import { isContractorContract } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 
@@ -71,13 +72,13 @@ export async function POST(req: Request) {
       makeupModalView({
         empName: emp.name,
         channel: form.get("channel_id") || undefined,
-        ratio: emp.payScheme === "RATIO",
+        ratio: isContractorContract(emp),
       })
     );
     return new Response("", { status: 200 });
   }
 
-  if (emp.payScheme === "RATIO") return ephemeral(RATIO_LEAVE_NOTICE);
+  if (isContractorContract(emp)) return ephemeral(RATIO_LEAVE_NOTICE);
 
   // 잔여연차 조회 (직원 셀프 조회) — 이번 연차기간 기준 + 대휴보상연차
   if (!text || /^(조회|잔여|현황|내연차|status|balance)$/i.test(text)) {

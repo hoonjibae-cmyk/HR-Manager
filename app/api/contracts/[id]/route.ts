@@ -52,6 +52,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if ("incomeType" in body) data.incomeType = body.incomeType || null;
   if ("stage" in body) data.stage = body.stage;
   if ("isProbation" in body) data.isProbation = !!body.isProbation;
+  if ("isContractor" in body) data.isContractor = !!body.isContractor;
   if ("note" in body) data.note = body.note || null;
   if ("startDate" in body && body.startDate) data.startDate = new Date(body.startDate);
   if ("endDate" in body) data.endDate = body.endDate ? new Date(body.endDate) : null;

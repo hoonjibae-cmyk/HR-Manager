@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CONTRACT_STAGE_LABEL, PAY_SCHEME_LABEL, INCOME_TYPE_LABEL } from "@/lib/constants";
 import FixedHoursFields from "./FixedHoursFields";
+import ContractorField from "./ContractorField";
 
 export interface ContractSnapshot {
   id: number;
@@ -21,6 +22,7 @@ export interface ContractSnapshot {
   incPerStudent: number | null;
   ratioPercent: number | null; // 0~1
   ratioMinGuarantee: number | null;
+  isContractor: boolean;
   fixedBaseHours: number | null;
   fixedOtHours: number | null;
   fixedNightHours: number | null;
@@ -73,6 +75,7 @@ export default function ContractEditForm({
         incPerStudent: f.incPerStudent === "" ? null : Number(f.incPerStudent),
         ratioPercent: f.ratioPercent === "" ? null : Number(f.ratioPercent) / 100,
         ratioMinGuarantee: f.ratioMinGuarantee === "" ? null : Number(f.ratioMinGuarantee),
+        isContractor: f.payScheme === "RATIO" ? true : !!f.isContractor,
         fixedBaseHours: f.fixedBaseHours === "" ? null : Number(f.fixedBaseHours),
         fixedOtHours: f.fixedOtHours === "" ? null : Number(f.fixedOtHours),
         fixedNightHours: f.fixedNightHours === "" ? null : Number(f.fixedNightHours),
@@ -177,7 +180,14 @@ export default function ContractEditForm({
         )}
         <L label="비고"><input className="input" value={f.note} onChange={(e) => set("note", e.target.value)} /></L>
       </div>
-      {isMonthly && <FixedHoursFields f={f} set={set} />}
+      <ContractorField
+        checked={!!f.isContractor}
+        payScheme={f.payScheme}
+        onChange={(v) => set("isContractor", v)}
+      />
+      {isMonthly && !f.isContractor && f.payScheme !== "RATIO" && (
+        <FixedHoursFields f={f} set={set} />
+      )}
       {err && <p className="text-xs text-red-600">{err}</p>}
       <div className="flex gap-2 justify-end">
         {deletable && (

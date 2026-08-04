@@ -9,6 +9,7 @@
 // 총일수가 서로 다르다. 발생은 시스템이 근로기준법대로 계산하고, 여기서는 '사용 내역'만 가져온다.
 
 import * as XLSX from "xlsx";
+import { isContractorContract } from "./constants";
 
 /** 시트의 휴가종류 → 시스템 표기 */
 export interface LeaveKind {
@@ -308,8 +309,8 @@ export function planLeaveImport(
       errors.push("등록된 직원 중 일치하는 사람이 없습니다");
       unmatched.push(r.rawName);
     }
-    if (target?.payScheme === "RATIO")
-      errors.push("완전비율제(위탁)는 연차 미적용 대상입니다");
+    if (isContractorContract(target))
+      errors.push("위탁계약(프리랜서·완전비율제)은 연차 미적용 대상입니다");
 
     const adds: LeaveEntry[] = [];
     const skipped: LeaveEntry[] = [];

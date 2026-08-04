@@ -792,3 +792,140 @@ describe("반올림 잔차 — 지급 합계는 언제나 계약 총액과 정�
     expect(off).toEqual([]);
   });
 });
+
+describe("위탁계약(프리랜서) — 근로기준법 항목을 일절 싣지 않는다", () => {
+  // 주2일 15시간 초과지만 위탁계약이라 주휴·연차·퇴직금·4대보험이 없는 케이스
+  const hourly: ScheduleDay[] = ["mon", "thu"].map((d) => ({
+    day: d as ScheduleDay["day"],
+    work: true,
+    start: "14:00",
+    end: "22:00",
+    breakH: 0.5,
+  })); // 주 15시간
+
+  const run = (o: any = {}) =>
+    computePayroll(
+      {
+        incomeType: o.incomeType ?? "FREELANCE",
+        payScheme: o.payScheme ?? "HOURLY",
+        isContractor: o.isContractor ?? true,
+        baseWage: o.baseWage ?? 20_000,
+        positionAllow: 0,
+        mealAllow: 0,
+        carAllow: 0,
+        dependents: 1,
+        schedule: o.schedule ?? hourly,
+        incThreshold: o.incThreshold ?? null,
+        incPerStudent: o.incPerStudent ?? null,
+      } as EmployeePayInput,
+      o.month ?? { workedHours: 60, weeklyHolidayHours: 12 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+
+  it("주 15시간을 넘겨도 주휴수당이 붙지 않는다", () => {
+    const r = run();
+    expect(r.weeklyHolidayP).toBe(0);
+    expect(r.baseP).toBe(1_200_000); // 시급 20,000 × 60시간
+    expect(r.gross).toBe(1_200_000);
+    expect(r.notes.join()).toContain("위탁계약(프리랜서) — 주휴수당 미적용");
+  });
+
+  it("같은 조건이라도 위탁 체크를 풀면 주휴가 붙는다 (플래그가 실제로 작동함)", () => {
+    const r = run({ isContractor: false });
+    expect(r.weeklyHolidayP).toBe(240_000); // 20,000 × 12시간
+    expect(r.gross).toBe(1_440_000);
+  });
+
+  it("4대보험을 떼지 않고 사업소득 3.3%로 처리한다", () => {
+    const r = run();
+    expect(r.pensionD).toBe(0);
+    expect(r.healthD).toBe(0);
+    expect(r.longTermD).toBe(0);
+    expect(r.employmentD).toBe(0);
+    expect(r.incomeTaxD).toBe(floor10(1_200_000 * 0.03));
+  });
+
+  it("세무구분이 실수로 근로소득이어도 보험료를 떼지 않고 안내를 남긴다", () => {
+    const r = run({ incomeType: "EMPLOYEE" });
+    expect(r.pensionD).toBe(0);
+    expect(r.healthD).toBe(0);
+    expect(r.notes.join()).toContain("세무구분을 '사업소득(3.3%)'으로 맞춰");
+  });
+
+  it("연장·야간·휴일 가산은 시간을 넣어도 0원", () => {
+    const r = run({
+      month: { workedHours: 60, extraHours: 5, overtimeHours: 5, nightHours: 5, holidayHours: 5 },
+    });
+    expect(r.extraP).toBe(0);
+    expect(r.overtimeP).toBe(0);
+    expect(r.nightP).toBe(0);
+    expect(r.holidayP).toBe(0);
+    expect(r.gross).toBe(1_200_000);
+  });
+
+  it("연차미사용수당도 없다", () => {
+    const r = run({ month: { workedHours: 60, unusedLeaveDays: 5 } });
+    expect(r.unusedLeaveP).toBe(0);
+  });
+
+  it("인센티브 계약이어도 퇴직유보금을 떼지 않는다", () => {
+    const r = run({
+      payScheme: "INCENTIVE",
+      baseWage: 3_000_000,
+      incThreshold: 10,
+      incPerStudent: 100_000,
+      month: { studentCount: 20 },
+    });
+    expect(r.incentiveP).toBe(1_000_000);
+    expect(r.retentionD).toBe(0);
+  });
+
+  it("완전비율제는 체크하지 않아도 언제나 위탁으로 본다", () => {
+    const r = computePayroll(
+      {
+        incomeType: "FREELANCE",
+        payScheme: "RATIO",
+        baseWage: 0,
+        positionAllow: 0,
+        mealAllow: 0,
+        carAllow: 0,
+        dependents: 1,
+        schedule: hourly,
+        ratioPercent: 0.5,
+      } as EmployeePayInput,
+      { classRevenue: 4_000_000, unusedLeaveDays: 3 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.unusedLeaveP).toBe(0);
+    expect(r.pensionD).toBe(0);
+    expect(r.gross).toBe(2_000_000);
+  });
+
+  it("위탁계약에는 포괄임금(고정OT) 분해를 적용하지 않아 총액이 그대로다", () => {
+    const r = computePayroll(
+      {
+        incomeType: "FREELANCE",
+        payScheme: "MONTHLY",
+        isContractor: true,
+        baseWage: 3_000_000,
+        positionAllow: 0,
+        mealAllow: 200_000,
+        carAllow: 0,
+        dependents: 1,
+        schedule: hourly,
+        fixedBaseHours: 209,
+        fixedOtHours: 12,
+        fixedNightHours: 8,
+      } as EmployeePayInput,
+      {},
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.overtimeP).toBe(0);
+    expect(r.nightP).toBe(0);
+    expect(r.baseP).toBe(2_800_000); // 300만 − 식대 20만
+    expect(r.gross).toBe(3_000_000);
+  });
+});

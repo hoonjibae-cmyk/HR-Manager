@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { adjustLeave } from "@/lib/leave-service";
+import { isContractorContract } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 
@@ -18,8 +19,8 @@ export async function POST(req: Request) {
   }
   const emp = await prisma.employee.findUnique({ where: { id: Number(b.employeeId) } });
   if (!emp) return NextResponse.json({ error: "직원 없음" }, { status: 404 });
-  if (emp.payScheme === "RATIO") {
-    return NextResponse.json({ error: "완전비율제(위탁) 계약은 연차 대상이 아닙니다" }, { status: 400 });
+  if (isContractorContract(emp)) {
+    return NextResponse.json({ error: "위탁계약(프리랜서·완전비율제)은 연차 대상이 아닙니다" }, { status: 400 });
   }
   try {
     const { comp } = await adjustLeave(

@@ -26,7 +26,7 @@ import {
 } from "@/lib/makeup-slack";
 import { createMakeupSession } from "@/lib/makeup-service";
 import { makeupCalendarConfigured } from "@/lib/gcal";
-import { MAKEUP_CATEGORY_LABEL } from "@/lib/constants";
+import { MAKEUP_CATEGORY_LABEL, isContractorContract } from "@/lib/constants";
 import {
   approveLeaveRequest,
   rejectLeaveRequest,
@@ -91,7 +91,7 @@ async function openLeaveForm(triggerId: string, userId: string, channelId?: stri
     await tellUser(channelId, userId, notLinkedText(info));
     return;
   }
-  if (emp.payScheme === "RATIO") {
+  if (isContractorContract(emp)) {
     await tellUser(channelId, userId, RATIO_LEAVE_NOTICE);
     return;
   }
@@ -127,7 +127,7 @@ async function openMakeupForm(triggerId: string, userId: string, channelId?: str
   }
   await openView(
     triggerId,
-    makeupModalView({ empName: emp.name, channel: channelId, ratio: emp.payScheme === "RATIO" })
+    makeupModalView({ empName: emp.name, channel: channelId, ratio: isContractorContract(emp) })
   );
 }
 

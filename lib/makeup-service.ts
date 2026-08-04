@@ -3,7 +3,7 @@
 // 여기서 모아 넘기고, 결과를 급여·화면·명세서가 쓸 형태로 돌려준다.
 
 import { prisma } from "./db";
-import { parseSchedule, MAKEUP_CATEGORY_LABEL, MAKEUP_STATUS_LABEL } from "./constants";
+import { parseSchedule, MAKEUP_CATEGORY_LABEL, MAKEUP_STATUS_LABEL, isContractorContract } from "./constants";
 import {
   createMakeupEvent,
   updateMakeupEvent,
@@ -177,7 +177,7 @@ export async function overtimeForMonth(
     //  · HOURLY: 보강 시간이 이미 출퇴근 기록(시간기록표)에 잡혀 실근로시간으로 지급된다.
     //    여기서 또 얹으면 같은 시간을 두 번 주는 셈이다. 시급제는 15시간을 넘긴 주마다
     //    주휴를 인정하는 것으로 초과근로분을 갈음해 왔다(lib/timesheet.ts 머리말).
-    const excludedByScheme = emp.payScheme === "RATIO" || emp.payScheme === "HOURLY";
+    const excludedByScheme = isContractorContract(emp) || emp.payScheme === "HOURLY";
     const hourlyWage = excludedByScheme ? 0 : hourlyWageOf(emp, segMap.get(employeeId));
     if (excludedByScheme) {
       result.extraHours = 0;

@@ -2,7 +2,7 @@
 // 엑셀 '임금산정식' / '갑근세' / '임금(4대보험)' / '임금(3.3%)' 로직을 재현한 순수 함수.
 // DB에 의존하지 않으므로 단위 테스트가 용이합니다.
 
-import { ScheduleDay } from "./constants";
+import { ScheduleDay, isContractorContract } from "./constants";
 
 /** 근속연수 계산 등에서 쓰는 4.345주/월 */
 export const WEEKS_PER_MONTH = 4.345;
@@ -39,6 +39,11 @@ export interface TaxBracketRow {
 export interface EmployeePayInput {
   incomeType: "EMPLOYEE" | "FREELANCE";
   payScheme: "MONTHLY" | "HOURLY" | "INCENTIVE" | "RATIO";
+  /**
+   * 위탁계약(프리랜서) — 근로기준법 항목(주휴·연차·퇴직유보금·4대보험·법정가산)을 일절 적용하지 않고
+   * 계약서의 시급 또는 비율로만 지급한다. 완전비율제(RATIO)는 플래그와 무관하게 항상 위탁으로 본다.
+   */
+  isContractor?: boolean | null;
   baseWage: number; // 월급제=월기본급, 시급제=시급
   positionAllow: number;
   mealAllow: number; // 비과세
@@ -347,12 +352,18 @@ export function computePayroll(
   const { weeklyContractual, weeklyOvertime, weeklyHoliday } =
     computeWeeklyHours(emp.schedule);
 
+  // --- 위탁계약(프리랜서) — 근로기준법 항목을 일절 싣지 않는다 ---
+  // 주휴(§55)·연차·퇴직유보금·4대보험·법정가산(§56)이 모두 빠지고 계약서의 시급/비율로만 지급한다.
+  // 주 15시간을 넘겨도 마찬가지 — 15시간은 '근로자' 일 때 따지는 기준이다.
+  const contractor = isContractorContract(emp);
+
   const monthlyStdHours =
     Math.max(weeklyContractual + weeklyHoliday, 0) * WEEKS_PER_MONTH;
 
   // --- 포괄임금 약정시간 (월급제/인센티브만) ---
+  // 위탁계약은 법정가산 자체가 없어 포괄임금(고정OT) 개념도 성립하지 않는다.
   const isMonthlyScheme =
-    emp.payScheme === "MONTHLY" || emp.payScheme === "INCENTIVE";
+    !contractor && (emp.payScheme === "MONTHLY" || emp.payScheme === "INCENTIVE");
   const fixedOt = isMonthlyScheme ? emp.fixedOtHours ?? 0 : 0;
   const fixedNight = isMonthlyScheme ? emp.fixedNightHours ?? 0 : 0;
   const hasFixed = fixedOt > 0 || fixedNight > 0;
@@ -408,7 +419,11 @@ export function computePayroll(
       );
     // 시급제 주휴수당 — 요건은 lib/timesheet.ts 에서 **1주 단위**로 판정한다
     // (주5일 계약=계약 근무요일 개근 / 주2~4일=그 주 실근로 15시간, 둘 다 1주 근로관계 존속 필요)
-    if (month.weeklyHolidayHours != null) {
+    if (contractor) {
+      // 위탁계약: 근로자가 아니므로 주휴 자체가 없다. 주 15시간을 넘겨도 마찬가지.
+      weeklyHolidayP = 0;
+      notes.push("위탁계약(프리랜서) — 주휴수당 미적용 (계약 시급으로만 지급)");
+    } else if (month.weeklyHolidayHours != null) {
       weeklyHolidayP = round0(emp.baseWage * month.weeklyHolidayHours);
       notes.push(
         month.weeklyHolidayHours > 0
@@ -495,11 +510,12 @@ export function computePayroll(
   incentiveP += month.incentiveManual ?? 0;
 
   // --- 추가(법내연장)/연장/야간/휴일 (월 입력) ---
-  const exH = month.extraHours ?? 0;
-  const otH = month.overtimeHours ?? 0;
-  const nightH = month.nightHours ?? 0;
-  const holH = month.holidayHours ?? 0;
-  const holOverH = month.holidayOverHours ?? 0;
+  // 위탁계약은 §56 가산 대상이 아니라 시간이 입력돼 있어도 수당으로 잡지 않는다.
+  const exH = contractor ? 0 : month.extraHours ?? 0;
+  const otH = contractor ? 0 : month.overtimeHours ?? 0;
+  const nightH = contractor ? 0 : month.nightHours ?? 0;
+  const holH = contractor ? 0 : month.holidayHours ?? 0;
+  const holOverH = contractor ? 0 : month.holidayOverHours ?? 0;
   const extraP = round0(exH * hourlyWage); // 법내연장 — 가산 없음
   // 포괄임금 약정분은 매월 고정 지급(일할 적용), 실적분은 그 위에 추가 가산
   const overtimeP = inclusive.overtimePay + round0(otH * hourlyWage * 1.5);
@@ -516,7 +532,10 @@ export function computePayroll(
   const bonusP = month.bonus ?? 0;
 
   // --- 연차미사용수당 = 1일 통상임금(통상시급×8) × 미사용일수 ---
-  const unusedLeaveP = round0((month.unusedLeaveDays ?? 0) * hourlyWage * 8);
+  // 위탁계약은 연차(§60) 자체가 없어 미사용수당도 없다.
+  const unusedLeaveP = contractor
+    ? 0
+    : round0((month.unusedLeaveDays ?? 0) * hourlyWage * 8);
 
   const gross =
     baseP +
@@ -544,10 +563,17 @@ export function computePayroll(
     incomeTaxD = 0,
     localTaxD = 0;
 
-  if (emp.incomeType === "FREELANCE") {
+  // 위탁계약은 근로자가 아니라 4대보험 가입 대상이 아니므로, 세무구분이 실수로
+  // EMPLOYEE 로 남아 있어도 보험료를 떼지 않는다 (사업소득 3.3% 로 처리).
+  if (emp.incomeType === "FREELANCE" || contractor) {
     // 사업소득 3.3% (지급총액 기준)
     incomeTaxD = floor10(gross * rates.businessIncomeTax);
     localTaxD = floor10(incomeTaxD * rates.localIncomeTaxRate);
+    if (contractor && emp.incomeType !== "FREELANCE")
+      notes.push(
+        "위탁계약(프리랜서)이라 4대보험을 공제하지 않고 사업소득 3.3%로 처리했습니다 — " +
+          "계약의 세무구분을 '사업소득(3.3%)'으로 맞춰 주세요."
+      );
   } else {
     // 4대보험 (보수월액 = 과세급여 기준)
     const pensionBase = Math.min(
@@ -563,8 +589,9 @@ export function computePayroll(
   }
 
   // --- 퇴직유보금: 인센티브 계약은 인센티브 원천액의 8.3%를 별도통장 송금(공제) ---
+  // 위탁계약은 퇴직급여 대상이 아니므로 유보하지 않는다.
   let retentionD = 0;
-  if (emp.payScheme === "INCENTIVE" && incentiveP > 0) {
+  if (!contractor && emp.payScheme === "INCENTIVE" && incentiveP > 0) {
     retentionD = floor10(incentiveP * RETENTION_RATE);
     notes.push(
       `퇴직유보금: 인센티브 ${incentiveP.toLocaleString()}원 × 1/12(8.3%) (별도통장 송금)`

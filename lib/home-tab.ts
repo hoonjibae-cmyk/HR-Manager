@@ -2,7 +2,7 @@
 import { prisma } from "./db";
 import { findEmployeeBySlack, autoLinkEmployeeBySlack, homeTabView, publishHomeView } from "./slack";
 import { leaveBalanceOf, leaveBalanceText, rangeLabel, RATIO_LEAVE_NOTICE } from "./leave-slack";
-import { LEAVE_TYPE_LABEL, LEAVE_STATUS_LABEL } from "./constants";
+import { LEAVE_TYPE_LABEL, LEAVE_STATUS_LABEL, isContractorContract } from "./constants";
 import { upcomingMakeups } from "./makeup-slack";
 
 /** 오늘(KST) 이후로 예정된 신청·승인 건 */
@@ -45,8 +45,8 @@ export async function refreshHomeTab(slackUserId: string) {
       })
     );
   }
-  // 완전비율제는 연차가 없지만 보강계획은 등록한다 — 연차 자리에만 안내를 넣는다
-  if (emp.payScheme === "RATIO") {
+  // 위탁계약(프리랜서·완전비율제)은 연차가 없지만 보강계획은 등록한다 — 연차 자리에만 안내를 넣는다
+  if (isContractorContract(emp)) {
     return publishHomeView(
       slackUserId,
       homeTabView({

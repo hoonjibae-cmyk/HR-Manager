@@ -105,6 +105,11 @@ model Employee {
   dependents    Int @default(1) // 부양가족수(본인포함) — 간이세액표용
   nonTaxTotal   Int @default(0) // 기타 비과세 총액(월)
 
+  /// 위탁계약(프리랜서) 여부 — 계약(Contract.isContractor)을 비추는 거울.
+  /// true 면 주휴·연차·퇴직(유보)금·4대보험·법정가산을 일절 적용하지 않고
+  /// 계약서대로 시급 또는 비율로만 지급한다. 완전비율제(RATIO)는 항상 위탁으로 본다.
+  isContractor Boolean @default(false)
+
   // 연차 발생 대상 여부. null = 자동(주 소정근로시간 15시간 이상이면 발생, 근로기준법 §18③)
   // true/false = 계약상 별도로 정한 경우 강제
   leaveEligible Boolean?
@@ -170,6 +175,9 @@ model Contract {
   incPerStudent     Int?
   ratioPercent      Float?
   ratioMinGuarantee Int? // 위탁 최저보장액(월)
+  /// 위탁계약(프리랜서) — 주휴·연차·퇴직금·4대보험 등 근로기준법 항목을 일절 적용하지 않는다.
+  /// 완전비율제(RATIO)는 성질상 항상 위탁이라 이 값과 무관하게 제외된다.
+  isContractor      Boolean @default(false)
   fixedBaseHours    Float? // 포괄임금 기본급 산정시간(월)
   fixedOtHours      Float? // 포괄임금 약정 시간외근로시간(월)
   fixedNightHours   Float? // 포괄임금 약정 야간근로시간(월)

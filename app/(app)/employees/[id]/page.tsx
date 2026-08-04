@@ -13,6 +13,7 @@ import {
   PAYROLL_STATUS_LABEL,
   parseSchedule,
   DAY_KO,
+  isContractorContract,
 } from "@/lib/constants";
 import { won, wonUnit, ymd } from "@/lib/format";
 import {
@@ -124,6 +125,15 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
             <dl className="text-sm space-y-2">
               <Row k="세무/보험">{INCOME_TYPE_LABEL[terms.incomeType] ?? terms.incomeType}</Row>
               <Row k="급여형태">{PAY_SCHEME_LABEL[terms.payScheme] ?? terms.payScheme}</Row>
+              {isContractorContract({ payScheme: terms.payScheme, isContractor: emp.isContractor }) && (
+                <Row k="계약 성격">
+                  <span className="pill bg-amber-50 text-amber-700">위탁계약(프리랜서)</span>
+                  <span className="block text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    주휴수당·연차·퇴직금·4대보험을 적용하지 않고 계약서의{" "}
+                    {terms.payScheme === "RATIO" ? "위탁 비율" : "시급"}로만 지급합니다.
+                  </span>
+                </Row>
+              )}
               {terms.payScheme === "RATIO" ? (
                 <>
                   <Row k="위탁비율">{((terms.ratioPercent ?? 0) * 100).toFixed(1)}%</Row>
@@ -313,6 +323,9 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                     {c.templateKey === "RATIO"
                       ? `위탁 ${((c.ratioPercent ?? 0) * 100).toFixed(1)}%`
                       : `${wonUnit(c.baseWage)}`}
+                    {((c as any).isContractor || c.templateKey === "RATIO") && (
+                      <span className="pill bg-amber-50 text-amber-700 ml-1">위탁</span>
+                    )}
                     {c.mealAllow > 0 && ` · 식대 ${wonUnit(c.mealAllow)}`}
                     {c.positionAllow > 0 && ` · 직책 ${wonUnit(c.positionAllow)}`}
                     {(c.fixedOtHours || c.fixedNightHours) && (
@@ -332,6 +345,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                         startDate: c.startDate.toISOString().slice(0, 10),
                         endDate: c.endDate ? c.endDate.toISOString().slice(0, 10) : "",
                         isProbation: c.isProbation,
+                        isContractor: (c as any).isContractor ?? false,
                         payScheme: paySchemeOf(c.templateKey),
                         incomeType: c.incomeType ?? emp.incomeType,
                         baseWage: c.baseWage,

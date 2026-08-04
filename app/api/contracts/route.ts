@@ -73,6 +73,9 @@ export async function POST(req: Request) {
         incPerStudent: numOrNull(body.incPerStudent, emp.incPerStudent),
         ratioPercent: numOrNull(body.ratioPercent, emp.ratioPercent),
         ratioMinGuarantee: numOrNull(body.ratioMinGuarantee, emp.ratioMinGuarantee),
+        // 위탁계약(프리랜서) — 주휴·연차·퇴직금·4대보험 미적용
+        isContractor:
+          body.isContractor != null ? !!body.isContractor : !!(emp as any).isContractor,
         fixedBaseHours: numOrNull(body.fixedBaseHours, emp.fixedBaseHours),
         fixedOtHours: numOrNull(body.fixedOtHours, emp.fixedOtHours),
         fixedNightHours: numOrNull(body.fixedNightHours, emp.fixedNightHours),

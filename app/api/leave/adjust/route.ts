@@ -6,6 +6,7 @@ import { logActivity } from "@/lib/activity";
 import { postMessage, slackConfigured } from "@/lib/slack";
 import { businessDaysFrom } from "@/lib/leave";
 import { ymd } from "@/lib/format";
+import { isContractorContract } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -61,11 +62,11 @@ export async function POST(req: Request) {
   if (!employees.length)
     return NextResponse.json({ error: "직원을 찾을 수 없습니다." }, { status: 404 });
 
-  const ratio = employees.filter((e) => e.payScheme === "RATIO");
-  const targets = employees.filter((e) => e.payScheme !== "RATIO");
+  const ratio = employees.filter((e) => isContractorContract(e));
+  const targets = employees.filter((e) => !isContractorContract(e));
   if (!targets.length)
     return NextResponse.json(
-      { error: "완전비율제(위탁) 계약은 연차휴가 대상이 아닙니다." },
+      { error: "위탁계약(프리랜서·완전비율제)은 연차휴가 대상이 아닙니다." },
       { status: 400 }
     );
 

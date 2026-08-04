@@ -83,6 +83,7 @@ export function empToPayInput(e: any): EmployeePayInput {
   return {
     incomeType: e.incomeType,
     payScheme: e.payScheme,
+    isContractor: e.isContractor ?? false,
     baseWage: e.baseWage,
     positionAllow: e.positionAllow,
     mealAllow: e.mealAllow,
