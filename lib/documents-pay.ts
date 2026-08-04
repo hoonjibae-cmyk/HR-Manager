@@ -158,23 +158,37 @@ export function payslipHtml(args: {
   let hoursRow = "";
   let holidayNote = "";
   let timeNote = "";
-  // 보강 오버타임 — 첨부 내역서를 보기 전에도 몇 시간이 어떤 구분으로 잡혔는지 명세서 1장에서 알 수 있게
+
+  // 산출 근거(breakdown)는 여러 곳에서 쓰므로 한 번만 읽는다
+  let bd: any = null;
+  try {
+    bd = p.breakdown ? JSON.parse(p.breakdown) : null;
+  } catch {}
+
+  // 보강 오버타임 — 첨부 내역서를 보기 전에도 몇 시간이 어떤 구분으로 잡혔는지 명세서 1장에서 알 수 있게.
+  // 배수를 항목마다 붙여 두면 내역서가 없는 달에도 어떻게 계산됐는지 스스로 설명이 된다.
   const otParts = [
-    (p.extraHours ?? 0) > 0 ? `연장 ${p.extraHours}시간` : "",
-    (p.overtimeHours ?? 0) > 0 ? `연장(법정가산) ${p.overtimeHours}시간` : "",
-    (p.holidayHours ?? 0) > 0 ? `휴일 ${p.holidayHours}시간` : "",
-    (p.holidayOverHours ?? 0) > 0 ? `휴일 8시간초과 ${p.holidayOverHours}시간` : "",
-    (p.nightHours ?? 0) > 0 ? `야간 ${p.nightHours}시간(가산)` : "",
+    (p.extraHours ?? 0) > 0 ? `연장 ${p.extraHours}시간(×1.0)` : "",
+    (p.overtimeHours ?? 0) > 0 ? `연장(법정가산) ${p.overtimeHours}시간(×1.5)` : "",
+    (p.holidayHours ?? 0) > 0 ? `휴일 ${p.holidayHours}시간(×1.5)` : "",
+    (p.holidayOverHours ?? 0) > 0 ? `휴일 8시간초과 ${p.holidayOverHours}시간(×2.0)` : "",
+    (p.nightHours ?? 0) > 0 ? `야간 ${p.nightHours}시간(+0.5 가산)` : "",
   ].filter(Boolean);
+  // **내역서가 실제로 첨부될 때만** 별첨이라고 적는다.
+  // 첨부는 보강 신청 → 실근무 확정을 거친 건(breakdown.overtime.lines)에만 붙는다 —
+  // 급여 화면에서 관리자가 시간을 직접 넣은 달은 산정 원장이 없어 붙일 내역서가 없다.
+  // 예전엔 이 문구가 조건 없이 찍혀 **없는 별첨을 가리켰다**.
+  const hasOtDetail = (bd?.overtime?.lines?.length ?? 0) > 0;
   const otRow =
     !isHourly && otParts.length
-      ? `<tr><th>오버타임</th><td colspan="3">${otParts.join(" · ")} <span class="muted">(산정 근거는 별첨 「보강 오버타임 산정 내역서」)</span></td></tr>`
+      ? `<tr><th>오버타임</th><td colspan="3">${otParts.join(" · ")}${
+          hasOtDetail
+            ? ` <span class="muted">(산정 근거는 별첨 「보강 오버타임 산정 내역서」)</span>`
+            : ` <span class="muted">(통상시급 ${won(p.hourlyWage)}원 기준)</span>`
+        }</td></tr>`
       : "";
   // 시간기록표 근거 (체류/휴게/순 근로/연차) — 있으면 명세서에 나눠 적는다
-  let ts: any = null;
-  try {
-    ts = p.breakdown ? JSON.parse(p.breakdown)?.timesheet ?? null : null;
-  } catch {}
+  const ts: any = bd?.timesheet ?? null;
 
   if (isHourly) {
     const baseHours =
@@ -240,10 +254,6 @@ export function payslipHtml(args: {
   }
 
   // ── 기본급 산출 근거 (월중 입·퇴사 일할 / 월중 계약변경 가중) ──
-  let bd: any = null;
-  try {
-    bd = p.breakdown ? JSON.parse(p.breakdown) : null;
-  } catch {}
   const blend =
     bd?.blend && Array.isArray(bd.blend.segments) && bd.blend.segments.length >= 2
       ? bd.blend

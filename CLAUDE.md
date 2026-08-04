@@ -139,6 +139,10 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   그 달 확정분을 읽어 `extraHours(법내연장 ×1.0)/overtimeHours(법정연장 ×1.5)/holidayHours/holidayOverHours/nightHours` 를 채운다
   (명시적으로 넘긴 값이 있으면 그쪽 우선). 산정 줄은 `breakdown.overtime` 에 남고
   명세서에 「보강 오버타임 산정 내역서」로 첨부된다(`overtimeDetailHtml`).
+  **첨부는 `breakdown.overtime.lines` 가 있을 때만 붙는다** — 즉 보강 신청 → 실근무 확정을 거친 건만이다.
+  급여 화면에서 관리자가 시간을 직접 넣은 달은 산정 원장이 없어 붙일 내역서가 없으므로,
+  명세서의 '별첨' 문구도 그때만 찍는다(`hasOtDetail`). 조건 없이 찍으면 **없는 별첨을 가리키게 된다**.
+  내역서가 없는 달에는 대신 통상시급과 항목별 배수(×1.0/×1.5/×2.0/+0.5)를 적어 스스로 설명되게 한다.
   내신 상한은 **내신 기간 전체** 기준이라 기간이 달을 걸치면 뒤 달 신청이 앞 달 배분을 바꿀 수 있다 —
   발송(SENT)된 달은 재계산하지 않으므로 확정분이 흔들리지는 않는다.
 - **보강은 '보강캘린더' 에 올린다** — 연차 캘린더(`GOOGLE_CALENDAR_ID`)와 **다른 캘린더**
