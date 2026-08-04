@@ -1,0 +1,291 @@
+import { describe, it, expect } from "vitest";
+import * as XLSX from "xlsx";
+import {
+  buildExportRow,
+  buildPayrollExportWorkbook,
+  payDateOf,
+  reconcileRow,
+  statutoryDeductionOf,
+  type ExportPayrollRecord,
+} from "./payroll-export";
+
+/** 세무사무소에 넘기던 실제 시트의 한 줄을 그대로 만들기 위한 최소 레코드 */
+const rec = (o: Partial<ExportPayrollRecord> & { name: string }): ExportPayrollRecord => ({
+  incomeType: "FREELANCE",
+  baseP: 0,
+  extraP: 0,
+  overtimeP: 0,
+  nightP: 0,
+  holidayP: 0,
+  weeklyHolidayP: 0,
+  positionP: 0,
+  mealP: 0,
+  carP: 0,
+  incentiveP: 0,
+  bonusP: 0,
+  unusedLeaveP: 0,
+  gross: 0,
+  pensionD: 0,
+  employmentD: 0,
+  healthD: 0,
+  longTermD: 0,
+  incomeTaxD: 0,
+  localTaxD: 0,
+  retentionD: 0,
+  parkingD: 0,
+  expenseD: 0,
+  otherD: 0,
+  net: 0,
+  ...o,
+  // rrn 을 명시적으로 null 로 줄 수 있어야 한다 (?? 를 쓰면 null 이 기본값으로 덮인다)
+  employee: {
+    name: o.name,
+    empNo: "1",
+    rrn: "rrn" in (o as any) ? (o as any).rrn : "961003-2951624",
+  },
+});
+
+describe("payDateOf — 익월 지급일", () => {
+  it("7월 급여는 8월 7일에 지급", () => {
+    expect(payDateOf(2026, 7, 7)).toBe("08월 07일");
+  });
+  it("12월 급여는 다음 해 1월", () => {
+    expect(payDateOf(2026, 12, 7)).toBe("01월 07일");
+  });
+  it("그 달에 없는 날짜는 말일로 당긴다", () => {
+    expect(payDateOf(2026, 1, 30)).toBe("02월 28일");
+  });
+});
+
+describe("열 관계 — 세무사가 이 표로 신고하므로 반드시 맞아야 한다", () => {
+  it("세전총계 = 세전급여 + 오버타임 + 미사용연차 + 상여", () => {
+    // 이서영 행 재현: 세전급여 400만 · 오버타임 81,468 · 상여 20만 → 세전총계 4,281,468
+    const r = buildExportRow(
+      rec({
+        name: "이서영",
+        baseP: 4_000_000,
+        overtimeP: 81_468,
+        bonusP: 200_000,
+        gross: 4_281_468,
+        incomeTaxD: 137_160,
+        localTaxD: 4_120,
+        retentionD: 16_667,
+        net: 4_123_521,
+      }),
+      "08월 07일"
+    );
+    expect(r.basePay).toBe(4_000_000);
+    expect(r.overtimePay).toBe(81_468);
+    expect(r.bonus).toBe(200_000);
+    expect(r.grossTotal).toBe(4_281_468);
+    expect(r.basePay + r.overtimePay + r.unusedLeavePay + r.bonus).toBe(r.grossTotal);
+  });
+
+  it("입금액 = 세전총계 − 공제 − 유보액 − 주차비 (이서영: 유보액이 빠진다)", () => {
+    const r = buildExportRow(
+      rec({
+        name: "이서영",
+        gross: 4_281_468,
+        overtimeP: 81_468,
+        bonusP: 200_000,
+        incomeTaxD: 137_160,
+        localTaxD: 4_120,
+        retentionD: 16_667,
+        net: 4_123_521,
+      }),
+      "08월 07일"
+    );
+    expect(r.deduction).toBe(141_280);
+    expect(r.retention).toBe(16_667);
+    expect(r.netPay).toBe(4_123_521);
+    expect(reconcileRow(r)).toBe(0);
+  });
+
+  it("주차비 환급(−)이면 입금액이 늘어난다 (김은진: −35,000)", () => {
+    const r = buildExportRow(
+      rec({
+        name: "김은진",
+        gross: 11_649_375,
+        incomeTaxD: 349_480,
+        localTaxD: 34_940,
+        parkingD: -35_000,
+        net: 11_299_955,
+      }),
+      "08월 07일"
+    );
+    expect(r.deduction).toBe(384_420);
+    expect(r.parking).toBe(-35_000);
+    expect(r.netPay).toBe(11_299_955);
+    expect(reconcileRow(r)).toBe(0);
+  });
+
+  it("주차비 공제(+)는 입금액을 줄인다 (배승희: 75,000)", () => {
+    const r = buildExportRow(
+      rec({
+        name: "배승희",
+        gross: 3_426_608,
+        overtimeP: 226_608,
+        incomeTaxD: 102_780,
+        localTaxD: 10_280,
+        parkingD: 75_000,
+        net: 3_238_548,
+      }),
+      "08월 07일"
+    );
+    expect(r.basePay).toBe(3_200_000);
+    expect(r.deduction).toBe(113_060);
+    expect(r.netPay).toBe(3_238_548);
+    expect(reconcileRow(r)).toBe(0);
+  });
+
+  it("'공제' 열에는 법정공제만 담는다 — 유보금·주차비를 섞으면 신고액이 틀어진다", () => {
+    const r = rec({
+      name: "테스트",
+      gross: 3_000_000,
+      pensionD: 100_000,
+      healthD: 90_000,
+      longTermD: 11_000,
+      employmentD: 27_000,
+      incomeTaxD: 50_000,
+      localTaxD: 5_000,
+      retentionD: 80_000,
+      parkingD: 35_000,
+      net: 2_602_000,
+    });
+    expect(statutoryDeductionOf(r)).toBe(283_000);
+    expect(buildExportRow(r, "-").deduction).toBe(283_000);
+  });
+});
+
+describe("워크북 출력", () => {
+  const records = [
+    rec({
+      name: "김은진",
+      gross: 11_649_375,
+      incomeTaxD: 349_480,
+      localTaxD: 34_940,
+      parkingD: -35_000,
+      net: 11_299_955,
+    }),
+    rec({
+      name: "정수진",
+      gross: 5_000_000,
+      incomeTaxD: 150_000,
+      localTaxD: 15_000,
+      net: 4_835_000,
+    }),
+  ];
+
+  const read = () => {
+    const { buffer } = buildPayrollExportWorkbook({
+      year: 2026,
+      month: 7,
+      payday: 7,
+      companyName: "주식회사 유쌤에듀",
+      records,
+    });
+    const wb = XLSX.read(buffer, { type: "buffer" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, blankrows: false });
+  };
+
+  it("제목·머리글이 기존 시트와 같은 순서다", () => {
+    const aoa = read();
+    expect(String(aoa[0][0])).toContain("2026년 7월 급여자료");
+    expect(String(aoa[0][0])).toContain("지급일 08월 07일");
+    expect(aoa[1]).toEqual([
+      "",
+      "지급일",
+      "세전급여",
+      "오버타임수당",
+      "미사용연차수당",
+      "상여금",
+      "세전총계",
+      "공제",
+      "입금액(공제후)",
+      "인센티브유보액",
+      "월정기주차비(50%)차감",
+      "기타",
+      "ID",
+    ]);
+  });
+
+  it("이름에 '선생님' 이 붙고 주민번호가 ID 열에 들어간다", () => {
+    const aoa = read();
+    expect(aoa[2][0]).toBe("김은진선생님");
+    expect(aoa[2][12]).toBe("961003-2951624");
+  });
+
+  it("합계 행이 붙는다", () => {
+    const aoa = read();
+    const last = aoa[aoa.length - 1];
+    expect(String(last[0])).toBe("합계 (2명)");
+    expect(last[6]).toBe(11_649_375 + 5_000_000);
+    expect(last[8]).toBe(11_299_955 + 4_835_000);
+    expect(last[10]).toBe(-35_000);
+  });
+
+  it("실비·기타공제가 있는 달에만 그 열이 붙는다 (합계가 어긋나지 않게)", () => {
+    const withExpense = buildPayrollExportWorkbook({
+      year: 2026,
+      month: 7,
+      payday: 7,
+      companyName: "유쌤에듀",
+      records: [
+        rec({
+          name: "가",
+          gross: 3_000_000,
+          incomeTaxD: 90_000,
+          localTaxD: 9_000,
+          expenseD: -20_000,
+          net: 2_921_000,
+        }),
+      ],
+    });
+    const wb = XLSX.read(withExpense.buffer, { type: "buffer" });
+    const aoa = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[wb.SheetNames[0]], {
+      header: 1,
+      blankrows: false,
+    });
+    expect(aoa[1]).toContain("실비 정산(±)");
+    expect(aoa[1]).not.toContain("기타공제");
+    expect(withExpense.mismatches).toEqual([]);
+  });
+
+  it("합계가 어긋나면 시트에 경고를 남긴다", () => {
+    const bad = buildPayrollExportWorkbook({
+      year: 2026,
+      month: 7,
+      payday: 7,
+      companyName: "유쌤에듀",
+      records: [rec({ name: "나", gross: 3_000_000, incomeTaxD: 99_000, net: 2_800_000 })],
+    });
+    expect(bad.mismatches.length).toBe(1);
+    expect(bad.mismatches[0]).toContain("어긋남");
+  });
+
+  it("주민번호가 비어 있으면 알린다 — 세무사가 신고할 수 없다", () => {
+    const r = buildPayrollExportWorkbook({
+      year: 2026,
+      month: 7,
+      payday: 7,
+      companyName: "유쌤에듀",
+      records: [
+        rec({ name: "다", rrn: null, gross: 1_000_000, incomeTaxD: 30_000, net: 970_000 } as any),
+      ],
+    });
+    expect(r.missingId).toEqual(["다선생님"]);
+  });
+
+  it("정상적인 달에는 경고가 없다", () => {
+    const { mismatches, missingId } = buildPayrollExportWorkbook({
+      year: 2026,
+      month: 7,
+      payday: 7,
+      companyName: "유쌤에듀",
+      records,
+    });
+    expect(mismatches).toEqual([]);
+    expect(missingId).toEqual([]);
+  });
+});

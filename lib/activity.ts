@@ -16,6 +16,7 @@ export const ACTION_LABEL: Record<string, string> = {
   PAYROLL_DELETE: "급여 기록 삭제",
   PAYROLL_TIMESHEET: "시간기록표 반영",
   PAYROLL_INCENTIVE: "인센티브 명단 반영",
+  PAYROLL_EXPORT: "세무사무소 제출자료 내려받기",
   PAYSLIP_SEND: "명세서 발송",
   PAYSLIP_SEND_SCHEDULED: "명세서 예약 발송",
   DOC_ISSUE: "문서 발급",
