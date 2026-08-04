@@ -380,11 +380,19 @@ export function computePayroll(
   let baseP = 0;
   let weeklyHolidayP = 0;
   if (emp.payScheme === "HOURLY") {
-    const monthHours =
-      month.workedHours != null && month.workedHours > 0
-        ? month.workedHours // 실제 근로시간 입력 시 그대로 사용(일할 이미 반영됨)
-        : weeklyContractual * WEEKS_PER_MONTH * prorate; // 스케줄 기반 추정
+    // 시간기록표를 올렸으면 그 실근로시간, 아니면 계약 근로시간표로 **추정**한다.
+    // 추정치는 결근·지각·추가근무가 하나도 반영되지 않은 '만근 가정' 값이므로 명세서에 반드시 남긴다.
+    const estimated = !(month.workedHours != null && month.workedHours > 0);
+    const monthHours = estimated
+      ? weeklyContractual * WEEKS_PER_MONTH * prorate // 스케줄 기반 추정
+      : month.workedHours!; // 실제 근로시간 입력 시 그대로 사용(일할 이미 반영됨)
     baseP = round0(emp.baseWage * monthHours);
+    if (estimated)
+      notes.push(
+        `⚠️ 시간기록표 미반영 — 계약 근로시간표로 추정했습니다 ` +
+          `(주 ${weeklyContractual}시간 × ${WEEKS_PER_MONTH}주 = ${monthHours.toFixed(2)}시간, 만근 가정). ` +
+          `실제 출퇴근 기록을 올리면 실근로 기준으로 다시 계산됩니다.`
+      );
     // 시급제 주휴수당 — 요건은 lib/timesheet.ts 에서 **1주 단위**로 판정한다
     // (주5일 계약=계약 근무요일 개근 / 주2~4일=그 주 실근로 15시간, 둘 다 1주 근로관계 존속 필요)
     if (month.weeklyHolidayHours != null) {
@@ -396,8 +404,14 @@ export function computePayroll(
       );
     } else {
       weeklyHolidayP = round0(emp.baseWage * weeklyHoliday * WEEKS_PER_MONTH * prorate);
-      if (weeklyHoliday === 0) notes.push("주 소정근로 15시간 미만으로 주휴수당 미발생");
-      else notes.push("주휴수당: 근로시간표 기준 추정 (시간기록표를 올리면 주별 실근로로 판정된다)");
+      if (weeklyHoliday === 0)
+        notes.push("주휴수당: 계약 주 소정근로가 15시간 미만이라 미발생 (§18③ 초단시간)");
+      else
+        notes.push(
+          `주휴수당: 계약 근로시간표 기준 추정 — 매주 요건을 갖춘 것으로 보고 ` +
+            `주 ${weeklyHoliday}시간 × ${WEEKS_PER_MONTH}주로 계산했습니다. ` +
+            `시간기록표를 올리면 주별로 다시 판정합니다.`
+        );
     }
   } else if (emp.payScheme === "RATIO") {
     const rev = month.classRevenue ?? 0;
