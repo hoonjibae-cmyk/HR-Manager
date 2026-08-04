@@ -39,6 +39,20 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   증명서는 `-78%` 로 더 올려 상호·대표이사 사이에 걸치게 한다(기본값이면 밑의 주소 잔글씨를 덮는다).
   업로드는 **반드시 PNG 로 내보낸다** — JPG 면 투명 배경이 검게 채워져 이름을 가린다.
   **이미 발급된 PDF 는 바뀌지 않는다**(발급 시점에 찍히므로 다시 발급해야 한다).
+- **간인(間印)**: 계약서가 2장을 넘으면 장 경계마다 인감을 반씩 걸쳐 찍는다
+  (`lib/pdf-seam.ts`, 테스트 있음. `Company.stampSeam` 로 끄고 켠다 — 설정 화면).
+  앞장 오른쪽 끝에 왼쪽 자락, 뒷장 왼쪽 끝에 오른쪽 자락 — 종이를 접어 찍으면 그 자리에서 맞물린다.
+  보이는 폭은 절반(10mm)이 아니라 **8mm** 다. 접힌 자리가 도장 가운데를 먹으므로 실제로도 자락만
+  남고, 절반을 그대로 얹으면 본문을 그만큼 더 덮는다.
+  **몇 장인지 렌더 전에는 알 수 없어 두 번 뽑는다** — 먼저 한 번 뽑아 `countPdfPages()` 로 세고,
+  2장 이상일 때만 간인·쪽번호를 얹어 다시 뽑는다(1장이면 첫 결과를 그대로 쓴다).
+  쪽번호(`1 / 2`)는 puppeteer `footerTemplate` 로 아래 여백에 찍는다 — 본문에 넣으면 마지막 줄과
+  겹치고, 머리글/바닥글 틀은 본문과 **다른 문서**라 한글 폰트가 없어 숫자와 `/` 만 쓴다.
+  **계약서 단독 발급(`genContract`)에만 붙인다** — 신규입사 패키지는 서로 다른 문서 4종의 묶음이라
+  문서 경계를 넘는 간인은 뜻이 달라진다.
+  간인은 **법적 의무가 아니다**(근로기준법 §17 은 서면 명시·교부만 요구). 인쇄된 간인은 매 장에
+  같은 그림이 찍히므로 증거력도 없다 — 관행상의 모양을 옮긴 것이고, 실제 증거력은 출력 후 사람이
+  직접 찍는 도장에서 나온다.
 - **문서→PDF**: `lib/documents.ts`(계약서/서약서/동의서), `lib/documents-pay.ts`(명세서/증명서) 가
   HTML 을 만들고 `lib/pdf.ts` 가 puppeteer-core 로 PDF 렌더(Vercel=@sparticuz/chromium, 로컬=설치된 Chrome/Edge).
   한글폰트는 `assets/fonts/` 를 base64 임베드(`lib/fonts.ts`).
@@ -52,6 +66,12 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   `lib/email.ts`, `lib/scheduler.ts`, `lib/slack.ts`.
 - **API**: `app/api/**` — 모두 `isAuthed()` 가드(슬랙/크론 제외, 자체 서명검증).
 - **화면**: `app/(app)/**` — 서버컴포넌트가 데이터 로드, `components/*Client.tsx` 가 상호작용.
+  **급여 화면(`/payroll`)만 화면 높이에 맞춰 두 층으로 나눈다** — 연·월 선택·버튼·합계 카드·표 머리글은
+  고정이고 **직원 행만 표 안에서 스크롤**한다. 47명을 넘어가면 아래로 내려갈수록 어느 입력칸인지
+  분간이 안 돼 잘못 적기 쉬웠다. 표 카드가 `flex-1 min-h-0 overflow-auto` 로 남은 높이를 먹고,
+  머리글은 `thead` 가 아니라 **`th` 마다** sticky 를 건다(thead 만으로는 안 붙는 브라우저가 있다).
+  머리글 아래 경계선은 border 가 아니라 inset shadow 로 그린다 — sticky 셀의 border 는 스크롤할 때
+  같이 밀려 사라진다. 계산 규칙 설명은 접어 둔다(400px 짜리가 늘 펼쳐져 있으면 볼 행이 두 줄 남는다).
   보강 화면(`/makeup`)만 표가 아니라 **월 달력**(`components/MakeupCalendar.tsx`) — 누가 언제 보강하는지가
   날짜 축으로 보여야 하고, 구글 보강캘린더와 같은 그림을 보게 하기 위함.
 - **명단 화면의 필터·정렬**: `components/TableTools.tsx`(`useTableSort` / `SortTh` / `FilterSelect` / `FilterBar`).

@@ -40,6 +40,9 @@ model Company {
   /// 계약서 '대표자' 와 재직·경력증명서 '대표이사' 옆에 찍혀 나온다.
   /// 없으면 예전처럼 `(인)`·`(직인)` 글자만 찍혀 손도장을 찍을 자리가 된다.
   stamp                String?
+  /// 간인(間印) — 2장 이상인 계약서에 장 경계마다 인감을 반씩 걸쳐 찍을지.
+  /// 종이를 접어 찍던 관행을 그대로 옮긴 것이라 기본으로 켠다. 인감이 없으면 무관.
+  stampSeam            Boolean  @default(true)
   updatedAt            DateTime @updatedAt
 }
 

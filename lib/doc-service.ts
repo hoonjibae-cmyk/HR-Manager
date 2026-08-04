@@ -96,12 +96,15 @@ export async function genContract(contractId: number) {
   if (!ct) throw new Error("계약 없음");
   const company = await getCompany();
   // 인센티브 계약은 별지 「인센티브 산정 계약서」가 함께 붙는다
+  // 계약서는 본문+별지가 한 건의 계약이라 장 경계에 간인을 찍고 쪽번호를 단다.
+  // 신규입사 패키지는 서로 다른 문서 4종의 묶음이라 문서 경계를 넘는 간인은 뜻이 달라져 붙이지 않는다.
   const pdf = await htmlPagesToPdf(
     contractBodies({
       employee: empToDoc(ct.employee),
       contract: contractToDoc(ct),
       company,
-    })
+    }),
+    { seamStamp: company.stampSeam ? company.stamp : null, paginate: true }
   );
   const path = await save(pdf, `근로계약서_${ct.employee.name}.pdf`);
   await record(ct.employeeId, "CONTRACT", `계약서 - ${ct.employee.name}`, path, {

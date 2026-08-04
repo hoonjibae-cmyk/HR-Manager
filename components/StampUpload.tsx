@@ -16,13 +16,14 @@ const MAX_EDGE = 512;
  * 흰 배경이 남아 있으면 글자를 덮어 버린다. 그래서 캔버스를 지우고 그린 뒤 반드시 PNG 로 내보내고,
  * 미리보기도 체크무늬 위에 얹어 배경이 뚫려 있는지 눈으로 확인하게 한다.
  */
-export default function StampUpload({ stamp }: { stamp: string | null }) {
+export default function StampUpload({ stamp, seam }: { stamp: string | null; seam: boolean }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [warn, setWarn] = useState("");
   const [preview, setPreview] = useState<string | null>(stamp);
+  const [useSeam, setUseSeam] = useState(seam);
 
   /** 네 모서리가 모두 불투명하면 누끼를 안 딴 사각 사진일 가능성이 높다 */
   function looksOpaque(ctx: CanvasRenderingContext2D, w: number, h: number): boolean {
@@ -170,7 +171,36 @@ export default function StampUpload({ stamp }: { stamp: string | null }) {
         </div>
       </div>
 
-      <p className="text-[11px] text-slate-400 mt-4 border-t border-slate-100 pt-3">
+      {/* 간인 — 종이를 접어 장 경계에 반씩 찍던 관행. 법적 의무는 아니라 끌 수 있게 둔다 */}
+      <label className="flex items-start gap-2 text-xs mt-4 border-t border-slate-100 pt-3">
+        <input
+          type="checkbox"
+          className="w-4 h-4 mt-0.5"
+          checked={useSeam}
+          disabled={busy}
+          onChange={async (e) => {
+            const v = e.target.checked;
+            setUseSeam(v);
+            setBusy(true);
+            await fetch("/api/settings/stamp", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ seam: v }),
+            }).catch(() => {});
+            setBusy(false);
+            router.refresh();
+          }}
+        />
+        <span className="text-slate-600">
+          2장 이상인 계약서에 <b>간인</b> 찍기
+          <span className="block text-[11px] text-slate-400 mt-0.5">
+            장이 넘어가는 자리마다 앞장 오른쪽 끝·뒷장 왼쪽 끝에 인감이 반씩 찍히고, 쪽번호(1 / 2)가 붙습니다.
+            종이를 접어 찍던 관행을 옮긴 것으로 <b>법으로 정해진 의무는 아닙니다</b>.
+          </span>
+        </span>
+      </label>
+
+      <p className="text-[11px] text-slate-400 mt-3 border-t border-slate-100 pt-3">
         이미 발급해 둔 PDF 는 그대로입니다 — 인감은 <b>발급하는 시점</b>에 찍히므로, 기존 문서에
         넣으려면 다시 발급하세요.
       </p>

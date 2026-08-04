@@ -325,7 +325,11 @@ export default function PayrollClient() {
   const totalGross = recs.reduce((s, r) => s + r.gross, 0);
 
   return (
-    <div>
+    /* 화면을 두 층으로 나눈다 — 연·월 선택과 합계는 늘 붙어 있고 **표만 안에서 스크롤**한다.
+       47명을 넘어가면 아래로 내려갈수록 어느 입력칸인지 분간이 안 돼 잘못 적기 쉬웠다.
+       창이 짧으면 min-h 가 걸려 예전처럼 페이지째 스크롤된다. */
+    <div className="flex flex-col h-[calc(100dvh-8rem)] lg:h-[calc(100dvh-9rem)] min-h-[28rem]">
+      <div className="shrink-0">
       <div className="card p-4 mb-5 flex flex-wrap items-center gap-3">
         <select className="input w-28" value={year} onChange={(e) => setYear(Number(e.target.value))}>
           {[year - 1, year, year + 1].map((y) => <option key={y} value={y}>{y}년</option>)}
@@ -372,7 +376,7 @@ export default function PayrollClient() {
       </div>
 
       {tsResult && (
-        <div className="card p-4 mb-5 border-emerald-200 bg-emerald-50/40">
+        <div className="card p-4 mb-5 border-emerald-200 bg-emerald-50/40 max-h-[38vh] overflow-auto">
           <div className="flex items-center justify-between mb-2">
             <span className="font-bold text-emerald-800 text-sm">
               ✅ 시간기록표 반영 완료 — {tsResult.year}년 {tsResult.month}월
@@ -485,7 +489,7 @@ export default function PayrollClient() {
       )}
 
       {incResult && (
-        <div className="card p-4 mb-5 border-indigo-200 bg-indigo-50/40">
+        <div className="card p-4 mb-5 border-indigo-200 bg-indigo-50/40 max-h-[38vh] overflow-auto">
           <div className="flex items-center justify-between mb-2">
             <span className="font-bold text-indigo-900 text-sm">
               ✅ 인센티브 명단 반영 — {incResult.year}년 {incResult.month}월 · {incResult.name} 선생님
@@ -537,7 +541,10 @@ export default function PayrollClient() {
         </div>
       )}
 
-      <div className="card overflow-x-auto">
+      </div>
+
+      {/* 표 — 남은 높이를 채우고 여기 안에서만 스크롤한다(머리글은 sticky 로 붙어 있다) */}
+      <div className="card flex-1 min-h-0 overflow-auto">
         {loading ? (
           <div className="text-center text-slate-400 py-12">불러오는 중…</div>
         ) : recs.length === 0 ? (
@@ -546,7 +553,10 @@ export default function PayrollClient() {
           </div>
         ) : (
           <table className="w-full min-w-[1180px] text-sm [&_td]:px-2 [&_th]:px-2">
-            <thead className="bg-slate-50">
+            {/* 머리글 고정 — th 마다 걸어야 한다(thead 만으로는 안 붙는 브라우저가 있다).
+                아래 경계선은 border 가 아니라 inset shadow 로 그린다 — sticky 인 셀의 border 는
+                스크롤할 때 같이 밀려 사라진다. */}
+            <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-slate-50 [&_th]:shadow-[inset_0_-1px_0_#e2e8f0]">
               <tr>
                 <th className="th">직원</th>
                 <th className="th">형태</th>
@@ -734,8 +744,14 @@ export default function PayrollClient() {
           </table>
         )}
       </div>
+      {/* 계산 규칙 설명 — 표 높이를 뺏지 않게 접어 둔다. 표가 화면에 고정된 뒤로는
+          400px 짜리 설명이 늘 펼쳐져 있으면 정작 볼 행이 두 줄밖에 남지 않는다. */}
       {recs.length > 0 && (
-        <div className="text-xs text-slate-400 mt-3 space-y-1">
+        <details className="shrink-0 mt-3">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-500 hover:text-slate-700 select-none">
+            표 보는 법 · 계산 규칙
+          </summary>
+        <div className="text-xs text-slate-400 mt-2 space-y-1 max-h-[40vh] overflow-auto">
           <p>
             ※ 변동입력은 각 행의 <b>저장</b> 버튼(해당 직원만 즉시 반영) 또는 상단 <b>급여 일괄 산정</b>(전체 반영)으로 저장·재계산됩니다.
             명세서 <b>이메일 발송이 완료된 기록은 자동으로 잠겨</b>(발송완료) 재계산·공제 수정이 되지 않으며, 재발송 시에도 제외됩니다.
@@ -802,6 +818,7 @@ export default function PayrollClient() {
             &nbsp;· 월중 입·퇴사자는 <b>일할계산</b>이 자동 적용됩니다.
           </p>
         </div>
+        </details>
       )}
     </div>
   );

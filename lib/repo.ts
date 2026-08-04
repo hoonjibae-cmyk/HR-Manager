@@ -14,7 +14,7 @@ import type { DocCompany, DocEmployee, DocContract } from "./documents";
 
 let _taxCache: TaxBracketRow[] | null = null;
 
-export async function getCompany(): Promise<DocCompany & { payday: number; transferAlias: string }> {
+export async function getCompany(): Promise<DocCompany & { payday: number; transferAlias: string; stampSeam: boolean }> {
   const c = await prisma.company.findFirst({ where: { id: 1 } });
   if (!c) {
     return {
@@ -27,6 +27,7 @@ export async function getCompany(): Promise<DocCompany & { payday: number; trans
       transferAlias: "유쌤",
       logo: null,
       stamp: null,
+      stampSeam: true,
     };
   }
   return {
@@ -42,6 +43,7 @@ export async function getCompany(): Promise<DocCompany & { payday: number; trans
     transferAlias: ((c as any).transferAlias ?? "").trim() || "유쌤",
     logo: (c as any).logo ?? null,
     stamp: (c as any).stamp ?? null,
+    stampSeam: (c as any).stampSeam ?? true,
   };
 }
 

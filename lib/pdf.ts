@@ -1,6 +1,7 @@
 import puppeteer, { type Browser } from "puppeteer-core";
 import { existsSync, readdirSync } from "fs";
 import { fontFaceCss } from "./fonts";
+import { countPdfPages, seamLayer, FOOTER_TEMPLATE } from "./pdf-seam";
 
 // 서버리스(Vercel/AWS Lambda) 환경 여부
 const onServerless =
@@ -167,12 +168,38 @@ async function getCachedBrowser(): Promise<Browser> {
 export interface PdfOptions {
   landscape?: boolean;
   marginMm?: number;
+  /**
+   * **간인(間印)** — 장이 넘어가는 자리마다 법인 인감을 반씩 걸쳐 찍는다(data URI).
+   * 앞장 오른쪽 끝에 도장의 왼쪽 절반, 뒷장 왼쪽 끝에 오른쪽 절반이 찍혀,
+   * 두 장을 나란히 놓으면 도장 하나가 이어진다 — 종이를 접어 찍던 그 모양이다.
+   * **2장 이상일 때만** 붙으므로 장수를 먼저 세야 한다(아래 2회 렌더).
+   */
+  seamStamp?: string | null;
+  /** 쪽번호 `1 / 3` 을 아래 여백에 찍는다. 1장짜리면 저절로 생략된다 */
+  paginate?: boolean;
 }
 
-/** 내부 렌더러: 완성된 본문 HTML 을 A4 PDF(Buffer)로 렌더링. */
+/**
+ * 완성된 본문 HTML 을 A4 PDF 로 렌더링.
+ *
+ * 간인·쪽번호를 붙이려면 **장수를 알아야** 하는데 렌더 전에는 알 수 없다.
+ * 그래서 먼저 한 번 뽑아 장수를 세고, 2장 이상일 때만 다시 뽑는다. 1장이면 그대로 쓴다.
+ */
 async function renderPdf(innerBody: string, opts: PdfOptions = {}): Promise<Buffer> {
+  const wantsCount = !!opts.seamStamp || !!opts.paginate;
+  if (!wantsCount) return renderOnce(innerBody, opts, 0);
+
+  const first = await renderOnce(innerBody, opts, 0);
+  const pages = countPdfPages(first);
+  if (pages < 2) return first; // 1장짜리엔 간인도 쪽번호도 필요 없다
+  return renderOnce(innerBody, opts, pages);
+}
+
+/** 실제 렌더 1회. `pages`>0 이면 그 장수에 맞춰 간인·쪽번호를 얹는다 */
+async function renderOnce(innerBody: string, opts: PdfOptions, pages: number): Promise<Buffer> {
   const margin = opts.marginMm ?? 15;
-  const html = wrapHtml(innerBody);
+  const seam = pages > 1 && opts.seamStamp ? seamLayer(pages, opts.seamStamp, margin) : "";
+  const html = wrapHtml(seam + innerBody);
   const browser = onServerless ? await launchBrowser() : await getCachedBrowser();
   const page = await browser.newPage();
   try {
@@ -186,11 +213,15 @@ async function renderPdf(innerBody: string, opts: PdfOptions = {}): Promise<Buff
       }),
       new Promise((r) => setTimeout(r, 8000)),
     ]);
+    const paginate = pages > 1 && !!opts.paginate;
     const pdf = await page.pdf({
       format: "A4",
       landscape: !!opts.landscape,
       printBackground: true,
       timeout: 45000,
+      displayHeaderFooter: paginate,
+      headerTemplate: "<span></span>",
+      footerTemplate: paginate ? FOOTER_TEMPLATE : "<span></span>",
       margin: {
         top: `${margin}mm`,
         bottom: `${margin}mm`,
@@ -211,7 +242,7 @@ export async function htmlToPdf(bodyHtml: string, opts: PdfOptions = {}): Promis
 }
 
 /** 여러 문서(HTML 본문)를 페이지 구분하여 하나의 PDF 로 병합 */
-export async function htmlPagesToPdf(bodies: string[]): Promise<Buffer> {
+export async function htmlPagesToPdf(bodies: string[], opts: PdfOptions = {}): Promise<Buffer> {
   const joined = bodies
     .map(
       (b, i) =>
@@ -220,7 +251,7 @@ export async function htmlPagesToPdf(bodies: string[]): Promise<Buffer> {
         }>${b}</section>`
     )
     .join("\n");
-  return renderPdf(joined);
+  return renderPdf(joined, opts);
 }
 
 function wrapHtml(body: string): string {
@@ -341,6 +372,16 @@ table.kv{page-break-inside:avoid;break-inside:avoid;}
 .compact table.kv th{width:92px;}
 .compact .inline-sign{font-size:8.4pt;margin:0 0 2px;}
 .compact .stamp-anchor .stamp-img{width:17mm;height:17mm;}
+/* 간인 — 장 경계마다 도장을 반씩. 절반만 보이게 잘라 두 장을 나란히 놓으면 하나로 이어진다.
+   본문 흐름 밖(절대배치)이라 장수를 늘리지 않는다. */
+.seam-layer{position:absolute;top:0;left:0;width:0;height:0;}
+/* 보이는 폭은 8mm — 종이 가장자리를 접어 찍으면 접힌 자리가 도장의 가운데를 먹으므로
+   실제로도 양쪽에 초승달처럼 일부만 남는다. 절반(10mm)을 그대로 얹으면 본문을 그만큼 더 덮는다. */
+.seam{position:absolute;display:block;width:8mm;height:20mm;overflow:hidden;}
+.seam img{position:absolute;top:0;width:20mm;height:20mm;object-fit:contain;}
+.seam-a img{left:0;}      /* 앞장 오른쪽 끝 — 도장의 왼쪽 자락 */
+.seam-b{left:0;}          /* 뒷장 왼쪽 끝 */
+.seam-b img{left:-12mm;}  /* — 오른쪽 자락 */
 .compact .hosub{margin:1.5px 0 1.5px 28px;}
 .compact .footnote{font-size:7.9pt;margin:1px 0 1px 13px;}
 .compact .muted{font-size:8.2pt;}

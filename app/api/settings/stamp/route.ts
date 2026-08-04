@@ -33,6 +33,26 @@ export async function POST(req: Request) {
   return NextResponse.json({ ok: true, bytes: chk.bytes });
 }
 
+/** 간인(2장 이상 계약서에 장 경계마다 반씩 날인) 켜고 끄기 */
+export async function PATCH(req: Request) {
+  if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const b = await req.json().catch(() => ({}) as any);
+  const seam = !!b.seam;
+  await prisma.company.upsert({
+    where: { id: 1 },
+    update: { stampSeam: seam },
+    create: { id: 1, stampSeam: seam },
+  });
+  await logActivity({
+    action: "SETTINGS_UPDATE",
+    target: "법인 인감",
+    summary: seam
+      ? "계약서 간인을 켰습니다 — 2장 이상이면 장 경계마다 인감이 반씩 찍힙니다."
+      : "계약서 간인을 껐습니다.",
+  });
+  return NextResponse.json({ ok: true, seam });
+}
+
 export async function DELETE() {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   await prisma.company.updateMany({ where: { id: 1 }, data: { stamp: null } });
