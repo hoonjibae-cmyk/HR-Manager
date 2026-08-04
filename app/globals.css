@@ -36,14 +36,16 @@ body {
   .label {
     @apply block text-xs font-semibold text-slate-500 mb-1;
   }
+  /* 머리글은 줄바꿈하지 않는다 — "명세서" 가 두 줄로 쪼개지면 표 전체가 들뜬다 */
   .th {
-    @apply px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide;
+    @apply whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide;
   }
   .td {
-    @apply px-3 py-2.5 text-sm text-slate-700 border-t border-slate-100;
+    @apply px-3 py-2.5 text-sm text-slate-700 border-t border-slate-100 align-middle;
   }
+  /* 배지는 절대 줄바꿈하지 않는다 — "작성중" 이 두 줄로 쪼개지면 행 높이가 들쭉날쭉해진다 */
   .pill {
-    @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+    @apply inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium;
   }
   .stat-num {
     @apply text-2xl font-bold text-slate-900 tabular-nums;

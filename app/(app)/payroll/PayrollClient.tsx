@@ -447,12 +447,25 @@ export default function PayrollClient() {
             {year}년 {month}월 급여 기록이 없습니다. <b>급여 일괄 산정</b>을 눌러 계산하세요.
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[1180px] text-sm [&_td]:px-2 [&_th]:px-2">
             <thead className="bg-slate-50">
               <tr>
                 <th className="th">직원</th>
                 <th className="th">형태</th>
-                <th className="th">변동입력</th>
+                <th className="th">
+                  {/* 입력칸 라벨은 여기 한 번만 — 행마다 반복하면 폭이 두 배가 되고 값도 라벨에 밀린다.
+                      아래 각 행의 그리드와 **같은 열 정의**를 써야 위아래가 맞는다. */}
+                  <div className="grid grid-cols-[4.25rem_repeat(4,2.75rem)_4.5rem_2.75rem_auto] items-center gap-x-1.5 font-normal normal-case tracking-normal text-[10px] text-slate-400">
+                    <span className="truncate" title="인센티브=학생수 · 완전비율제=반 매출">학생/매출</span>
+                    <span title="평일 소정근로 외·토요일 중 1일 8h·주 40h 이내 (가산 없음)">추가h</span>
+                    <span title="1일 8시간·주 40시간 초과분 (×1.5)">연장h</span>
+                    <span title="일요일·공휴일 근무 (×1.5)">휴일h</span>
+                    <span title="22시~06시 근무 (+0.5)">야간h</span>
+                    <span>상여</span>
+                    <span title="미사용연차(일)">미사용</span>
+                    <span />
+                  </div>
+                </th>
                 <th className="th text-right">지급액</th>
                 <th className="th text-right">공제액</th>
                 <th className="th text-right">실수령</th>
@@ -461,69 +474,90 @@ export default function PayrollClient() {
               </tr>
             </thead>
             <tbody>
-              {recs.map((r) => (
+              {recs.map((r) => {
+                // 근로기준법 항목(가산·연차)을 다루는 행인가 — 위탁계약이면 아니다
+                const statutory = !isContractorContract({
+                  payScheme: r.payScheme,
+                  isContractor: r.employee?.isContractor,
+                });
+                return (
                 <React.Fragment key={r.id}>
                 <tr className="hover:bg-slate-50">
                   <td className="td">
-                    <div className="font-semibold">{r.employee.name}</div>
-                    <div className="text-xs text-slate-400">{r.employee.department} {r.employee.position}</div>
+                    <div className="font-semibold whitespace-nowrap">{r.employee.name}</div>
+                    <div className="text-xs text-slate-400 whitespace-nowrap">
+                      {r.employee.department} {r.employee.position}
+                    </div>
                     {r.prorationRatio < 1 && (r.payScheme === "MONTHLY" || r.payScheme === "INCENTIVE") && (
                       <div className="text-[10px] text-amber-600 mt-0.5">일할 {(r.prorationRatio * 100).toFixed(0)}%</div>
                     )}
                   </td>
-                  <td className="td">
+                  <td className="td w-px">
                     <div className="flex flex-col items-start gap-1">
                       <Pill kind={r.payScheme}>{PAY_SCHEME_LABEL[r.payScheme]}</Pill>
                       <Pill kind={r.incomeType}>{r.incomeType === "FREELANCE" ? "사업소득" : "근로소득"}</Pill>
-                      {isContractorContract({
-                        payScheme: r.payScheme,
-                        isContractor: r.employee?.isContractor,
-                      }) && (
+                      {!statutory && (
                         <span
                           className="pill bg-amber-50 text-amber-700"
                           title="위탁계약(프리랜서) — 주휴수당·연차·퇴직금·4대보험·법정가산을 적용하지 않습니다."
                         >
-                          위탁 · 근로기준법 미적용
+                          위탁
                         </span>
                       )}
                     </div>
                   </td>
                   <td className="td">
-                    <div className="flex flex-wrap gap-1">
-                      {r.payScheme === "INCENTIVE" &&
-                        (r.studentUnits != null ? (
-                          <span
-                            className="text-[11px] bg-indigo-50 text-indigo-700 rounded px-2 py-1 self-end"
-                            title="인센티브 명단(회차 비례) 기준 가중 인원 — 명단 업로드로 자동 산정됩니다"
-                          >
-                            명단 {Number(r.studentUnits).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}명
-                          </span>
-                        ) : (
-                          <InlineInput label="학생수" value={inputs[r.employeeId]?.studentCount ?? ""} onChange={(v) => setInput(r.employeeId, "studentCount", v)} />
-                        ))}
-                      {r.payScheme === "RATIO" && (
-                        <InlineInput label="매출" value={inputs[r.employeeId]?.classRevenue ?? ""} onChange={(v) => setInput(r.employeeId, "classRevenue", v)} wide />
-                      )}
-                      {!isContractorContract({
-                        payScheme: r.payScheme,
-                        isContractor: r.employee?.isContractor,
-                      }) && (
+                    {/* 급여형태마다 필요한 입력이 달라도 **같은 열에 서도록** 고정폭 그리드로 둔다.
+                        예전엔 flex-wrap 이라 인센티브 행만 두 줄로 접히고 위탁 행은 텅 비어
+                        행 높이와 라벨 위치가 제각각이었다. 안 쓰는 칸은 빈 칸으로 자리만 지킨다. */}
+                    <div className="grid grid-cols-[4.25rem_repeat(4,2.75rem)_4.5rem_2.75rem_auto] items-center gap-x-1.5">
+                      {/* ① 학생수(인센티브) / 매출(비율제) */}
+                      <div>
+                        {r.payScheme === "INCENTIVE" &&
+                          (r.studentUnits != null ? (
+                            <span
+                              className="text-[11px] bg-indigo-50 text-indigo-700 rounded px-2 py-1 whitespace-nowrap"
+                              title="인센티브 명단(회차 비례) 기준 가중 인원 — 명단 업로드로 자동 산정됩니다"
+                            >
+                              명단 {Number(r.studentUnits).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}명
+                            </span>
+                          ) : (
+                            <InlineInput label="" title="학생수" value={inputs[r.employeeId]?.studentCount ?? ""} onChange={(v) => setInput(r.employeeId, "studentCount", v)} />
+                          ))}
+                        {r.payScheme === "RATIO" && (
+                          <InlineInput label="" title="매출" value={inputs[r.employeeId]?.classRevenue ?? ""} onChange={(v) => setInput(r.employeeId, "classRevenue", v)} />
+                        )}
+                      </div>
+
+                      {/* ②~⑤ 법정가산 시간 — 위탁계약은 대상이 아니라 칸 자체를 비운다 */}
+                      {statutory ? (
                         <>
-                          <InlineInput label="추가h" value={inputs[r.employeeId]?.extraHours ?? ""} onChange={(v) => setInput(r.employeeId, "extraHours", v)} />
-                          <InlineInput label="연장h" value={inputs[r.employeeId]?.overtimeHours ?? ""} onChange={(v) => setInput(r.employeeId, "overtimeHours", v)} />
-                          <InlineInput label="휴일h" value={inputs[r.employeeId]?.holidayHours ?? ""} onChange={(v) => setInput(r.employeeId, "holidayHours", v)} />
-                          <InlineInput label="야간h" value={inputs[r.employeeId]?.nightHours ?? ""} onChange={(v) => setInput(r.employeeId, "nightHours", v)} />
+                          <InlineInput label="" title="추가h (법내연장)" value={inputs[r.employeeId]?.extraHours ?? ""} onChange={(v) => setInput(r.employeeId, "extraHours", v)} />
+                          <InlineInput label="" title="연장h (법정 초과 ×1.5)" value={inputs[r.employeeId]?.overtimeHours ?? ""} onChange={(v) => setInput(r.employeeId, "overtimeHours", v)} />
+                          <InlineInput label="" title="휴일h (×1.5)" value={inputs[r.employeeId]?.holidayHours ?? ""} onChange={(v) => setInput(r.employeeId, "holidayHours", v)} />
+                          <InlineInput label="" title="야간h (+0.5)" value={inputs[r.employeeId]?.nightHours ?? ""} onChange={(v) => setInput(r.employeeId, "nightHours", v)} />
                         </>
+                      ) : (
+                        <div
+                          className="col-span-4 text-[10px] text-slate-300 whitespace-nowrap"
+                          title="위탁계약(프리랜서)은 연장·야간·휴일 가산과 연차 대상이 아닙니다"
+                        >
+                          가산·연차 항목 없음
+                        </div>
                       )}
-                      <InlineInput label="상여" value={inputs[r.employeeId]?.bonus ?? ""} onChange={(v) => setInput(r.employeeId, "bonus", v)} wide />
-                      {!isContractorContract({
-                        payScheme: r.payScheme,
-                        isContractor: r.employee?.isContractor,
-                      }) && (
-                        <InlineInput label="미사용연차(일)" value={inputs[r.employeeId]?.unusedLeaveDays ?? ""} onChange={(v) => setInput(r.employeeId, "unusedLeaveDays", v)} />
-                      )}
+
+                      {/* ⑥ 상여 (모든 형태 공통) */}
+                      <InlineInput label="" title="상여" value={inputs[r.employeeId]?.bonus ?? ""} onChange={(v) => setInput(r.employeeId, "bonus", v)} />
+
+                      {/* ⑦ 미사용연차 */}
+                      <div>
+                        {statutory && (
+                          <InlineInput label="" title="미사용연차(일)" value={inputs[r.employeeId]?.unusedLeaveDays ?? ""} onChange={(v) => setInput(r.employeeId, "unusedLeaveDays", v)} />
+                        )}
+                      </div>
+
                       <button
-                        className="btn-primary py-1 px-2.5 text-xs self-end disabled:opacity-40"
+                        className="btn-primary justify-self-start py-1 px-2.5 text-xs whitespace-nowrap disabled:opacity-40"
                         disabled={!!busy || r.status === "SENT"}
                         title={r.status === "SENT" ? "명세서가 발송된 기록은 잠겨 있어 재계산되지 않습니다" : "이 직원만 저장하고 재산정"}
                         onClick={() => saveRow(r.employeeId)}
@@ -532,23 +566,32 @@ export default function PayrollClient() {
                       </button>
                     </div>
                   </td>
-                  <td className="td text-right tnum">{won(r.gross)}</td>
-                  <td className="td text-right">
+                  <td className="td text-right tnum whitespace-nowrap">{won(r.gross)}</td>
+                  <td className="td text-right whitespace-nowrap">
                     <button
                       className="tnum text-slate-600 underline decoration-dotted underline-offset-2 hover:text-brand-600"
                       onClick={() => setOpenDedId(openDedId === r.id ? null : r.id)}
-                      title="공제 편집"
+                      title="공제 편집 (클릭)"
                     >
                       {won(r.totalDeduct)}
                     </button>
-                    <div className={`text-[10px] ${r.deductMode === "AUTO" ? "text-emerald-600" : "text-amber-600"}`}>
+                    <div
+                      className={`text-[10px] ${r.deductMode === "AUTO" ? "text-emerald-600" : "text-amber-600"}`}
+                    >
                       {r.deductMode === "AUTO" ? "자동" : "수동"} ▾
                     </div>
                   </td>
-                  <td className="td text-right tnum font-bold">{won(r.net)}</td>
-                  <td className="td"><Pill kind={r.status}>{PAYROLL_STATUS_LABEL[r.status] ?? r.status}</Pill></td>
-                  <td className="td">
-                    <button className="text-xs text-brand-600 font-semibold" onClick={() => openPayslip(r.id)}>PDF</button>
+                  <td className="td text-right tnum font-bold whitespace-nowrap">{won(r.net)}</td>
+                  <td className="td w-px whitespace-nowrap">
+                    <Pill kind={r.status}>{PAYROLL_STATUS_LABEL[r.status] ?? r.status}</Pill>
+                  </td>
+                  <td className="td w-px">
+                    <button
+                      className="text-xs text-brand-600 font-semibold whitespace-nowrap"
+                      onClick={() => openPayslip(r.id)}
+                    >
+                      PDF
+                    </button>
                   </td>
                 </tr>
                 {openDedId === r.id && (
@@ -559,7 +602,8 @@ export default function PayrollClient() {
                   </tr>
                 )}
                 </React.Fragment>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -814,12 +858,27 @@ function fmtHM(n: number): string {
   return m > 0 ? `${h}시간 ${m}분` : `${h}시간`;
 }
 
-function InlineInput({ label, value, onChange, wide }: { label: string; value: any; onChange: (v: string) => void; wide?: boolean }) {
+function InlineInput({
+  label,
+  value,
+  onChange,
+  title,
+}: {
+  /** 보통 빈 문자열 — 라벨은 표 머리글에 한 번만 둔다 */
+  label: string;
+  value: any;
+  onChange: (v: string) => void;
+  /** 마우스를 올렸을 때 뜨는 항목 이름 */
+  title?: string;
+}) {
   return (
-    <label className="inline-flex items-center gap-1 text-[10px] text-slate-400">
+    <label
+      className="inline-flex items-center gap-1 text-[10px] text-slate-400 whitespace-nowrap"
+      title={title ?? label}
+    >
       {label}
       <input
-        className={`border border-slate-200 rounded px-1 py-0.5 text-xs ${wide ? "w-20" : "w-12"}`}
+        className="w-full min-w-0 border border-slate-200 rounded px-1 py-0.5 text-xs"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
