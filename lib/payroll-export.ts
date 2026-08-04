@@ -3,11 +3,14 @@
 // 학원이 매달 세무대행 업체에 넘기던 시트를 그대로 재현한다. 세무사는 이 표로
 // 원천세 신고와 공제를 하므로 **열 관계가 반드시 맞아떨어져야** 한다.
 //
-//   세전총계   = 세전급여 + 오버타임수당 + 미사용연차수당 + 상여금
+//   세전총계   = 세전급여 + 인센티브 + 오버타임수당 + 미사용연차수당 + 상여금
 //
 // '오버타임수당' 은 **그 달에 새로 생긴 초과근로분만** 담는다(`variableOvertimeOf`).
 // 포괄임금 약정분(계약서에 이미 포함된 고정 시간외·야간)은 여기 넣지 않고 세전급여로 보낸다.
 //   입금액     = 세전총계 − 공제 − 인센티브유보액 − 월정기주차비(50%)차감 − 실비 − 기타공제
+//
+// 인센티브는 **기본급과 섞지 않고 열을 따로 둔다** — 세무사가 고정급과 성과급을 갈라 봐야 하고,
+// 뒤쪽 '인센티브유보액'(인센티브 × 1/12)과 대조도 이 열이 있어야 된다.
 //
 // '공제' 열은 **법정공제만**(4대보험·소득세·지방소득세) 담는다. 인센티브유보액·주차비는
 // 세무 신고 대상이 아니라 회사가 따로 떼는 돈이라 각자 열로 빠져 있다 — 이걸 '공제' 에
@@ -57,7 +60,8 @@ export interface ExportPayrollRecord {
 export interface ExportRow {
   name: string; // 김은진선생님
   payDate: string; // 08월 07일
-  basePay: number; // 세전급여 (오버타임·미사용연차·상여를 뺀 나머지)
+  basePay: number; // 세전급여 (인센티브·오버타임·미사용연차·상여를 뺀 나머지)
+  incentive: number; // 인센티브 (기본급과 분리)
   overtimePay: number; // 오버타임수당
   unusedLeavePay: number; // 미사용연차수당
   bonus: number; // 상여금
@@ -122,14 +126,16 @@ export function buildExportRow(r: ExportPayrollRecord, payDate: string): ExportR
   const overtimePay = variableOvertimeOf(r);
   const unusedLeavePay = r.unusedLeaveP || 0;
   const bonus = r.bonusP || 0;
+  const incentive = r.incentiveP || 0;
   // 세전급여 = 총계에서 따로 열이 있는 항목들을 뺀 나머지
-  // (기본급·주휴·직책수당·식대·차량유지비·인센티브 + **포괄임금 약정분**이 여기 뭉쳐 들어간다.
+  // (기본급·주휴·직책수당·식대·차량유지비 + **포괄임금 약정분**이 여기 뭉쳐 들어간다.
   //  약정분은 계약된 월 급여의 일부이므로 오버타임이 아니라 급여 쪽에 있어야 맞다 — 원래 시트가 그렇다)
-  const basePay = (r.gross || 0) - overtimePay - unusedLeavePay - bonus;
+  const basePay = (r.gross || 0) - incentive - overtimePay - unusedLeavePay - bonus;
   return {
     name: `${r.employee.name}선생님`,
     payDate,
     basePay,
+    incentive,
     overtimePay,
     unusedLeavePay,
     bonus,
@@ -181,6 +187,7 @@ export function buildPayrollExportWorkbook(args: {
     "",
     "지급일",
     "세전급여",
+    "인센티브",
     "오버타임수당",
     "미사용연차수당",
     "상여금",
@@ -199,6 +206,7 @@ export function buildPayrollExportWorkbook(args: {
     r.name,
     r.payDate,
     r.basePay,
+    r.incentive || null,
     r.overtimePay || null,
     r.unusedLeavePay || null,
     r.bonus || null,
@@ -219,6 +227,7 @@ export function buildPayrollExportWorkbook(args: {
     `합계 (${rows.length}명)`,
     "",
     sum((r) => r.basePay),
+    sum((r) => r.incentive),
     sum((r) => r.overtimePay),
     sum((r) => r.unusedLeavePay),
     sum((r) => r.bonus),

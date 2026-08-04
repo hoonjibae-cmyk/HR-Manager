@@ -64,7 +64,7 @@ describe("payDateOf — 익월 지급일", () => {
 });
 
 describe("열 관계 — 세무사가 이 표로 신고하므로 반드시 맞아야 한다", () => {
-  it("세전총계 = 세전급여 + 오버타임 + 미사용연차 + 상여", () => {
+  it("세전총계 = 세전급여 + 인센티브 + 오버타임 + 미사용연차 + 상여", () => {
     // 이서영 행 재현: 세전급여 400만 · 오버타임 81,468 · 상여 20만 → 세전총계 4,281,468
     const r = buildExportRow(
       rec({
@@ -86,7 +86,30 @@ describe("열 관계 — 세무사가 이 표로 신고하므로 반드시 맞�
     expect(r.overtimePay).toBe(81_468);
     expect(r.bonus).toBe(200_000);
     expect(r.grossTotal).toBe(4_281_468);
-    expect(r.basePay + r.overtimePay + r.unusedLeavePay + r.bonus).toBe(r.grossTotal);
+    expect(r.basePay + r.incentive + r.overtimePay + r.unusedLeavePay + r.bonus).toBe(r.grossTotal);
+  });
+
+  it("인센티브는 세전급여에 섞이지 않고 제 열로 빠진다", () => {
+    // 월급 350만 + 인센티브 120만 → 세전총계 470만. 세무사가 고정급/성과급을 갈라 봐야 한다.
+    const r = buildExportRow(
+      rec({
+        name: "홍경지",
+        baseP: 3_500_000,
+        incentiveP: 1_200_000,
+        gross: 4_700_000,
+        incomeTaxD: 141_000,
+        localTaxD: 14_100,
+        retentionD: 100_000, // 인센티브 120만 × 1/12
+        net: 4_444_900,
+      }),
+      "08월 07일"
+    );
+    expect(r.incentive).toBe(1_200_000);
+    expect(r.basePay).toBe(3_500_000); // 인센티브가 여기 섞이지 않는다
+    expect(r.basePay + r.incentive).toBe(r.grossTotal);
+    // 유보액(인센티브 × 1/12)을 인센티브 열과 대조할 수 있어야 한다
+    expect(Math.round(r.incentive / 12)).toBe(r.retention);
+    expect(reconcileRow(r)).toBe(0);
   });
 
   it("입금액 = 세전총계 − 공제 − 유보액 − 주차비 (이서영: 유보액이 빠진다)", () => {
@@ -269,6 +292,7 @@ describe("워크북 출력", () => {
       "",
       "지급일",
       "세전급여",
+      "인센티브",
       "오버타임수당",
       "미사용연차수당",
       "상여금",
@@ -285,16 +309,39 @@ describe("워크북 출력", () => {
   it("이름에 '선생님' 이 붙고 주민번호가 ID 열에 들어간다", () => {
     const aoa = read();
     expect(aoa[2][0]).toBe("김은진선생님");
-    expect(aoa[2][12]).toBe("961003-2951624");
+    expect(aoa[2][13]).toBe("961003-2951624");
   });
 
   it("합계 행이 붙는다", () => {
     const aoa = read();
     const last = aoa[aoa.length - 1];
+    const at = (label: string) => last[(aoa[1] as any[]).indexOf(label)];
     expect(String(last[0])).toBe("합계 (2명)");
-    expect(last[6]).toBe(11_649_375 + 5_000_000);
-    expect(last[8]).toBe(11_299_955 + 4_835_000);
-    expect(last[10]).toBe(-35_000);
+    expect(at("세전총계")).toBe(11_649_375 + 5_000_000);
+    expect(at("입금액(공제후)")).toBe(11_299_955 + 4_835_000);
+    expect(at("월정기주차비(50%)차감")).toBe(-35_000);
+  });
+
+  it("인센티브가 있는 달은 합계에도 따로 잡힌다", () => {
+    const { buffer } = buildPayrollExportWorkbook({
+      year: 2026,
+      month: 7,
+      payday: 7,
+      companyName: "유쌤에듀",
+      records: [
+        rec({ name: "가", baseP: 3_000_000, incentiveP: 600_000, gross: 3_600_000, net: 3_600_000 }),
+        rec({ name: "나", baseP: 3_000_000, gross: 3_000_000, net: 3_000_000 }),
+      ],
+    });
+    const wb = XLSX.read(buffer, { type: "buffer" });
+    const aoa = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[wb.SheetNames[0]], {
+      header: 1,
+      blankrows: false,
+    });
+    const col = (aoa[1] as any[]).indexOf("인센티브");
+    expect(aoa[2][col]).toBe(600_000);
+    expect(aoa[3][col]).toBeUndefined(); // 인센티브가 없는 직원은 0 이 아니라 빈칸
+    expect(aoa[aoa.length - 1][col]).toBe(600_000);
   });
 
   it("실비·기타공제가 있는 달에만 그 열이 붙는다 (합계가 어긋나지 않게)", () => {
