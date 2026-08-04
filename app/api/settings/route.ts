@@ -85,6 +85,8 @@ export async function PATCH(req: Request) {
         phone: data.phone,
         address: data.address,
         payday: Number(data.payday) || 7,
+        // 비우면 회사명이 통장 적요로 나가 자리가 넘친다 — 기본 약칭으로 되돌린다
+        transferAlias: String(data.transferAlias ?? "").trim() || "유쌤",
       },
       create: { id: 1, ...data, payday: Number(data.payday) || 7 },
     });

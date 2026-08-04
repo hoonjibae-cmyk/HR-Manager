@@ -197,6 +197,43 @@ export default function PayrollClient() {
     }
   }
 
+  /** 은행 파일이체(대량이체)용 파일 — 세후 실지급액이 그대로 돈이 되어 나간다 */
+  async function exportForBank() {
+    setBusy("bank");
+    try {
+      const res = await fetch(`/api/payroll/bank-export?year=${year}&month=${month}`);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert("내려받기 실패: " + (j.error || res.statusText));
+        return;
+      }
+      try {
+        const raw = res.headers.get("X-Export-Warnings");
+        if (raw) {
+          const w = JSON.parse(atob(raw));
+          const msgs = [
+            w.missingAccount?.length
+              ? `계좌가 없어 빠진 ${w.missingAccount.length}건: ${w.missingAccount.join(", ")}\n→ 직원 정보에 은행·계좌번호를 넣은 뒤 다시 받으세요.`
+              : "",
+            w.zeroAmount?.length ? `지급액이 0원이라 빠진 직원: ${w.zeroAmount.join(", ")}` : "",
+          ].filter(Boolean);
+          if (msgs.length) alert("⚠️ 확인이 필요합니다\n\n" + msgs.join("\n\n"));
+        }
+      } catch {}
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `이체_${year}-${String(month).padStart(2, "0")}.xls`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function sendEmails() {
     if (!confirm(`${year}년 ${month}월 급여명세서를 이메일로 발송하시겠습니까?\n발송된 기록은 자동으로 잠기며(발송완료), 이후 재계산·공제 수정이 불가합니다.`)) return;
     setBusy("email");
@@ -308,20 +345,29 @@ export default function PayrollClient() {
           <input type="file" accept=".xlsx,.xls" className="hidden" onChange={uploadIncentive} />
         </label>
         <div className="flex-1" />
+        {/* 산정이 끝난 뒤에 쓰는 것들 — 좁아져도 셋이 함께 줄바꿈되게 묶어 둔다 */}
         {recs.length > 0 && (
-          <button
-            className="btn-outline"
-            onClick={exportForTax}
-            disabled={!!busy}
-            title="세무대행 업체에 넘기는 급여자료 양식 그대로 엑셀로 받습니다"
-          >
-            {busy === "export" ? "만드는 중…" : "📊 세무사무소 제출자료"}
-          </button>
-        )}
-        {recs.length > 0 && (
-          <button className="btn-outline" onClick={sendEmails} disabled={!!busy}>
-            {busy === "email" ? "발송 중…" : "명세서 이메일 발송"}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="btn-outline"
+              onClick={exportForTax}
+              disabled={!!busy}
+              title="세무대행 업체에 넘기는 급여자료 양식 그대로 엑셀로 받습니다"
+            >
+              {busy === "export" ? "만드는 중…" : "📊 세무사무소 제출자료"}
+            </button>
+            <button
+              className="btn-outline"
+              onClick={exportForBank}
+              disabled={!!busy}
+              title="세후 실지급액을 은행 파일이체(대량이체)에 올릴 수 있는 엑셀로 받습니다"
+            >
+              {busy === "bank" ? "만드는 중…" : "🏦 은행 이체 파일"}
+            </button>
+            <button className="btn-outline" onClick={sendEmails} disabled={!!busy}>
+              {busy === "email" ? "발송 중…" : "명세서 이메일 발송"}
+            </button>
+          </div>
         )}
       </div>
 

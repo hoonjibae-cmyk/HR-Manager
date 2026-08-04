@@ -20,9 +20,9 @@ interface Row {
   warnings: string[];
 }
 
-type Tab = "create" | "fill";
+type Tab = "create" | "fill" | "bank";
 
-/** 엑셀 명단 → 미리보기 → 확정 등록 / 기존 직원 정보 채우기 */
+/** 엑셀 명단 → 미리보기 → 확정 등록 / 기존 직원 정보 채우기 / 은행 이체 양식으로 계좌 등록 */
 export default function EmployeeImport() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -42,8 +42,9 @@ export default function EmployeeImport() {
     const fd = new FormData();
     fd.append("file", target);
     fd.append("mode", tab === "fill" ? `fill-${kind}` : kind);
-    if (tab === "fill") fd.append("overwrite", (ow ?? overwrite) ? "1" : "0");
-    const res = await fetch("/api/employees/import", { method: "POST", body: fd });
+    if (tab !== "create") fd.append("overwrite", (ow ?? overwrite) ? "1" : "0");
+    const url = tab === "bank" ? "/api/employees/bank-import" : "/api/employees/import";
+    const res = await fetch(url, { method: "POST", body: fd });
     const j = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) return setErr(j.error || "처리에 실패했습니다.");
@@ -52,7 +53,10 @@ export default function EmployeeImport() {
       return;
     }
     alert(
-      tab === "fill"
+      tab === "bank"
+        ? `계좌 등록 완료 — ${j.updatedCount}명 / ${j.changeCount}건` +
+            (j.unmatched?.length ? `\n등록된 직원이 없어 건너뜀: ${j.unmatched.join(", ")}` : "")
+        : tab === "fill"
         ? `채우기 완료 — ${j.updatedCount}명 / ${j.changeCount}건`
         : `등록 완료 — ${j.createdCount}명` +
             (j.skippedCount ? `\n오류로 제외: ${j.skippedCount}명` : "")
@@ -93,7 +97,11 @@ export default function EmployeeImport() {
         <div className="flex items-start justify-between mb-4">
           <div>
             <h2 className="font-bold text-slate-800 text-lg">
-              {tab === "create" ? "직원 명단 일괄 등록" : "기존 직원 정보 채우기"}
+              {tab === "create"
+                ? "직원 명단 일괄 등록"
+                : tab === "fill"
+                ? "기존 직원 정보 채우기"
+                : "급여 계좌 일괄 등록"}
             </h2>
             <p className="text-xs text-slate-500 mt-1">
               {tab === "create" ? (
@@ -101,16 +109,21 @@ export default function EmployeeImport() {
                   엑셀(.xlsx) 또는 CSV 파일을 올리면 내용을 먼저 확인한 뒤 등록합니다.
                   각 직원의 <b>초기 계약</b>도 함께 만들어집니다.
                 </>
-              ) : (
+              ) : tab === "fill" ? (
                 <>
                   이미 등록된 직원의 <b>비어 있는 인적사항</b>(이메일·주민번호·연락처 등)만 채웁니다.
                   기본급·수당 등 보수조건은 계약에서만 바꿀 수 있어 이 화면으로는 변경되지 않습니다.
+                </>
+              ) : (
+                <>
+                  은행 <b>대량이체(파일이체) 양식</b>을 그대로 올리면 <b>예상예금주</b> 이름으로 직원을 찾아
+                  은행·계좌번호를 채웁니다. 입금통장표시가 <b>퇴직유보금</b>인 줄은 유보금 전용 통장으로 들어갑니다.
                 </>
               )}
             </p>
           </div>
           <button
-            className="btn-ghost"
+            className="btn-ghost shrink-0"
             onClick={() => {
               setOpen(false);
               setPreview(null);
@@ -126,6 +139,7 @@ export default function EmployeeImport() {
           {([
             ["create", "신규 등록"],
             ["fill", "정보 채우기"],
+            ["bank", "계좌 등록"],
           ] as Array<[Tab, string]>).map(([k, label]) => (
             <button
               key={k}
@@ -142,12 +156,18 @@ export default function EmployeeImport() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 mb-4">
-          <a
-            href={tab === "fill" ? "/api/employees/import?kind=fill" : "/api/employees/import"}
-            className="btn-outline"
-          >
-            {tab === "fill" ? "직원 명단 깔린 양식 내려받기" : "빈 양식 내려받기"}
-          </a>
+          {tab !== "bank" ? (
+            <a
+              href={tab === "fill" ? "/api/employees/import?kind=fill" : "/api/employees/import"}
+              className="btn-outline"
+            >
+              {tab === "fill" ? "직원 명단 깔린 양식 내려받기" : "빈 양식 내려받기"}
+            </a>
+          ) : (
+            <span className="text-xs text-slate-500">
+              은행에서 내려받은 <b>대량이체 양식(.xls)</b>을 그대로 올리세요.
+            </span>
+          )}
           <button className="btn-primary" onClick={() => fileRef.current?.click()} disabled={busy}>
             {busy ? "읽는 중…" : "파일 선택"}
           </button>
@@ -163,7 +183,7 @@ export default function EmployeeImport() {
 
         {err && <p className="text-sm text-red-600 whitespace-pre-line mb-3">{err}</p>}
 
-        {preview && tab === "fill" && (
+        {preview && tab !== "create" && (
           <>
             <div className="flex flex-wrap gap-3 text-sm mb-3">
               <span className="pill bg-slate-100 text-slate-600">읽은 행 {preview.total}</span>
@@ -173,6 +193,11 @@ export default function EmployeeImport() {
               <span className="pill bg-brand-50 text-brand-700">채울 항목 {preview.changeCount}건</span>
               {preview.errorCount > 0 && (
                 <span className="pill bg-red-50 text-red-700">오류 {preview.errorCount}</span>
+              )}
+              {preview.skipped > 0 && (
+                <span className="pill bg-amber-50 text-amber-700">
+                  계좌가 비어 건너뛴 줄 {preview.skipped}
+                </span>
               )}
             </div>
 
@@ -188,7 +213,11 @@ export default function EmployeeImport() {
               />
               <span>
                 이미 값이 있는 항목도 <b>덮어쓰기</b>
-                <span className="text-slate-400"> (기본은 비어 있는 항목만 채웁니다)</span>
+                <span className="text-slate-400">
+                  {tab === "bank"
+                    ? " (기본은 비어 있는 계좌만 채웁니다 — 잘못 덮어쓰면 돈이 남에게 갑니다)"
+                    : " (기본은 비어 있는 항목만 채웁니다)"}
+                </span>
               </span>
             </label>
 
@@ -203,8 +232,8 @@ export default function EmployeeImport() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(preview.rows ?? []).map((r: any) => (
-                    <tr key={r.rowNo} className={r.errors.length ? "bg-red-50" : ""}>
+                  {(preview.rows ?? []).map((r: any, i: number) => (
+                    <tr key={`${r.rowNo}-${i}`} className={r.errors.length ? "bg-red-50" : ""}>
                       <td className="td tnum text-slate-400">{r.rowNo}</td>
                       <td className="td font-semibold align-top">
                         {r.name}
@@ -213,16 +242,16 @@ export default function EmployeeImport() {
                         )}
                       </td>
                       <td className="td">
-                        {r.changes.map((c: any) => (
-                          <div key={c.field}>
+                        {r.changes.map((c: any, ci: number) => (
+                          <div key={c.field ?? ci}>
                             <span className="text-slate-500">{c.label}</span>{" "}
                             <span className="text-slate-400">{c.from}</span>
                             <span className="text-slate-300"> → </span>
                             <b className="text-emerald-700">{c.to}</b>
                           </div>
                         ))}
-                        {r.kept.map((c: any) => (
-                          <div key={c.field} className="text-slate-300">
+                        {r.kept.map((c: any, ki: number) => (
+                          <div key={c.field ?? `k${ki}`} className="text-slate-300">
                             {c.label} {c.from} → {c.to} (유지)
                           </div>
                         ))}
@@ -234,7 +263,7 @@ export default function EmployeeImport() {
                         {r.errors.map((e: string, i: number) => (
                           <div key={i} className="text-red-600">✕ {e}</div>
                         ))}
-                        {r.warnings.map((w: string, i: number) => (
+                        {(r.warnings ?? []).map((w: string, i: number) => (
                           <div key={i} className="text-amber-600">! {w}</div>
                         ))}
                       </td>
@@ -246,7 +275,9 @@ export default function EmployeeImport() {
 
             <div className="flex items-center justify-between mt-4">
               <p className="text-xs text-slate-400">
-                주민등록번호·계좌번호는 화면에만 가려 표시하고, 저장은 원본으로 됩니다.
+                {tab === "bank"
+                  ? "계좌번호는 화면에만 뒤 4자리로 가려 표시하고, 저장은 원본으로 됩니다."
+                  : "주민등록번호·계좌번호는 화면에만 가려 표시하고, 저장은 원본으로 됩니다."}
               </p>
               <button
                 className="btn-primary"

@@ -14,7 +14,7 @@ import type { DocCompany, DocEmployee, DocContract } from "./documents";
 
 let _taxCache: TaxBracketRow[] | null = null;
 
-export async function getCompany(): Promise<DocCompany & { payday: number }> {
+export async function getCompany(): Promise<DocCompany & { payday: number; transferAlias: string }> {
   const c = await prisma.company.findFirst({ where: { id: 1 } });
   if (!c) {
     return {
@@ -24,6 +24,7 @@ export async function getCompany(): Promise<DocCompany & { payday: number }> {
       phone: "031-794-3306",
       address: "경기도 하남시 미사강변대로 216 한강트윈프라자2 3층",
       payday: 7,
+      transferAlias: "유쌤",
       logo: null,
     };
   }
@@ -36,6 +37,8 @@ export async function getCompany(): Promise<DocCompany & { payday: number }> {
     phone: c.phone,
     address: c.address,
     payday: c.payday,
+    // 은행 이체 파일의 통장표시 약칭 — 상호를 그대로 쓰면 통장 적요 자리가 넘친다
+    transferAlias: ((c as any).transferAlias ?? "").trim() || "유쌤",
     logo: (c as any).logo ?? null,
   };
 }

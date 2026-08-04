@@ -133,6 +133,7 @@ function CompanyCard({ company, onSave }: any) {
   const [f, setF] = useState({
     name: company?.name ?? "", ceo: company?.ceo ?? "", bizNo: company?.bizNo ?? "",
     phone: company?.phone ?? "", address: company?.address ?? "", payday: company?.payday ?? 7,
+    transferAlias: company?.transferAlias ?? "",
   });
   const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v }));
   return (
@@ -144,6 +145,12 @@ function CompanyCard({ company, onSave }: any) {
         <F l="사업자등록번호"><input className="input" value={f.bizNo} onChange={(e) => set("bizNo", e.target.value)} /></F>
         <F l="전화번호"><input className="input" value={f.phone} onChange={(e) => set("phone", e.target.value)} /></F>
         <F l="급여 지급일(익월 n일)"><input type="number" className="input" value={f.payday} onChange={(e) => set("payday", e.target.value)} /></F>
+        <F l="이체 통장표시 약칭">
+          <input className="input" placeholder="유쌤" value={f.transferAlias} onChange={(e) => set("transferAlias", e.target.value)} />
+          <p className="text-[11px] text-slate-400 mt-1">
+            은행 이체 파일에서 직원 통장에 <b>{(f.transferAlias || "유쌤")}_7월급여</b> 로 찍힙니다.
+          </p>
+        </F>
         <F l="회사주소" full><input className="input" value={f.address} onChange={(e) => set("address", e.target.value)} /></F>
       </div>
       <div className="flex justify-end mt-4"><button className="btn-primary" onClick={() => onSave(f)}>저장</button></div>

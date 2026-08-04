@@ -41,6 +41,9 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     slackUserId: initial?.slackUserId ?? "",
     bankName: initial?.bankName ?? "",
     bankAccount: initial?.bankAccount ?? "",
+    bankHolder: initial?.bankHolder ?? "",
+    retentionBank: initial?.retentionBank ?? "",
+    retentionAccount: initial?.retentionAccount ?? "",
     hireDate: initial?.hireDate ? String(initial.hireDate).slice(0, 10) : "",
     contractEnd: "", // 신규 등록 시 초기(기간제) 계약 종료일 — 공란이면 계약서에도 공란
     resignDate: initial?.resignDate ? String(initial.resignDate).slice(0, 10) : "",
@@ -127,8 +130,28 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           <Field label="이메일 (명세서 발송)"><input type="email" className="input" value={f.email} onChange={(e) => set("email", e.target.value)} /></Field>
           <Field label="슬랙 User ID (연차신청)"><input className="input" placeholder="U01234ABC" value={f.slackUserId} onChange={(e) => set("slackUserId", e.target.value)} /></Field>
           <Field label="주소" full><input className="input" value={f.address} onChange={(e) => set("address", e.target.value)} /></Field>
-          <Field label="은행"><input className="input" value={f.bankName} onChange={(e) => set("bankName", e.target.value)} /></Field>
-          <Field label="계좌번호"><input className="input" value={f.bankAccount} onChange={(e) => set("bankAccount", e.target.value)} /></Field>
+        </div>
+      </div>
+
+      {/* 급여 이체 계좌 — 은행 대량이체 파일에 그대로 실린다 */}
+      <div className="card p-5">
+        <h2 className="font-bold text-slate-800 mb-1">급여 이체 계좌</h2>
+        <p className="text-xs text-slate-500 mb-4">
+          급여 화면의 <b>🏦 은행 이체 파일</b>에 그대로 실립니다. 계좌번호는 하이픈을 넣어도 되고,
+          파일로 나갈 때 숫자만 남습니다.
+        </p>
+        <div className="grid md:grid-cols-3 gap-4">
+          <Field label="은행"><input className="input" placeholder="국민은행" value={f.bankName} onChange={(e) => set("bankName", e.target.value)} /></Field>
+          <Field label="계좌번호"><input className="input" placeholder="123-45-678901" value={f.bankAccount} onChange={(e) => set("bankAccount", e.target.value)} /></Field>
+          <Field label="예금주">
+            <input className="input" placeholder={f.name || "(성명과 같으면 비움)"} value={f.bankHolder} onChange={(e) => set("bankHolder", e.target.value)} />
+            <p className="text-[11px] text-slate-400 mt-1">계좌 명의가 본인과 다를 때만 (보호자 명의 등).</p>
+          </Field>
+          <Field label="퇴직유보금 은행"><input className="input" placeholder="(급여 계좌와 같으면 비움)" value={f.retentionBank} onChange={(e) => set("retentionBank", e.target.value)} /></Field>
+          <Field label="퇴직유보금 계좌번호">
+            <input className="input" placeholder="(급여 계좌와 같으면 비움)" value={f.retentionAccount} onChange={(e) => set("retentionAccount", e.target.value)} />
+            <p className="text-[11px] text-slate-400 mt-1">유보금은 급여와 별도 통장으로 송금합니다(확인서 제6조).</p>
+          </Field>
         </div>
       </div>
 

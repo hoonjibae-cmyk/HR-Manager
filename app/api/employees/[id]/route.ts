@@ -27,7 +27,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   const data: any = {};
   const fields = [
     "name", "rrn", "birth", "department", "position", "duty", "address",
-    "phone", "email", "slackUserId", "bankName", "bankAccount",
+    "phone", "email", "slackUserId", "bankName", "bankAccount", "bankHolder",
+    "retentionBank", "retentionAccount",
   ];
   for (const f of fields) if (f in body) data[f] = body[f] || null;
   for (const f of ["dependents", "nonTaxTotal"])
