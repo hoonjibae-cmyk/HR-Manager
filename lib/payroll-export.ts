@@ -4,6 +4,9 @@
 // 원천세 신고와 공제를 하므로 **열 관계가 반드시 맞아떨어져야** 한다.
 //
 //   세전총계   = 세전급여 + 오버타임수당 + 미사용연차수당 + 상여금
+//
+// '오버타임수당' 은 **그 달에 새로 생긴 초과근로분만** 담는다(`variableOvertimeOf`).
+// 포괄임금 약정분(계약서에 이미 포함된 고정 시간외·야간)은 여기 넣지 않고 세전급여로 보낸다.
 //   입금액     = 세전총계 − 공제 − 인센티브유보액 − 월정기주차비(50%)차감 − 실비 − 기타공제
 //
 // '공제' 열은 **법정공제만**(4대보험·소득세·지방소득세) 담는다. 인센티브유보액·주차비는
@@ -22,6 +25,13 @@ export interface ExportPayrollRecord {
   overtimeP: number;
   nightP: number;
   holidayP: number;
+  /** 그 달 실제로 입력·확정된 시간 — '오버타임수당' 열은 오직 이 시간에서만 나온다 */
+  extraHours: number;
+  overtimeHours: number;
+  nightHours: number;
+  holidayHours: number;
+  holidayOverHours: number;
+  hourlyWage: number;
   weeklyHolidayP: number;
   positionP: number;
   mealP: number;
@@ -84,13 +94,37 @@ export function statutoryDeductionOf(r: ExportPayrollRecord): number {
   );
 }
 
+/**
+ * 세무 시트의 '오버타임수당' — **그 달에 실제로 생긴 초과근로분만** 담는다.
+ *
+ * 급여 레코드의 `overtimeP`·`nightP` 에는 **포괄임금 약정분(고정 시간외·야간)이 섞여 있다**.
+ * 그건 계약서에 이미 들어 있는 월 급여의 일부라 매달 같은 금액이고, 초과근로로 새로 생긴 돈이
+ * 아니다. 그대로 이 열에 넣으면 세무사가 매달 오버타임이 발생한 것으로 보게 된다.
+ *
+ * 그래서 금액을 그대로 쓰지 않고 **입력·확정된 시간에서 다시 세운다** — 관리자가 급여 화면에
+ * 손으로 넣었거나 보강·오버타임 메뉴에서 실근무 확정한 시간만 여기 남는다.
+ * 배수와 반올림은 엔진(lib/payroll.ts)과 같은 식이라 값이 어긋나지 않는다.
+ * 빠진 포괄임금 약정분은 '세전급여' 로 들어가므로 세전총계는 그대로다.
+ */
+export function variableOvertimeOf(r: ExportPayrollRecord): number {
+  const hw = r.hourlyWage || 0;
+  const round0 = (x: number) => Math.round(x);
+  return (
+    round0((r.extraHours || 0) * hw) + // 법내연장 — 가산 없음(×1.0)
+    round0((r.overtimeHours || 0) * hw * 1.5) +
+    round0((r.nightHours || 0) * hw * 0.5) + // 야간은 가산분만
+    round0((r.holidayHours || 0) * hw * 1.5) +
+    round0((r.holidayOverHours || 0) * hw * 2) // 휴일 8시간 초과분
+  );
+}
+
 export function buildExportRow(r: ExportPayrollRecord, payDate: string): ExportRow {
-  const overtimePay =
-    (r.extraP || 0) + (r.overtimeP || 0) + (r.nightP || 0) + (r.holidayP || 0);
+  const overtimePay = variableOvertimeOf(r);
   const unusedLeavePay = r.unusedLeaveP || 0;
   const bonus = r.bonusP || 0;
   // 세전급여 = 총계에서 따로 열이 있는 항목들을 뺀 나머지
-  // (기본급·주휴·직책수당·식대·차량유지비·인센티브가 여기 뭉쳐 들어간다 — 원래 시트가 그렇다)
+  // (기본급·주휴·직책수당·식대·차량유지비·인센티브 + **포괄임금 약정분**이 여기 뭉쳐 들어간다.
+  //  약정분은 계약된 월 급여의 일부이므로 오버타임이 아니라 급여 쪽에 있어야 맞다 — 원래 시트가 그렇다)
   const basePay = (r.gross || 0) - overtimePay - unusedLeavePay - bonus;
   return {
     name: `${r.employee.name}선생님`,

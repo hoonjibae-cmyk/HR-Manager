@@ -17,6 +17,12 @@ const rec = (o: Partial<ExportPayrollRecord> & { name: string }): ExportPayrollR
   overtimeP: 0,
   nightP: 0,
   holidayP: 0,
+  extraHours: 0,
+  overtimeHours: 0,
+  nightHours: 0,
+  holidayHours: 0,
+  holidayOverHours: 0,
+  hourlyWage: 0,
   weeklyHolidayP: 0,
   positionP: 0,
   mealP: 0,
@@ -65,6 +71,8 @@ describe("열 관계 — 세무사가 이 표로 신고하므로 반드시 맞�
         name: "이서영",
         baseP: 4_000_000,
         overtimeP: 81_468,
+        extraHours: 4,
+        hourlyWage: 20_367, // 4h × 20,367 = 81,468
         bonusP: 200_000,
         gross: 4_281_468,
         incomeTaxD: 137_160,
@@ -87,6 +95,8 @@ describe("열 관계 — 세무사가 이 표로 신고하므로 반드시 맞�
         name: "이서영",
         gross: 4_281_468,
         overtimeP: 81_468,
+        extraHours: 4,
+        hourlyWage: 20_367,
         bonusP: 200_000,
         incomeTaxD: 137_160,
         localTaxD: 4_120,
@@ -125,6 +135,8 @@ describe("열 관계 — 세무사가 이 표로 신고하므로 반드시 맞�
         name: "배승희",
         gross: 3_426_608,
         overtimeP: 226_608,
+        extraHours: 8,
+        hourlyWage: 28_326, // 8h × 28,326 = 226,608
         incomeTaxD: 102_780,
         localTaxD: 10_280,
         parkingD: 75_000,
@@ -136,6 +148,66 @@ describe("열 관계 — 세무사가 이 표로 신고하므로 반드시 맞�
     expect(r.deduction).toBe(113_060);
     expect(r.netPay).toBe(3_238_548);
     expect(reconcileRow(r)).toBe(0);
+  });
+
+  it("포괄임금 약정분은 오버타임수당에 넣지 않는다 — 계약에 이미 포함된 돈이다", () => {
+    // 하수정 행: 기준급여 500만(식대 20만 포함) + 휴일 8시간(수기 입력) 271,560
+    //   연장 147,489 · 야간 122,907 은 계약서 제4조의 포괄임금 약정분이라 매달 고정이다.
+    const r = buildExportRow(
+      rec({
+        name: "하수정",
+        baseP: 4_529_604,
+        overtimeP: 147_489, // 약정분 (입력 시간 0)
+        nightP: 122_907, // 약정분 (입력 시간 0)
+        holidayP: 271_560,
+        holidayHours: 8,
+        hourlyWage: 22_630, // 8h × 22,630 × 1.5 = 271,560
+        mealP: 200_000,
+        gross: 5_271_560,
+        net: 5_271_560,
+      }),
+      "08월 07일"
+    );
+    // 수기로 넣은 휴일 8시간분만 오버타임으로 잡힌다
+    expect(r.overtimePay).toBe(271_560);
+    // 약정분은 세전급여로 들어가 계약 월 급여총액(500만)과 정확히 맞아떨어진다
+    expect(r.basePay).toBe(5_000_000);
+    expect(r.basePay + r.overtimePay).toBe(r.grossTotal);
+  });
+
+  it("시간 입력이 하나도 없으면 오버타임수당은 0 — 약정분만 있는 달", () => {
+    const r = buildExportRow(
+      rec({
+        name: "하수정",
+        overtimeP: 147_489,
+        nightP: 122_907,
+        hourlyWage: 22_630,
+        gross: 5_000_000,
+        net: 5_000_000,
+      }),
+      "08월 07일"
+    );
+    expect(r.overtimePay).toBe(0);
+    expect(r.basePay).toBe(5_000_000);
+  });
+
+  it("법내연장·연장·야간·휴일·휴일초과가 모두 배수대로 합산된다", () => {
+    const r = buildExportRow(
+      rec({
+        name: "혼합",
+        hourlyWage: 10_000,
+        extraHours: 1, // ×1.0 = 10,000
+        overtimeHours: 2, // ×1.5 = 30,000
+        nightHours: 4, // ×0.5 = 20,000
+        holidayHours: 3, // ×1.5 = 45,000
+        holidayOverHours: 1, // ×2.0 = 20,000
+        gross: 3_125_000,
+        net: 3_125_000,
+      }),
+      "-"
+    );
+    expect(r.overtimePay).toBe(125_000);
+    expect(r.basePay).toBe(3_000_000);
   });
 
   it("'공제' 열에는 법정공제만 담는다 — 유보금·주차비를 섞으면 신고액이 틀어진다", () => {
