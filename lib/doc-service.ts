@@ -118,7 +118,7 @@ export async function genPayslip(payrollId: number) {
   });
   if (!pr) throw new Error("급여기록 없음");
   const company = await getCompany();
-  const payroll: DocPayroll = pr as any;
+  const payroll: DocPayroll = { ...(pr as any), parkingFee: (pr.employee as any).parkingFee ?? 0 };
   const employee = empToDoc(pr.employee);
   const pages = [payslipHtml({ employee, payroll, company })];
 

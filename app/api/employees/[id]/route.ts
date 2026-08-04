@@ -30,7 +30,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     "phone", "email", "slackUserId", "bankName", "bankAccount",
   ];
   for (const f of fields) if (f in body) data[f] = body[f] || null;
-  for (const f of ["dependents", "nonTaxTotal"]) if (f in body) data[f] = Number(body[f]) || 0;
+  // parkingFee(월 정기주차 비용)는 보수조건이 아니라 복리후생이라 여기서 받는다
+  for (const f of ["dependents", "nonTaxTotal", "parkingFee"])
+    if (f in body) data[f] = Math.max(Number(body[f]) || 0, 0);
   if ("hireDate" in body && body.hireDate) data.hireDate = new Date(body.hireDate);
   if ("resignDate" in body) data.resignDate = body.resignDate ? new Date(body.resignDate) : null;
   if ("active" in body) data.active = !!body.active;

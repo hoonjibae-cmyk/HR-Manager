@@ -52,6 +52,7 @@ export async function POST(req: Request) {
     carAllow: Number(body.carAllow) || 0,
     dependents: Number(body.dependents) || 1,
     nonTaxTotal: Number(body.nonTaxTotal) || 0,
+    parkingFee: Math.max(Number(body.parkingFee) || 0, 0),
     incThreshold: body.incThreshold != null && body.incThreshold !== "" ? Number(body.incThreshold) : null,
     incPerStudent: body.incPerStudent != null && body.incPerStudent !== "" ? Number(body.incPerStudent) : null,
     ratioPercent: body.ratioPercent != null && body.ratioPercent !== "" ? Number(body.ratioPercent) : null,

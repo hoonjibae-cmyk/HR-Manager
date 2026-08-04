@@ -48,6 +48,19 @@ export function isContractorContract(
   return e.isContractor === true || e.payScheme === PAY_SCHEME.RATIO;
 }
 
+/**
+ * 월 정기주차 공제율 — 직원 정보의 `parkingFee`(월 정기주차 비용) 중 직원이 부담하는 몫.
+ * 회사와 절반씩 부담하므로 0.5.
+ */
+export const PARKING_DEDUCT_RATE = 0.5;
+
+/** 월 정기주차비에서 직원이 부담할 공제액 (다른 공제와 같이 10원 절사) */
+export function parkingDeductionOf(parkingFee?: number | null): number {
+  const fee = Math.max(Math.round(Number(parkingFee) || 0), 0);
+  if (fee <= 0) return 0;
+  return Math.floor((fee * PARKING_DEDUCT_RATE) / 10) * 10;
+}
+
 /** 위탁계약이라 근로기준법 항목이 빠진다는 안내 문구 (화면·슬랙 공용) */
 export const CONTRACTOR_NOTICE =
   "위탁계약(프리랜서)이라 주휴수당·연차·퇴직금·4대보험이 적용되지 않습니다. " +

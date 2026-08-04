@@ -11,6 +11,7 @@ import {
   type TaxBracketRow,
 } from "./payroll";
 import type { ScheduleDay } from "./constants";
+import { parkingDeductionOf } from "./constants";
 
 const fullTime: ScheduleDay[] = [
   { day: "mon", work: true, start: "09:00", end: "18:00", breakH: 1 },
@@ -927,5 +928,62 @@ describe("위탁계약(프리랜서) — 근로기준법 항목을 일절 싣지
     expect(r.nightP).toBe(0);
     expect(r.baseP).toBe(2_800_000); // 300만 − 식대 20만
     expect(r.gross).toBe(3_000_000);
+  });
+});
+
+describe("parkingDeductionOf — 월 정기주차 공제(50%)", () => {
+  it("월 주차비의 절반을 공제한다", () => {
+    expect(parkingDeductionOf(100_000)).toBe(50_000);
+    expect(parkingDeductionOf(70_000)).toBe(35_000);
+  });
+  it("다른 공제와 같이 10원 절사", () => {
+    expect(parkingDeductionOf(55_555)).toBe(27_770); // 27,777.5 → 27,770
+  });
+  it("입력이 없거나 0이면 공제하지 않는다", () => {
+    expect(parkingDeductionOf(0)).toBe(0);
+    expect(parkingDeductionOf(null)).toBe(0);
+    expect(parkingDeductionOf(undefined)).toBe(0);
+    expect(parkingDeductionOf(-10_000)).toBe(0);
+  });
+});
+
+describe("퇴직유보금 — 인센티브 직원에게 항상, 위탁계약은 제외", () => {
+  const run = (o: any) =>
+    computePayroll(
+      {
+        incomeType: o.incomeType ?? "EMPLOYEE",
+        payScheme: o.payScheme ?? "INCENTIVE",
+        isContractor: o.isContractor ?? false,
+        baseWage: 3_000_000,
+        positionAllow: 0,
+        mealAllow: 0,
+        carAllow: 0,
+        dependents: 1,
+        schedule: instructor,
+        incThreshold: 10,
+        incPerStudent: 100_000,
+      } as EmployeePayInput,
+      { studentCount: o.students ?? 20 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+
+  it("인센티브가 발생하면 8.3%를 유보한다 (근로소득)", () => {
+    const r = run({});
+    expect(r.incentiveP).toBe(1_000_000);
+    expect(r.retentionD).toBe(floor10(1_000_000 / 12));
+  });
+
+  it("사업소득(3.3%) 인센티브 강사도 유보 대상이다", () => {
+    // 위탁계약 체크를 하지 않는 한 세무구분만으로는 빠지지 않는다
+    expect(run({ incomeType: "FREELANCE" }).retentionD).toBe(floor10(1_000_000 / 12));
+  });
+
+  it("위탁계약(프리랜서)이면 유보하지 않는다 — 퇴직급여 대상이 아니다", () => {
+    expect(run({ isContractor: true }).retentionD).toBe(0);
+  });
+
+  it("그 달 인센티브가 0이면 유보액도 0", () => {
+    expect(run({ students: 5 }).retentionD).toBe(0);
   });
 });

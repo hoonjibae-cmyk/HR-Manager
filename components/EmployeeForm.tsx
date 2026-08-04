@@ -58,6 +58,7 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     carAllow: initial?.carAllow ?? 0,
     dependents: initial?.dependents ?? 1,
     nonTaxTotal: initial?.nonTaxTotal ?? 0,
+    parkingFee: initial?.parkingFee ?? 0,
     incThreshold: initial?.incThreshold ?? "",
     incPerStudent: initial?.incPerStudent ?? "",
     ratioPercent: initial?.ratioPercent != null ? initial.ratioPercent * 100 : "",
@@ -179,6 +180,31 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           </Field>
           )}
           <Field label="부양가족수(본인포함)"><input type="number" min={1} className="input" value={f.dependents} onChange={(e) => set("dependents", e.target.value)} /></Field>
+          <Field label="월 정기주차 비용 (원)">
+            <input
+              type="number"
+              min={0}
+              step={1000}
+              className="input"
+              placeholder="없으면 0"
+              value={f.parkingFee}
+              onChange={(e) => set("parkingFee", e.target.value)}
+            />
+            <p className="text-[11px] text-slate-400 mt-1">
+              급여에서 이 금액의 <b>50%</b>
+              {Number(f.parkingFee) > 0 && (
+                <>
+                  {" "}(<b className="text-slate-600">
+                    {Math.floor((Number(f.parkingFee) * 0.5) / 10) * 10 > 0
+                      ? (Math.floor((Number(f.parkingFee) * 0.5) / 10) * 10).toLocaleString()
+                      : 0}
+                    원
+                  </b>)
+                </>
+              )}
+              을 <b>주차비 공제</b>로 자동 반영합니다. 0 이면 공제하지 않습니다.
+            </p>
+          </Field>
           <Field label="연차 적용">
             <select
               className="input"

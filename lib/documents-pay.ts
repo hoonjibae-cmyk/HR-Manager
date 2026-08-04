@@ -41,6 +41,8 @@ export interface DocPayroll {
   localTaxD: number;
   retentionD: number;
   parkingD: number;
+  /** 직원 정보의 월 정기주차 비용 — 명세서에 '× 50%' 근거를 적기 위해서만 쓴다 */
+  parkingFee?: number | null;
   expenseD: number;
   otherD: number;
   otherItems?: string | null; // 기타공제 세부 항목 JSON [{name, amount}]
@@ -364,6 +366,13 @@ export function payslipHtml(args: {
       ? `<div class="small">· 사업소득 원천징수: 지급총액의 3.3%(소득세 3% + 지방소득세 0.3%) 공제</div>`
       : `<div class="small">· 4대보험 및 근로소득세는 관계법령·간이세액표(또는 세무대리인 산정액)에 따릅니다.</div>`}
     ${p.retentionD ? `<div class="small">· 퇴직유보금: 인센티브 원천액의 8.3%로, 확인서에 따라 별도 통장으로 송금·적립됩니다.</div>` : ""}
+    ${
+      p.parkingD
+        ? `<div class="small">· 주차비 공제: 월 정기주차 비용의 <b>50%</b>(본인 부담분)입니다${
+            p.parkingFee ? ` — 월 ${won(p.parkingFee)}원 × 50% = <b>${won(p.parkingD)}원</b>` : ""
+          }. 나머지 50%는 회사가 부담합니다.</div>`
+        : ""
+    }
     <div class="small">· 본 명세서는 근로기준법 제48조에 따라 교부됩니다.</div>
   </div>`;
 }

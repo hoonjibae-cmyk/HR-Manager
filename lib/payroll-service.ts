@@ -9,6 +9,7 @@ import {
 import { getActiveRates, getTaxTable, empToPayInput } from "./repo";
 import { summarizeIncentive, type RosterStudent } from "./incentive";
 import { overtimeInputsFor } from "./makeup-service";
+import { parkingDeductionOf } from "./constants";
 
 export interface PayrollInputMap {
   [employeeId: number]: MonthlyInput;
@@ -432,8 +433,12 @@ export async function runPayrollMonth(
         incomeTaxD: existing?.incomeTaxD ?? 0,
         localTaxD: existing?.localTaxD ?? 0,
       },
+      // 퇴직유보금은 인센티브 계약자에게 늘 자동(위탁계약은 엔진이 제외한다)
       retentionD: r.retentionD,
-      parkingD: existing?.parkingD ?? 0,
+      // 월 정기주차 공제 = 직원 정보의 월 주차비 × 50%.
+      // 이미 값이 들어 있으면(사람이 고쳤거나 앞선 기본값) 그대로 두고, 0 일 때만 기본값을 채운다 —
+      // 직원 정보에 주차비를 나중에 넣어도 다음 산정에서 자동으로 반영되게 하기 위함이다.
+      parkingD: existing?.parkingD || parkingDeductionOf((emp as any).parkingFee),
       expenseD: existing?.expenseD ?? 0,
       otherD: existing?.otherD ?? 0,
       gross: r.gross,

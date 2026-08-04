@@ -52,6 +52,7 @@ interface Rec {
     department: string | null;
     position: string | null;
     isContractor?: boolean;
+    parkingFee?: number;
   };
 }
 
@@ -670,7 +671,9 @@ export default function PayrollClient() {
           <p>
             · <b>공제</b>: 공제액 숫자를 클릭하면 편집창이 열립니다. 기본은 <b>수동입력</b>(세무사 지정값)이며,
             "자동 산출"로 전환하면 4대보험·간이세액표 기준으로 자동 계산됩니다.
-            퇴직유보금(인센티브×8.3%)·주차비·실비(±)·기타공제도 편집창에서 입력합니다.
+            <b>퇴직유보금</b>(인센티브×8.3%)과 <b>주차비</b>(직원 정보의 월 정기주차×50%)는
+            <b>기본값이 자동으로 채워지고</b>, 편집창에서 그 달만 다르게 고칠 수 있습니다.
+            실비(±)·기타공제도 편집창에서 입력합니다.
             &nbsp;· 월중 입·퇴사자는 <b>일할계산</b>이 자동 적용됩니다.
           </p>
         </div>
@@ -762,10 +765,22 @@ function DeductionEditor({ rec, onSaved, onClose }: { rec: Rec; onSaved: () => P
         )}
         <DedField label={isFree ? "소득세(3%)" : "근로소득세"} v={f.incomeTaxD} onChange={(v) => set("incomeTaxD", v)} disabled={!manual} />
         <DedField label="지방소득세" v={f.localTaxD} onChange={(v) => set("localTaxD", v)} disabled={!manual} />
-        {rec.payScheme === "INCENTIVE" && (
-          <DedField label="퇴직유보금(8.3%)" v={f.retentionD} onChange={(v) => set("retentionD", v)} />
-        )}
-        <DedField label="주차비 공제" v={f.parkingD} onChange={(v) => set("parkingD", v)} />
+        {rec.payScheme === "INCENTIVE" &&
+          !isContractorContract({
+            payScheme: rec.payScheme,
+            isContractor: rec.employee?.isContractor,
+          }) && (
+            <DedField label="퇴직유보금(8.3%)" v={f.retentionD} onChange={(v) => set("retentionD", v)} />
+          )}
+        <DedField
+          label={
+            rec.employee?.parkingFee
+              ? `주차비 공제 (월 ${rec.employee.parkingFee.toLocaleString()}원 × 50%)`
+              : "주차비 공제"
+          }
+          v={f.parkingD}
+          onChange={(v) => set("parkingD", v)}
+        />
         <DedField label="실비 정산(±)" v={f.expenseD} onChange={(v) => set("expenseD", v)} allowNegative />
       </div>
       {/* 기타공제 — 이름을 직접 기입하는 항목 리스트 */}
@@ -820,6 +835,9 @@ function DeductionEditor({ rec, onSaved, onClose }: { rec: Rec; onSaved: () => P
           : "자동 산출: 4대보험·소득세를 요율·간이세액표로 재계산합니다. 회색 칸은 자동으로 채워집니다."}
         &nbsp;실비 정산은 음수(-) 입력 시 환급(지급 증가)으로 처리됩니다.
         {rec.payScheme === "INCENTIVE" && " 퇴직유보금 기본값은 인센티브 원천액의 8.3%입니다(확인서 기준)."}
+        {rec.employee?.parkingFee
+          ? ` 주차비 기본값은 직원 정보의 월 정기주차 ${rec.employee.parkingFee.toLocaleString()}원의 50%입니다.`
+          : " 주차비를 매달 자동으로 넣으려면 직원 정보에 '월 정기주차 비용' 을 입력하세요."}
       </p>
     </div>
   );
