@@ -367,10 +367,14 @@ export function payslipHtml(args: {
       : `<div class="small">· 4대보험 및 근로소득세는 관계법령·간이세액표(또는 세무대리인 산정액)에 따릅니다.</div>`}
     ${p.retentionD ? `<div class="small">· 퇴직유보금: 인센티브 원천액의 8.3%로, 확인서에 따라 별도 통장으로 송금·적립됩니다.</div>` : ""}
     ${
-      p.parkingD
+      p.parkingD > 0
         ? `<div class="small">· 주차비 공제: 월 정기주차 비용의 <b>50%</b>(본인 부담분)입니다${
             p.parkingFee ? ` — 월 ${won(p.parkingFee)}원 × 50% = <b>${won(p.parkingD)}원</b>` : ""
           }. 나머지 50%는 회사가 부담합니다.</div>`
+        : p.parkingD < 0
+        ? `<div class="small">· 주차비 정산: 앞달 과다공제분 등을 <b>${won(
+            Math.abs(p.parkingD)
+          )}원</b> 환급하여 공제에서 차감했습니다 — 그만큼 실수령액이 늘어납니다.</div>`
         : ""
     }
     <div class="small">· 본 명세서는 근로기준법 제48조에 따라 교부됩니다.</div>

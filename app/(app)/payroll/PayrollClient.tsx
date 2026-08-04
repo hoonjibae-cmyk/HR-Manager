@@ -775,11 +775,12 @@ function DeductionEditor({ rec, onSaved, onClose }: { rec: Rec; onSaved: () => P
         <DedField
           label={
             rec.employee?.parkingFee
-              ? `주차비 공제 (월 ${rec.employee.parkingFee.toLocaleString()}원 × 50%)`
-              : "주차비 공제"
+              ? `주차비 공제(±) (월 ${rec.employee.parkingFee.toLocaleString()}원 × 50%)`
+              : "주차비 공제(±)"
           }
           v={f.parkingD}
           onChange={(v) => set("parkingD", v)}
+          allowNegative
         />
         <DedField label="실비 정산(±)" v={f.expenseD} onChange={(v) => set("expenseD", v)} allowNegative />
       </div>
@@ -833,10 +834,10 @@ function DeductionEditor({ rec, onSaved, onClose }: { rec: Rec; onSaved: () => P
         {manual
           ? "수동입력: 4대보험·소득세는 세무사 지정값을 입력하세요. 저장 시 실수령액이 재계산됩니다."
           : "자동 산출: 4대보험·소득세를 요율·간이세액표로 재계산합니다. 회색 칸은 자동으로 채워집니다."}
-        &nbsp;실비 정산은 음수(-) 입력 시 환급(지급 증가)으로 처리됩니다.
+        &nbsp;<b>주차비·실비 정산은 음수(−)</b> 입력 시 환급(지급 증가)으로 처리됩니다 — 앞달 과다공제분을 되돌릴 때 씁니다.
         {rec.payScheme === "INCENTIVE" && " 퇴직유보금 기본값은 인센티브 원천액의 8.3%입니다(확인서 기준)."}
         {rec.employee?.parkingFee
-          ? ` 주차비 기본값은 직원 정보의 월 정기주차 ${rec.employee.parkingFee.toLocaleString()}원의 50%입니다.`
+          ? ` 주차비 기본값은 직원 정보의 월 정기주차 ${rec.employee.parkingFee.toLocaleString()}원의 50%입니다 — 0 으로 비우면 다음 재산정 때 기본값이 다시 채워지니, 그 달만 빼려면 (−)로 상계하세요.`
           : " 주차비를 매달 자동으로 넣으려면 직원 정보에 '월 정기주차 비용' 을 입력하세요."}
       </p>
     </div>
