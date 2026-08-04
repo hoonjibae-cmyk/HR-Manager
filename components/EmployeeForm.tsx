@@ -181,28 +181,38 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           )}
           <Field label="부양가족수(본인포함)"><input type="number" min={1} className="input" value={f.dependents} onChange={(e) => set("dependents", e.target.value)} /></Field>
           <Field label="월 정기주차 비용 (원)">
+            {/* (−) 를 허용한다 — 매달 돌려줄 몫이 있으면 음수로 넣어 두면 공제가 (−)로 잡힌다 */}
             <input
               type="number"
-              min={0}
               step={1000}
               className="input"
-              placeholder="없으면 0"
+              placeholder="없으면 0 · 환급이면 (−)"
               value={f.parkingFee}
               onChange={(e) => set("parkingFee", e.target.value)}
             />
             <p className="text-[11px] text-slate-400 mt-1">
-              급여에서 이 금액의 <b>50%</b>
-              {Number(f.parkingFee) > 0 && (
-                <>
-                  {" "}(<b className="text-slate-600">
-                    {Math.floor((Number(f.parkingFee) * 0.5) / 10) * 10 > 0
-                      ? (Math.floor((Number(f.parkingFee) * 0.5) / 10) * 10).toLocaleString()
-                      : 0}
-                    원
-                  </b>)
-                </>
-              )}
-              을 <b>주차비 공제</b>로 자동 반영합니다. 0 이면 공제하지 않습니다.
+              {(() => {
+                const fee = Math.round(Number(f.parkingFee) || 0);
+                const half =
+                  fee === 0
+                    ? 0
+                    : (fee < 0 ? -1 : 1) * (Math.floor((Math.abs(fee) * 0.5) / 10) * 10);
+                if (half === 0)
+                  return <>급여에서 이 금액의 <b>50%</b>를 <b>주차비 공제</b>로 자동 반영합니다. 0 이면 공제하지 않습니다.</>;
+                if (half < 0)
+                  return (
+                    <>
+                      매달 <b className="text-emerald-700">{Math.abs(half).toLocaleString()}원</b>을{" "}
+                      <b>주차비 환급</b>(공제 −)으로 자동 반영합니다 — 실수령액이 그만큼 늘어납니다.
+                    </>
+                  );
+                return (
+                  <>
+                    급여에서 이 금액의 <b>50%</b>(<b className="text-slate-600">{half.toLocaleString()}원</b>)를{" "}
+                    <b>주차비 공제</b>로 자동 반영합니다. 나머지 50%는 회사가 부담합니다.
+                  </>
+                );
+              })()}
             </p>
           </Field>
           <Field label="연차 적용">

@@ -54,11 +54,18 @@ export function isContractorContract(
  */
 export const PARKING_DEDUCT_RATE = 0.5;
 
-/** 월 정기주차비에서 직원이 부담할 공제액 (다른 공제와 같이 10원 절사) */
+/**
+ * 월 정기주차비에서 직원이 부담할 공제액 (다른 공제와 같이 10원 절사).
+ *
+ * **음수를 허용한다** — 매달 돌려줄 몫이 있으면 주차비를 (−)로 넣어 두면 공제가 (−)로 잡혀
+ * 실수령액이 그만큼 늘어난다. 절사는 부호가 아니라 **크기** 기준이라, 환급액이 절사 때문에
+ * 되레 커지지 않는다(−17,777.5 → −17,770).
+ */
 export function parkingDeductionOf(parkingFee?: number | null): number {
-  const fee = Math.max(Math.round(Number(parkingFee) || 0), 0);
-  if (fee <= 0) return 0;
-  return Math.floor((fee * PARKING_DEDUCT_RATE) / 10) * 10;
+  const fee = Math.round(Number(parkingFee) || 0);
+  if (fee === 0) return 0;
+  const sign = fee < 0 ? -1 : 1;
+  return sign * (Math.floor((Math.abs(fee) * PARKING_DEDUCT_RATE) / 10) * 10);
 }
 
 /** 위탁계약이라 근로기준법 항목이 빠진다는 안내 문구 (화면·슬랙 공용) */

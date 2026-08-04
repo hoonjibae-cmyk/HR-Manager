@@ -774,9 +774,11 @@ function DeductionEditor({ rec, onSaved, onClose }: { rec: Rec; onSaved: () => P
           )}
         <DedField
           label={
-            rec.employee?.parkingFee
-              ? `주차비 공제(±) (월 ${rec.employee.parkingFee.toLocaleString()}원 × 50%)`
-              : "주차비 공제(±)"
+            !rec.employee?.parkingFee
+              ? "주차비 공제(±)"
+              : rec.employee.parkingFee < 0
+              ? `주차비 환급(±) (월 ${Math.abs(rec.employee.parkingFee).toLocaleString()}원 × 50%)`
+              : `주차비 공제(±) (월 ${rec.employee.parkingFee.toLocaleString()}원 × 50%)`
           }
           v={f.parkingD}
           onChange={(v) => set("parkingD", v)}

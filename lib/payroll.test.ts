@@ -943,7 +943,14 @@ describe("parkingDeductionOf — 월 정기주차 공제(50%)", () => {
     expect(parkingDeductionOf(0)).toBe(0);
     expect(parkingDeductionOf(null)).toBe(0);
     expect(parkingDeductionOf(undefined)).toBe(0);
-    expect(parkingDeductionOf(-10_000)).toBe(0);
+  });
+  it("음수는 환급 — 매달 돌려줄 몫이 있으면 (−)로 넣는다", () => {
+    expect(parkingDeductionOf(-70_000)).toBe(-35_000);
+    expect(parkingDeductionOf(-100_000)).toBe(-50_000);
+  });
+  it("절사는 부호가 아니라 크기 기준 — 환급이 절사로 되레 커지지 않는다", () => {
+    expect(parkingDeductionOf(55_555)).toBe(27_770);
+    expect(parkingDeductionOf(-55_555)).toBe(-27_770); // −27,780 이 아니다
   });
 });
 
