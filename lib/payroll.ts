@@ -588,14 +588,30 @@ export function computePayroll(
     localTaxD = floor10(incomeTaxD * rates.localIncomeTaxRate);
   }
 
-  // --- 퇴직유보금: 인센티브 계약은 인센티브 원천액의 8.3%를 별도통장 송금(공제) ---
+  // --- 퇴직유보금: 인센티브 계약은 **인센티브와 상여금**의 1/12(8.3%)를 별도통장 송금(공제) ---
+  // 상여금도 퇴직금 산정의 평균임금에 들어가므로 함께 적립한다(확인서 제6조).
   // 위탁계약은 퇴직급여 대상이 아니므로 유보하지 않는다.
+  //
+  // 다른 공제와 달리 **10원 절사를 하지 않고 원 단위로 반올림**한다 — 세무사무소에 넘기던
+  // 기존 시트가 그렇게 적립해 왔다(상여 200,000원 → 16,667원. 절사하면 16,660원이 되어 어긋난다).
+  // 유보금은 법정공제가 아니라 직원 몫으로 떼어 두는 돈이라 깎지 않는 쪽이 맞기도 하다.
   let retentionD = 0;
-  if (!contractor && emp.payScheme === "INCENTIVE" && incentiveP > 0) {
-    retentionD = floor10(incentiveP * RETENTION_RATE);
-    notes.push(
-      `퇴직유보금: 인센티브 ${incentiveP.toLocaleString()}원 × 1/12(8.3%) (별도통장 송금)`
-    );
+  if (!contractor && emp.payScheme === "INCENTIVE") {
+    const incPart = Math.max(incentiveP, 0);
+    const bonusPart = Math.max(bonusP, 0);
+    const retentionBase = incPart + bonusPart;
+    if (retentionBase > 0) {
+      retentionD = round0(retentionBase * RETENTION_RATE);
+      const parts = [
+        incPart > 0 ? `인센티브 ${incPart.toLocaleString()}원` : "",
+        bonusPart > 0 ? `상여금 ${bonusPart.toLocaleString()}원` : "",
+      ].filter(Boolean);
+      // 항목이 둘이면 괄호를 씌운다 — "인센티브 + 상여금 × 1/12" 로 읽히면 안 된다
+      const basis = parts.length > 1 ? `(${parts.join(" + ")})` : parts[0];
+      notes.push(
+        `퇴직유보금: ${basis} × 1/12(8.3%) = ${retentionD.toLocaleString()}원 (별도통장 송금)`
+      );
+    }
   }
 
   const otherD = 0;

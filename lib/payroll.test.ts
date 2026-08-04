@@ -970,20 +970,46 @@ describe("퇴직유보금 — 인센티브 직원에게 항상, 위탁계약은 
         incThreshold: 10,
         incPerStudent: 100_000,
       } as EmployeePayInput,
-      { studentCount: o.students ?? 20 },
+      { studentCount: o.students ?? 20, bonus: o.bonus ?? 0 },
       DEFAULT_RATES_2025,
       smallTaxTable
     );
 
-  it("인센티브가 발생하면 8.3%를 유보한다 (근로소득)", () => {
+  it("인센티브가 발생하면 1/12 을 유보한다 (근로소득)", () => {
     const r = run({});
     expect(r.incentiveP).toBe(1_000_000);
-    expect(r.retentionD).toBe(floor10(1_000_000 / 12));
+    expect(r.retentionD).toBe(Math.round(1_000_000 / 12)); // 83,333
   });
 
   it("사업소득(3.3%) 인센티브 강사도 유보 대상이다", () => {
     // 위탁계약 체크를 하지 않는 한 세무구분만으로는 빠지지 않는다
-    expect(run({ incomeType: "FREELANCE" }).retentionD).toBe(floor10(1_000_000 / 12));
+    expect(run({ incomeType: "FREELANCE" }).retentionD).toBe(Math.round(1_000_000 / 12));
+  });
+
+  it("상여금도 유보 대상 — 인센티브가 0이어도 상여만으로 유보된다", () => {
+    // 세무사무소 시트의 이서영 행: 상여 200,000 → 유보액 16,667
+    const r = run({ students: 5, bonus: 200_000 });
+    expect(r.incentiveP).toBe(0);
+    expect(r.bonusP).toBe(200_000);
+    expect(r.retentionD).toBe(16_667);
+  });
+
+  it("인센티브와 상여금이 함께 있으면 합쳐서 1/12", () => {
+    const r = run({ bonus: 200_000 });
+    expect(r.retentionD).toBe(Math.round((1_000_000 + 200_000) / 12)); // 100,000
+  });
+
+  it("10원 절사가 아니라 원 단위 반올림 — 기존 시트의 16,667 을 그대로 재현한다", () => {
+    expect(run({ students: 5, bonus: 200_000 }).retentionD).toBe(16_667);
+    expect(floor10(200_000 / 12)).toBe(16_660); // 절사였다면 이 값이라 시트와 어긋난다
+  });
+
+  it("월급제·시급제는 상여가 있어도 유보하지 않는다 (인센티브 계약만 해당)", () => {
+    expect(run({ payScheme: "MONTHLY", bonus: 200_000 }).retentionD).toBe(0);
+  });
+
+  it("위탁계약은 상여가 있어도 유보하지 않는다", () => {
+    expect(run({ isContractor: true, bonus: 200_000 }).retentionD).toBe(0);
   });
 
   it("위탁계약(프리랜서)이면 유보하지 않는다 — 퇴직급여 대상이 아니다", () => {
