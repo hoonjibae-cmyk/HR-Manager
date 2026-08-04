@@ -990,22 +990,22 @@ describe("퇴직유보금 — 인센티브 직원에게 항상, 위탁계약은 
     expect(run({ incomeType: "FREELANCE" }).retentionD).toBe(Math.round(1_000_000 / 12));
   });
 
-  it("상여금도 유보 대상 — 인센티브가 0이어도 상여만으로 유보된다", () => {
-    // 세무사무소 시트의 이서영 행: 상여 200,000 → 유보액 16,667
+  it("상여금은 유보 대상이 아니다 — 비정기 특별상여 자리이므로", () => {
     const r = run({ students: 5, bonus: 200_000 });
     expect(r.incentiveP).toBe(0);
     expect(r.bonusP).toBe(200_000);
-    expect(r.retentionD).toBe(16_667);
+    expect(r.retentionD).toBe(0);
   });
 
-  it("인센티브와 상여금이 함께 있으면 합쳐서 1/12", () => {
-    const r = run({ bonus: 200_000 });
-    expect(r.retentionD).toBe(Math.round((1_000_000 + 200_000) / 12)); // 100,000
+  it("상여가 있어도 유보는 인센티브분만 본다", () => {
+    const r = run({ bonus: 500_000 }); // 인센티브 자동산정 1,000,000
+    expect(r.retentionD).toBe(Math.round(1_000_000 / 12)); // 상여 500,000 은 무시
   });
 
   it("10원 절사가 아니라 원 단위 반올림 — 기존 시트의 16,667 을 그대로 재현한다", () => {
-    expect(run({ students: 5, bonus: 200_000 }).retentionD).toBe(16_667);
-    expect(floor10(200_000 / 12)).toBe(16_660); // 절사였다면 이 값이라 시트와 어긋난다
+    // 인센티브 200,000 → 16,667 (시트 이서영 행). 절사였다면 16,660 이라 어긋난다
+    expect(run({ students: 5, incentiveManual: 200_000 }).retentionD).toBe(16_667);
+    expect(floor10(200_000 / 12)).toBe(16_660);
   });
 
   it("인센티브 금액을 직접 넣으면 그대로 잡히고 유보 대상에도 들어간다", () => {
@@ -1022,12 +1022,12 @@ describe("퇴직유보금 — 인센티브 직원에게 항상, 위탁계약은 
     expect(r.notes.join()).toContain("자동산정분에 가산");
   });
 
-  it("월급제·시급제는 상여가 있어도 유보하지 않는다 (인센티브 계약만 해당)", () => {
-    expect(run({ payScheme: "MONTHLY", bonus: 200_000 }).retentionD).toBe(0);
+  it("월급제·시급제는 유보하지 않는다 (인센티브 계약만 해당)", () => {
+    expect(run({ payScheme: "MONTHLY", incentiveManual: 200_000 }).retentionD).toBe(0);
   });
 
-  it("위탁계약은 상여가 있어도 유보하지 않는다", () => {
-    expect(run({ isContractor: true, bonus: 200_000 }).retentionD).toBe(0);
+  it("위탁계약은 인센티브가 있어도 유보하지 않는다", () => {
+    expect(run({ isContractor: true }).retentionD).toBe(0);
   });
 
   it("위탁계약(프리랜서)이면 유보하지 않는다 — 퇴직급여 대상이 아니다", () => {

@@ -549,6 +549,16 @@ export default function PayrollClient() {
                     {r.prorationRatio < 1 && (r.payScheme === "MONTHLY" || r.payScheme === "INCENTIVE") && (
                       <div className="text-[10px] text-amber-600 mt-0.5">일할 {(r.prorationRatio * 100).toFixed(0)}%</div>
                     )}
+                    {/* 인센티브 칸이 없던 시절 상여 칸에 인센티브를 넣던 흔적 —
+                        그대로 두면 퇴직유보금(인센티브×1/12)이 잡히지 않는다 */}
+                    {r.payScheme === "INCENTIVE" && r.bonusP > 0 && r.incentiveP === 0 && (
+                      <div
+                        className="text-[10px] text-amber-700 mt-0.5"
+                        title="퇴직유보금은 인센티브 금액에만 붙습니다. 상여 칸에 넣은 인센티브는 유보 대상에서 빠집니다."
+                      >
+                        ⚠️ 상여만 있고 인센티브 0 — 인센티브 칸으로 옮기세요
+                      </div>
+                    )}
                   </td>
                   <td className="td w-px">
                     <div className="flex flex-col items-start gap-1">
@@ -839,7 +849,7 @@ function DeductionEditor({ rec, onSaved, onClose }: { rec: Rec; onSaved: () => P
             payScheme: rec.payScheme,
             isContractor: rec.employee?.isContractor,
           }) && (
-            <DedField label="퇴직유보금 (인센티브+상여 × 1/12)" v={f.retentionD} onChange={(v) => set("retentionD", v)} />
+            <DedField label="퇴직유보금 (인센티브 × 1/12)" v={f.retentionD} onChange={(v) => set("retentionD", v)} />
           )}
         <DedField
           label={
@@ -906,7 +916,7 @@ function DeductionEditor({ rec, onSaved, onClose }: { rec: Rec; onSaved: () => P
           ? "수동입력: 4대보험·소득세는 세무사 지정값을 입력하세요. 저장 시 실수령액이 재계산됩니다."
           : "자동 산출: 4대보험·소득세를 요율·간이세액표로 재계산합니다. 회색 칸은 자동으로 채워집니다."}
         &nbsp;<b>주차비·실비 정산은 음수(−)</b> 입력 시 환급(지급 증가)으로 처리됩니다 — 앞달 과다공제분을 되돌릴 때 씁니다.
-        {rec.payScheme === "INCENTIVE" && " 퇴직유보금 기본값은 인센티브+상여금 원천액의 8.3%(1/12)입니다(확인서 기준)."}
+        {rec.payScheme === "INCENTIVE" && " 퇴직유보금 기본값은 인센티브 원천액의 8.3%(1/12)입니다(확인서 기준) — 상여금은 대상이 아니므로 인센티브는 '인센티브' 칸에 넣으세요."}
         {rec.employee?.parkingFee
           ? ` 주차비 기본값은 직원 정보의 월 정기주차 ${rec.employee.parkingFee.toLocaleString()}원의 50%입니다 — 0 으로 비우면 다음 재산정 때 기본값이 다시 채워지니, 그 달만 빼려면 (−)로 상계하세요.`
           : " 주차비를 매달 자동으로 넣으려면 직원 정보에 '월 정기주차 비용' 을 입력하세요."}

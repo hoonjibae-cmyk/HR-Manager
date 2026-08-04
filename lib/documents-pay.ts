@@ -365,7 +365,7 @@ export function payslipHtml(args: {
     ${isFree
       ? `<div class="small">· 사업소득 원천징수: 지급총액의 3.3%(소득세 3% + 지방소득세 0.3%) 공제</div>`
       : `<div class="small">· 4대보험 및 근로소득세는 관계법령·간이세액표(또는 세무대리인 산정액)에 따릅니다.</div>`}
-    ${p.retentionD ? `<div class="small">· 퇴직유보금: <b>인센티브·상여금</b> 원천액의 8.3%(1/12)로, 확인서에 따라 별도 통장으로 송금·적립됩니다.</div>` : ""}
+    ${p.retentionD ? `<div class="small">· 퇴직유보금: 인센티브 원천액의 8.3%(1/12)로, 확인서에 따라 별도 통장으로 송금·적립됩니다.</div>` : ""}
     ${
       p.parkingD > 0
         ? `<div class="small">· 주차비 공제: 월 정기주차 비용의 <b>50%</b>(본인 부담분)입니다${
