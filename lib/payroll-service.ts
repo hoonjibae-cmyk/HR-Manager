@@ -401,6 +401,12 @@ export async function runPayrollMonth(
       } else if (mInput.studentUnits === undefined) {
         mInput.studentUnits = existing?.studentUnits ?? null;
       }
+      // 직접 넣은 학생수·인센티브 금액도 배치 재실행 때 잃지 않는다
+      // (화면은 매번 전부 보내지만, 입력 없이 API 를 부르면 0 으로 지워졌었다)
+      if (mInput.studentCount === undefined)
+        mInput.studentCount = existing?.studentCount ?? null;
+      if (mInput.incentiveManual === undefined)
+        mInput.incentiveManual = existing?.incentiveManual ?? 0;
     }
 
     const r = computePayroll(payInput, mInput, rates, tax);

@@ -29,6 +29,7 @@ interface Rec {
   nightHours: number;
   studentCount: number | null;
   studentUnits: number | null;
+  incentiveManual: number;
   classRevenue: number | null;
   bonus: number;
   unusedLeaveDays: number;
@@ -66,6 +67,7 @@ function rowInputsOf(r: Rec) {
     holidayHours: r.holidayHours || "",
     nightHours: r.nightHours || "",
     studentCount: r.studentCount ?? "",
+    incentiveManual: r.incentiveManual || "",
     classRevenue: r.classRevenue ?? "",
     bonus: r.bonus || "",
     unusedLeaveDays: r.unusedLeaveDays || "",
@@ -80,6 +82,7 @@ function cleanRowInput(v: any) {
     holidayHours: v.holidayHours ? Number(v.holidayHours) : 0,
     nightHours: v.nightHours ? Number(v.nightHours) : 0,
     studentCount: v.studentCount !== "" && v.studentCount != null ? Number(v.studentCount) : null,
+    incentiveManual: v.incentiveManual ? Number(v.incentiveManual) : 0,
     classRevenue: v.classRevenue !== "" && v.classRevenue != null ? Number(v.classRevenue) : null,
     bonus: v.bonus ? Number(v.bonus) : 0,
     unusedLeaveDays: v.unusedLeaveDays ? Number(v.unusedLeaveDays) : 0,
@@ -504,8 +507,14 @@ export default function PayrollClient() {
                 <th className="th">
                   {/* 입력칸 라벨은 여기 한 번만 — 행마다 반복하면 폭이 두 배가 되고 값도 라벨에 밀린다.
                       아래 각 행의 그리드와 **같은 열 정의**를 써야 위아래가 맞는다. */}
-                  <div className="grid grid-cols-[4.25rem_repeat(4,2.75rem)_4.5rem_2.75rem_auto] items-center gap-x-1.5 font-normal normal-case tracking-normal text-[10px] text-slate-400">
+                  <div className="grid grid-cols-[4.25rem_4.5rem_repeat(4,2.6rem)_4.5rem_2.75rem_auto] items-center gap-x-1.5 font-normal normal-case tracking-normal text-[10px] text-slate-400">
                     <span className="truncate" title="인센티브=학생수 · 완전비율제=반 매출">학생/매출</span>
+                    <span
+                      className="truncate"
+                      title="인센티브 금액을 직접 넣습니다. 학생수 자동산정을 쓰는 달이면 그 위에 더해집니다."
+                    >
+                      인센티브
+                    </span>
                     <span title="평일 소정근로 외·토요일 중 1일 8h·주 40h 이내 (가산 없음)">추가h</span>
                     <span title="1일 8시간·주 40시간 초과분 (×1.5)">연장h</span>
                     <span title="일요일·공휴일 근무 (×1.5)">휴일h</span>
@@ -559,7 +568,7 @@ export default function PayrollClient() {
                     {/* 급여형태마다 필요한 입력이 달라도 **같은 열에 서도록** 고정폭 그리드로 둔다.
                         예전엔 flex-wrap 이라 인센티브 행만 두 줄로 접히고 위탁 행은 텅 비어
                         행 높이와 라벨 위치가 제각각이었다. 안 쓰는 칸은 빈 칸으로 자리만 지킨다. */}
-                    <div className="grid grid-cols-[4.25rem_repeat(4,2.75rem)_4.5rem_2.75rem_auto] items-center gap-x-1.5">
+                    <div className="grid grid-cols-[4.25rem_4.5rem_repeat(4,2.6rem)_4.5rem_2.75rem_auto] items-center gap-x-1.5">
                       {/* ① 학생수(인센티브) / 매출(비율제) */}
                       <div>
                         {r.payScheme === "INCENTIVE" &&
@@ -578,7 +587,19 @@ export default function PayrollClient() {
                         )}
                       </div>
 
-                      {/* ②~⑤ 법정가산 시간 — 위탁계약은 대상이 아니라 칸 자체를 비운다 */}
+                      {/* ② 인센티브 금액 직접 입력 (월급+인센티브 계약자만) */}
+                      <div>
+                        {r.payScheme === "INCENTIVE" && (
+                          <InlineInput
+                            label=""
+                            title="인센티브 금액 (학생수 자동산정분이 있으면 그 위에 더해집니다)"
+                            value={inputs[r.employeeId]?.incentiveManual ?? ""}
+                            onChange={(v) => setInput(r.employeeId, "incentiveManual", v)}
+                          />
+                        )}
+                      </div>
+
+                      {/* ③~⑥ 법정가산 시간 — 위탁계약은 대상이 아니라 칸 자체를 비운다 */}
                       {statutory ? (
                         <>
                           <InlineInput label="" title="추가h (법내연장)" value={inputs[r.employeeId]?.extraHours ?? ""} onChange={(v) => setInput(r.employeeId, "extraHours", v)} />

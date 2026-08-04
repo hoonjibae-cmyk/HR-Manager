@@ -507,7 +507,18 @@ export function computePayroll(
       );
     }
   }
-  incentiveP += month.incentiveManual ?? 0;
+  // 학생수 자동산정 위에 관리자가 직접 넣은 금액을 더한다 (둘 중 하나만 써도 된다)
+  const incManual = month.incentiveManual ?? 0;
+  if (emp.payScheme === "INCENTIVE" && incManual !== 0) {
+    incentiveP += incManual;
+    notes.push(
+      incentiveP === incManual
+        ? `인센티브: 직접 입력 ${incManual.toLocaleString()}원`
+        : `인센티브 직접 입력 ${incManual > 0 ? "+" : ""}${incManual.toLocaleString()}원 (자동산정분에 가산)`
+    );
+  } else {
+    incentiveP += incManual;
+  }
 
   // --- 추가(법내연장)/연장/야간/휴일 (월 입력) ---
   // 위탁계약은 §56 가산 대상이 아니라 시간이 입력돼 있어도 수당으로 잡지 않는다.

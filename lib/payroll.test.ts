@@ -970,7 +970,11 @@ describe("퇴직유보금 — 인센티브 직원에게 항상, 위탁계약은 
         incThreshold: 10,
         incPerStudent: 100_000,
       } as EmployeePayInput,
-      { studentCount: o.students ?? 20, bonus: o.bonus ?? 0 },
+      {
+        studentCount: o.students ?? 20,
+        bonus: o.bonus ?? 0,
+        incentiveManual: o.incentiveManual ?? 0,
+      },
       DEFAULT_RATES_2025,
       smallTaxTable
     );
@@ -1002,6 +1006,20 @@ describe("퇴직유보금 — 인센티브 직원에게 항상, 위탁계약은 
   it("10원 절사가 아니라 원 단위 반올림 — 기존 시트의 16,667 을 그대로 재현한다", () => {
     expect(run({ students: 5, bonus: 200_000 }).retentionD).toBe(16_667);
     expect(floor10(200_000 / 12)).toBe(16_660); // 절사였다면 이 값이라 시트와 어긋난다
+  });
+
+  it("인센티브 금액을 직접 넣으면 그대로 잡히고 유보 대상에도 들어간다", () => {
+    // 학생수가 기준 미달(자동산정 0)이어도 직접 입력분은 살아 있다
+    const r = run({ students: 5, incentiveManual: 600_000 });
+    expect(r.incentiveP).toBe(600_000);
+    expect(r.retentionD).toBe(Math.round(600_000 / 12)); // 50,000
+    expect(r.notes.join()).toContain("인센티브: 직접 입력 600,000원");
+  });
+
+  it("학생수 자동산정분 위에 직접 입력분이 더해진다", () => {
+    const r = run({ incentiveManual: 200_000 }); // 자동산정 1,000,000
+    expect(r.incentiveP).toBe(1_200_000);
+    expect(r.notes.join()).toContain("자동산정분에 가산");
   });
 
   it("월급제·시급제는 상여가 있어도 유보하지 않는다 (인센티브 계약만 해당)", () => {
