@@ -701,3 +701,94 @@ describe("computePayroll — 인센티브 가중 인원(명단 기반)", () => {
     expect(r.incentiveP).toBe(150_000); // (41.5-40) × 100,000
   });
 });
+
+describe("반올림 잔차 — 지급 합계는 언제나 계약 총액과 정확히 일치한다", () => {
+  const sch: ScheduleDay[] = ["mon", "tue", "wed", "thu", "fri"].map((d) => ({
+    day: d as ScheduleDay["day"],
+    work: true,
+    start: "14:00",
+    end: "22:00",
+    breakH: 0.5,
+  }));
+
+  const run = (o: {
+    baseWage: number;
+    scheme?: "MONTHLY" | "INCENTIVE";
+    baseHours?: number | null;
+    ot?: number;
+    night?: number;
+    meal?: number;
+    car?: number;
+    pos?: number;
+    prorate?: number;
+  }) =>
+    computePayroll(
+      {
+        incomeType: "EMPLOYEE",
+        payScheme: o.scheme ?? "MONTHLY",
+        baseWage: o.baseWage,
+        positionAllow: o.pos ?? 0,
+        mealAllow: o.meal ?? 0,
+        carAllow: o.car ?? 0,
+        dependents: 1,
+        schedule: sch,
+        fixedBaseHours: o.baseHours ?? null,
+        fixedOtHours: o.ot ?? 0,
+        fixedNightHours: o.night ?? 0,
+      } as EmployeePayInput,
+      { prorationRatio: o.prorate ?? 1 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+
+  it("포괄임금 약정이 있어도 총액이 1원도 어긋나지 않는다 (홍경지 3,400,000)", () => {
+    // 고치기 전에는 약정 시간외·야간을 반올림 전 값으로 빼서 3,399,999 가 나왔다
+    const r = run({ baseWage: 3_400_000, baseHours: 209, ot: 8, night: 8, meal: 200_000 });
+    expect(r.gross).toBe(3_400_000);
+  });
+
+  it("반대로 1원이 더 붙지도 않는다 (김영서 2,700,000)", () => {
+    const r = run({ baseWage: 2_700_000, baseHours: 209, ot: 5, night: 10, meal: 200_000 });
+    expect(r.gross).toBe(2_700_000);
+  });
+
+  it("일할계산 + 식대 조합도 어긋나지 않는다 (약정시간이 없어도 새던 경우)", () => {
+    const p = 30 / 31;
+    const r = run({ baseWage: 3_400_000, baseHours: 209, meal: 200_000, prorate: p });
+    expect(r.gross).toBe(Math.round(3_400_000 * p));
+  });
+
+  it("직책수당은 총액에 가산되고 그 합도 정확하다", () => {
+    const r = run({ baseWage: 2_700_000, baseHours: 209, ot: 12, meal: 200_000, pos: 300_000 });
+    expect(r.gross).toBe(3_000_000);
+  });
+
+  it("잔차는 전부 기본급이 흡수한다 — 항목 합계 = 기준급여", () => {
+    const iw = inclusiveWageBreakdown({
+      baseWage: 3_400_000,
+      mealAllow: 200_000,
+      baseHours: 209,
+      otHours: 8,
+      nightHours: 8,
+    });
+    expect(iw.basePay + iw.nonTax + iw.overtimePay + iw.nightPay).toBe(3_400_000);
+    expect(iw.target).toBe(3_400_000);
+  });
+
+  it("여러 조건을 훑어도 총액이 항상 맞는다", () => {
+    const off: string[] = [];
+    for (const baseWage of [3_400_000, 2_700_000, 2_345_678, 1_999_999])
+      for (const baseHours of [209, 174])
+        for (const ot of [0, 5, 8, 12])
+          for (const night of [0, 4, 10])
+            for (const meal of [0, 200_000, 133_333])
+              for (const pos of [0, 111_111])
+                for (const prorate of [1, 0.5, 17 / 31]) {
+                  const r = run({ baseWage, baseHours, ot, night, meal, pos, prorate });
+                  const want = Math.round(baseWage * prorate) + Math.round(pos * prorate);
+                  if (r.gross !== want)
+                    off.push(`${baseWage}/${baseHours}/${ot}/${night}/${meal}/${pos}/${prorate}: ${r.gross} ≠ ${want}`);
+                }
+    expect(off).toEqual([]);
+  });
+});

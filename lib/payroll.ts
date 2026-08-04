@@ -248,6 +248,11 @@ export interface InclusiveWageBreakdown {
   basePay: number;
   nonTax: number; // 식대+차량유지비
   hasFixed: boolean;
+  /**
+   * 이 분해가 맞춰야 할 월 지급 총액 = round0(기준급여 × 일할비율).
+   * `basePay + nonTax(반올림분) + overtimePay + nightPay` 가 항상 이 값과 정확히 같다.
+   */
+  target: number;
 }
 
 /**
@@ -274,11 +279,17 @@ export function inclusiveWageBreakdown(t: InclusiveWageTerms): InclusiveWageBrea
 
   const overtimePay = round0(exactHourly * 1.5 * otHours * prorate);
   const nightPay = round0(exactHourly * 0.5 * nightHours * prorate);
-  const basePay = round0(
-    Math.max(t.baseWage - nonTax, 0) * prorate -
-      exactHourly * 1.5 * otHours * prorate -
-      exactHourly * 0.5 * nightHours * prorate
-  );
+
+  // 기본급은 '잔액' — **이미 반올림한** 항목들을 뺀 나머지로 둔다.
+  // 반올림 전 값으로 빼면 각 항목이 흘린 소수점 잔차가 기본급에 남지 않고 합계에 새어
+  // 계약 총액과 1원씩 어긋난다(3,400,000 → 3,399,999). 잔차는 전부 기본급이 흡수한다.
+  //
+  // 비과세(식대·차량유지비)도 급여 산정과 **같은 식**으로 반올림해야 맞물린다 —
+  // computePayroll 의 mealP/carP 가 각각 round0(수당 × prorate) 이므로 여기서도 따로 반올림한다.
+  const target = round0(t.baseWage * prorate); // 이 계약이 그 달에 지급해야 할 총액
+  const nonTaxPaid =
+    round0((t.mealAllow || 0) * prorate) + round0((t.carAllow || 0) * prorate);
+  const basePay = Math.max(target - nonTaxPaid - overtimePay - nightPay, 0);
 
   return {
     hourlyWage: round0(exactHourly),
@@ -291,6 +302,8 @@ export function inclusiveWageBreakdown(t: InclusiveWageTerms): InclusiveWageBrea
     basePay,
     nonTax,
     hasFixed,
+    /** 이 분해가 맞춰야 할 월 지급 총액 (기본급 + 비과세 + 약정 시간외 + 약정 야간) */
+    target,
   };
 }
 
