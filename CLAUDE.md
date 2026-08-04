@@ -27,6 +27,18 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   없고 재배포 없이 화면에서 바꿔야 하기 때문. 설정 화면(`components/LogoUpload.tsx`)이 브라우저에서
   긴 변 320px 로 줄여 올리므로 원본 png 를 그대로 골라도 된다. 문서 머리글은 `logoImg(company)`,
   화면은 사이드바·로그인에서 쓴다. 없으면 회사명만 나온다.
+- **법인 인감(직인)**: `Company.stamp` — 로고와 같은 data URI 방식(`components/StampUpload.tsx`,
+  `POST/DELETE /api/settings/stamp`, 검증은 `lib/company-image.ts` 를 로고와 공유).
+  찍히는 곳은 **회사가 날인하는 자리뿐**이다: 계약서 "갑" 의 대표자(`signDuo`)와 재직·경력증명서의
+  대표이사. 서약서·동의서는 직원이 회사에 내는 문서라 회사 도장을 찍지 않고, 계약서 "을" 성명 옆도
+  본인이 직접 날인할 자리라 `(인)` 글자로 남긴다(`companySeal()` / `stampImg()`, 테스트 있음).
+  인감이 없으면 예전처럼 `(인)`·`(직인)` 글자만 나온다.
+  **자리를 차지하지 않게 절대배치**한다(`.stamp-anchor` 가 0×0, lib/pdf.ts) — 실물 도장처럼 이름 위에
+  겹쳐 찍히면서 줄 높이를 밀지 않는다. 자리를 차지하면 2페이지로 맞춰 둔 계약서가 3페이지로 늘어난다.
+  크기는 A4 기준 **20mm**(계약서 축소본 17mm) — 법인인감은 가로·세로 1cm 초과 3cm 이내다.
+  증명서는 `-78%` 로 더 올려 상호·대표이사 사이에 걸치게 한다(기본값이면 밑의 주소 잔글씨를 덮는다).
+  업로드는 **반드시 PNG 로 내보낸다** — JPG 면 투명 배경이 검게 채워져 이름을 가린다.
+  **이미 발급된 PDF 는 바뀌지 않는다**(발급 시점에 찍히므로 다시 발급해야 한다).
 - **문서→PDF**: `lib/documents.ts`(계약서/서약서/동의서), `lib/documents-pay.ts`(명세서/증명서) 가
   HTML 을 만들고 `lib/pdf.ts` 가 puppeteer-core 로 PDF 렌더(Vercel=@sparticuz/chromium, 로컬=설치된 Chrome/Edge).
   한글폰트는 `assets/fonts/` 를 base64 임베드(`lib/fonts.ts`).
@@ -272,6 +284,8 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 
 ## 자주 하는 작업
 - **계약서 문구 수정** → `lib/documents.ts` 의 `contractHtml`.
+- **법인 인감 등록·교체** → 설정 → *법인 인감(직인)* 에 누끼(배경 제거)된 PNG 를 올린다.
+  크기·위치를 바꾸려면 `lib/pdf.ts` 의 `.stamp-anchor .stamp-img`.
 - **직원 보수조건 변경** → 직원 상세 → 계약 이력 → *조건 수정*(오타 정정) 또는 *신규 계약 작성*(변경 발효일 지정).
 - **포괄임금 약정시간 입력** → 계약 폼(신규 계약 작성 / 조건 수정)의 *포괄임금 약정시간* 접이식 영역.
   시간만 넣으면 기본급·시간외·야간 금액이 자동 분해되어 계약서 제4조와 명세서에 함께 반영된다.

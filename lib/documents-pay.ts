@@ -2,7 +2,7 @@
 
 import { won, wonUnit, ymd, ymdKo } from "./format";
 import { INCOME_TYPE_LABEL } from "./constants";
-import { logoImg, type DocCompany, type DocEmployee } from "./documents";
+import { logoImg, stampImg, type DocCompany, type DocEmployee } from "./documents";
 import {
   summarizeIncentive,
   STUDENT_STATUS_LABEL,
@@ -406,7 +406,7 @@ export function certEmploymentHtml(args: {
     <div class="date-center">${ymdKo(issue)}</div>
     <div style="margin-top:18px;font-size:13pt">
       <div style="font-weight:800;font-size:16pt;letter-spacing:0.02em">${esc(c.name)}</div>
-      <div style="margin-top:6px">대표이사 ${esc(c.ceo)} <span class="seal">(직인)</span></div>
+      <div style="margin-top:6px">대표이사 ${esc(c.ceo)} ${c.stamp ? stampImg(c) : '<span class="seal">(직인)</span>'}</div>
       <div class="small" style="margin-top:3px">${esc(c.address)} · ${esc(c.phone)}</div>
     </div>
   </div>`;
@@ -454,7 +454,7 @@ export function certCareerHtml(args: {
     <div class="date-center">${ymdKo(issue)}</div>
     <div style="margin-top:18px;font-size:13pt">
       <div style="font-weight:800;font-size:16pt;letter-spacing:0.02em">${esc(c.name)}</div>
-      <div style="margin-top:6px">대표이사 ${esc(c.ceo)} <span class="seal">(직인)</span></div>
+      <div style="margin-top:6px">대표이사 ${esc(c.ceo)} ${c.stamp ? stampImg(c) : '<span class="seal">(직인)</span>'}</div>
     </div>
   </div>`;
 }

@@ -26,6 +26,7 @@ export async function getCompany(): Promise<DocCompany & { payday: number; trans
       payday: 7,
       transferAlias: "유쌤",
       logo: null,
+      stamp: null,
     };
   }
   return {
@@ -40,6 +41,7 @@ export async function getCompany(): Promise<DocCompany & { payday: number; trans
     // 은행 이체 파일의 통장표시 약칭 — 상호를 그대로 쓰면 통장 적요 자리가 넘친다
     transferAlias: ((c as any).transferAlias ?? "").trim() || "유쌤",
     logo: (c as any).logo ?? null,
+    stamp: (c as any).stamp ?? null,
   };
 }
 

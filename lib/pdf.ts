@@ -283,6 +283,14 @@ table.kv.sched{table-layout:fixed;}
 .sign-party{font-weight:800;color:#1f2d5a;margin:8px 0 2px;font-size:10pt;}
 .sign-row{display:flex;justify-content:space-between;margin:8px 0;}
 .seal{color:#c0392b;font-weight:700;}
+/* 법인 인감 — 앵커가 0×0 이라 줄 높이를 밀지 않는다. 실물 도장처럼 이름 위에 살짝 겹쳐 찍힌다.
+   자리를 차지하면 2페이지로 맞춰 둔 계약서가 3페이지로 늘어난다. */
+.stamp-anchor{position:relative;display:inline-block;width:0;height:0;vertical-align:baseline;}
+.stamp-anchor .stamp-img{position:absolute;left:-3mm;top:0;transform:translateY(-55%);
+  width:20mm;height:20mm;object-fit:contain;}
+/* 증명서 발급인 블록 — 상호와 대표이사 사이에 걸치게 위로 올린다.
+   기본값(-55%)이면 도장이 아래로 흘러 바로 밑의 주소·전화 잔글씨를 덮는다. */
+.doc-foot .stamp-anchor .stamp-img{left:1mm;transform:translateY(-78%);}
 .date-center{text-align:center;margin:14px 0 6px;font-size:11pt;letter-spacing:0.05em;}
 table.pay{width:100%;border-collapse:collapse;margin-top:8px;}
 table.pay th,table.pay td{border:1px solid #cbd5e1;padding:6px 9px;font-size:9.6pt;}
@@ -332,6 +340,7 @@ table.kv{page-break-inside:avoid;break-inside:avoid;}
 .compact table.kv th,.compact table.kv td{padding:2.5px 6px;font-size:8.4pt;}
 .compact table.kv th{width:92px;}
 .compact .inline-sign{font-size:8.4pt;margin:0 0 2px;}
+.compact .stamp-anchor .stamp-img{width:17mm;height:17mm;}
 .compact .hosub{margin:1.5px 0 1.5px 28px;}
 .compact .footnote{font-size:7.9pt;margin:1px 0 1px 13px;}
 .compact .muted{font-size:8.2pt;}

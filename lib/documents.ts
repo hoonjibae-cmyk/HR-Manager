@@ -14,6 +14,8 @@ export interface DocCompany {
   payday?: number;
   /** 학원 로고 (data URI). 없으면 문서 머리에 회사명만 나온다 */
   logo?: string | null;
+  /** 법인 인감/직인 (data URI). 없으면 `(인)`·`(직인)` 글자만 찍힌다 */
+  stamp?: string | null;
 }
 export interface DocEmployee {
   name: string;
@@ -83,6 +85,25 @@ export function logoImg(c: DocCompany): string {
   return c.logo ? `<img class="clogo" src="${c.logo}" alt=""/>` : "";
 }
 
+/**
+ * 법인 인감(직인) — 등록돼 있으면 `(인)`·`(직인)` 글자 자리에 도장을 찍는다.
+ *
+ * **자리를 차지하지 않게 절대배치**한다(`.stamp-anchor` 가 0×0). 실물 도장처럼 이름 위에
+ * 살짝 겹쳐 찍히면서도 줄 높이를 밀지 않아, 2페이지로 맞춰 둔 계약서가 3페이지로 늘어나지 않는다.
+ * 크기는 A4 인쇄 기준 20mm(계약서 축소본 17mm) — 법인인감은 가로·세로 1cm 초과 3cm 이내다
+ * (인감증명법 시행령 §11). 없으면 예전처럼 글자만 남아 손도장을 찍을 자리가 된다.
+ */
+export function stampImg(c: DocCompany, alt = "직인"): string {
+  return c.stamp
+    ? `<span class="stamp-anchor"><img class="stamp-img" src="${c.stamp}" alt="${esc(alt)}"/></span>`
+    : "";
+}
+
+/** 회사 날인 자리 — 도장이 있으면 도장, 없으면 `(인)` 글자 */
+function companySeal(c: DocCompany, label = "(인)"): string {
+  return c.stamp ? stampImg(c) : `<span class="seal">${label}</span>`;
+}
+
 function companyHead(c: DocCompany, tag?: string): string {
   return `<div class="company-head">
     <div class="cbrand">${logoImg(c)}
@@ -94,12 +115,22 @@ function companyHead(c: DocCompany, tag?: string): string {
   </div>`;
 }
 
-/** 서명 필드 (라벨 + 값/밑줄) */
-function sigField(label: string, value?: string | null, seal = false): string {
+/**
+ * 서명 필드 (라벨 + 값/밑줄).
+ * `stamp` 를 주면 `(인)` 자리에 법인 인감을 찍는다 — **"갑"(회사) 쪽에만** 준다.
+ * "을"(직원) 칸은 본인이 직접 날인할 자리라 언제나 글자로 남긴다.
+ */
+function sigField(
+  label: string,
+  value?: string | null,
+  seal = false,
+  stamp?: DocCompany | null
+): string {
+  const mark = seal ? ` ${stamp ? companySeal(stamp) : '<span class="seal">(인)</span>'}` : "";
   if (value) {
-    return `<div class="f"><span class="lbl">${esc(label)}</span><b>${esc(value)}</b>${seal ? ' <span class="seal">(인)</span>' : ""}</div>`;
+    return `<div class="f"><span class="lbl">${esc(label)}</span><b>${esc(value)}</b>${mark}</div>`;
   }
-  return `<div class="f"><span class="lbl">${esc(label)}</span><span class="fill">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>${seal ? ' <span class="seal">(인)</span>' : ""}</div>`;
+  return `<div class="f"><span class="lbl">${esc(label)}</span><span class="fill">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>${mark}</div>`;
 }
 
 /** 계약 당사자 서명 박스 (갑/을 나란히) — 원문 양식 필드 순서 */
@@ -110,7 +141,7 @@ function signDuo(c: DocCompany, e: DocEmployee, partyB: string): string {
         <div class="sign-box"><div class="sign-grid one">
           ${sigField("회사명", c.name)}
           ${sigField("주소지", c.address)}
-          ${sigField("대표자", c.ceo, true)}
+          ${sigField("대표자", c.ceo, true, c)}
           ${sigField("전화번호", c.phone)}
         </div></div>
       </div>
