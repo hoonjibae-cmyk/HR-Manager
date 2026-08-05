@@ -66,6 +66,21 @@ body {
     @apply bg-slate-50;
     box-shadow: inset 0 -1px 0 #e2e8f0;
   }
+  /**
+   * 표 합계 줄 고정 — 머리글(`.sticky-head`)의 짝. 스크롤해도 바닥에 붙어 있는다.
+   * tfoot 과 td 에 둘 다 거는 이유는 머리글과 같다.
+   * 위 경계선은 border 가 아니라 inset shadow — sticky 셀의 border 는 스크롤할 때 밀려 사라진다.
+   */
+  .sticky-foot {
+    @apply sticky bottom-0 z-10;
+  }
+  .sticky-foot > tr > td {
+    @apply sticky bottom-0 z-10;
+  }
+  .sticky-foot td {
+    @apply bg-slate-50 font-bold text-slate-700;
+    box-shadow: inset 0 1px 0 #cbd5e1;
+  }
   .stat-num {
     @apply text-2xl font-bold text-slate-900 tabular-nums;
   }

@@ -378,6 +378,24 @@ export default function PayrollClient() {
   }, [recs, q, filter]);
 
   const { sorted, sort, toggle, resetSort } = useTableSort(filtered, pickRec, "payroll.sort");
+
+  /**
+   * 지금 보이는 행의 소계 — 표 맨 아래에 붙여 둔다.
+   * 필터를 걸면 그 묶음의 합이 되므로(예: 사업소득만 31명) 위 합계 카드(그 달 전체)와
+   * 나란히 놓고 볼 수 있다. 열 밑에 그대로 정렬돼야 읽히므로 카드가 아니라 표 안에 둔다.
+   */
+  const sub = React.useMemo(
+    () =>
+      sorted.reduce(
+        (a, r) => ({
+          gross: a.gross + r.gross,
+          deduct: a.deduct + r.totalDeduct,
+          net: a.net + r.net,
+        }),
+        { gross: 0, deduct: 0, net: 0 }
+      ),
+    [sorted]
+  );
   // 정렬도 기억하므로 '되돌릴 게 있는지' 판단에 함께 넣는다
   const dirty = !!(q || filter.scheme || filter.income || filter.status || sort);
   const resetView = () => {
@@ -847,6 +865,26 @@ export default function PayrollClient() {
                 );
               })}
             </tbody>
+            {/* 소계 — 지금 보이는 행의 합. 스크롤해도 바닥에 붙어 금액 열 밑에 그대로 정렬된다.
+                열은 8개(직원·형태·변동입력·지급액·공제액·실수령·상태·명세서)라 3 + 3 + 2 로 나눈다. */}
+            <tfoot className="sticky-foot">
+              <tr>
+                <td className="td" colSpan={3}>
+                  {dirty ? (
+                    <>
+                      <span className="text-brand-700">거른 {sorted.length}명 소계</span>
+                      <span className="font-normal text-slate-400"> · 전체 {recs.length}명</span>
+                    </>
+                  ) : (
+                    `합계 ${recs.length}명`
+                  )}
+                </td>
+                <td className="td text-right tnum">{won(sub.gross)}</td>
+                <td className="td text-right tnum">{won(sub.deduct)}</td>
+                <td className="td text-right tnum text-brand-700">{won(sub.net)}</td>
+                <td className="td" colSpan={2} />
+              </tr>
+            </tfoot>
           </table>
         )}
         </div>
