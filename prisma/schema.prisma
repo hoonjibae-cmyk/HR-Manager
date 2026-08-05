@@ -616,3 +616,32 @@ model TimesheetDay {
   @@unique([employeeId, date])
   @@index([date])
 }
+
+/// 퇴직급여 산정 조건 (단일 행, id=1). 화면(퇴직급여 → 산정 조건)에서 수정한다.
+///
+/// 유쌤에듀는 **근속 1년이 지나면 DC형 퇴직연금에 가입**한다. 그 전 기간은 납입할 계정이
+/// 없어 회사가 충당금으로 쌓아 두고, 1년을 넘기면 입사일부터 전체 기간이 지급 대상이 되므로
+/// (근로자퇴직급여보장법 §8①) 그 충당금이 곧 **소급 납입할 몫**이 된다.
+///
+/// 산입 범위를 상수가 아니라 설정으로 둔 이유: 무엇을 임금총액에 넣을지는 노무 자문으로
+/// 바뀔 수 있는 판단이다. 상수로 두면 바꿀 때마다 배포해야 하고, 무엇을 뺐는지가 화면에
+/// 남지 않는다.
+model SeverancePolicy {
+  id Int @id @default(1)
+
+  /// 근속 몇 개월이 지나면 DC 부담금으로 넘어가는가 (유쌤에듀 = 12개월)
+  dcAfterMonths  Int   @default(12)
+  /// 연간 임금총액을 나누는 수 — 법정 하한이 1/12 이다 (근로자퇴직급여보장법 §20①)
+  divisor        Int   @default(12)
+  /// 이 시간 미만이면 대상에서 뺀다 (§4① 단서 = 주 15시간)
+  minWeeklyHours Float @default(15)
+
+  // 산입 범위 — 기본값은 '상여·인센티브·오버타임 제외'
+  includeBonus       Boolean @default(false) // 비정기 특별상여
+  includeIncentive   Boolean @default(false) // 이미 퇴직유보금으로 1/12 을 떼고 있다
+  includeOvertime    Boolean @default(false) // ⚠ 끄면 법정 하한에 미달할 수 있다
+  includeUnusedLeave Boolean @default(true)
+  includeMealCar     Boolean @default(true) // 비과세지만 정기·일률 지급이면 임금이다
+
+  updatedAt DateTime @updatedAt
+}
