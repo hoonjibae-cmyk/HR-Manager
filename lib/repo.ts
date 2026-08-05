@@ -132,6 +132,8 @@ export function empToDoc(e: any): DocEmployee {
     carAllow: e.carAllow,
     schedule: e.schedule,
     breakPaid: e.breakPaid ?? false,
+    retentionBank: e.retentionBank ?? null,
+    retentionAccount: e.retentionAccount ?? null,
   };
 }
 
@@ -151,6 +153,7 @@ export function contractToDoc(ct: any): DocContract {
     incThreshold: ct.incThreshold,
     incPerStudent: ct.incPerStudent,
     incRevenuePercent: ct.incRevenuePercent,
+    isContractor: ct.isContractor ?? false,
     fixedBaseHours: ct.fixedBaseHours,
     fixedOtHours: ct.fixedOtHours,
     fixedNightHours: ct.fixedNightHours,

@@ -5,6 +5,18 @@ import { won, wonUnit, ymd, ymdKo, maskRRN } from "./format";
 import { DAY_KO, PAY_SCHEME_LABEL, parseSchedule, type ScheduleDay } from "./constants";
 import { computeWeeklyHours, inclusiveWageBreakdown, WEEKS_PER_MONTH } from "./payroll";
 
+/**
+ * 부서가 정하는 서류 정책 — 어떤 서류를 발급할지.
+ * 실제 값은 DB(`Department`)에서 오지만, 문서 모듈이 DB 를 끌어오지 않도록 모양만 여기 둔다
+ * (구조적 타이핑이라 `lib/departments.ts` 의 DeptRow 가 그대로 들어맞는다).
+ */
+export interface DeptDocPolicy {
+  docPledgeServiceII: boolean;
+  docPromotion: boolean;
+  docHealth: boolean;
+  docNonCompete: boolean;
+}
+
 export interface DocCompany {
   name: string;
   ceo: string;
@@ -37,6 +49,9 @@ export interface DocEmployee {
   carAllow: number;
   schedule: string;
   breakPaid?: boolean;
+  /** 퇴직유보금 전용 통장 — 퇴직유보금 확인서에 적는다 */
+  retentionBank?: string | null;
+  retentionAccount?: string | null;
 }
 export interface DocContract {
   stage: string;
@@ -54,6 +69,8 @@ export interface DocContract {
   incPerStudent?: number | null;
   /** 매출 비율 인센티브 (0.15 = 15%) — 인원 기준과 다른 갈래 */
   incRevenuePercent?: number | null;
+  /** 위탁계약(프리랜서) — 개인사업자 지위 확인서가 함께 나간다 */
+  isContractor?: boolean | null;
   /** 포괄임금 — 기본급 산정시간(월). 없으면 근로시간표에서 환산 */
   fixedBaseHours?: number | null;
   /** 포괄임금 — 약정(고정) 시간외근로시간(월) */
@@ -575,16 +592,43 @@ export function incentiveContractHtml(args: {
 }
 
 /** 계약서 본문 페이지 목록 (인센티브 계약은 별지 「인센티브 산정 계약서」 포함) */
+/**
+ * 계약서 세트 — 계약서 + 그 계약의 성질상 함께 받아야 하는 확인서.
+ *
+ * **갱신계약에서도 그대로 붙는다.** 신규입사 때는 해당이 없다가 갱신하면서 인센티브·비율제나
+ * 위탁계약으로 바뀌는 일이 있는데, 그때 확인서를 따로 챙기지 않으면 근거 없이 유보금을 떼거나
+ * 위탁으로 처리하게 된다. 그래서 계약 조건을 보고 그 자리에서 함께 낸다.
+ */
 export function contractBodies(args: {
   employee: DocEmployee;
   contract: DocContract;
   company: DocCompany;
 }): string[] {
+  const { employee, company, contract } = args;
   const bodies = [contractHtml(args)];
-  const isIncentive =
-    args.contract.templateKey === "INCENTIVE" || args.employee.payScheme === "INCENTIVE";
-  if (isIncentive) bodies.push(incentiveContractHtml(args));
+  const scheme = paySchemeOfTemplate(contract.templateKey) ?? employee.payScheme;
+
+  // 인센티브 산정 계약서 (별지)
+  if (scheme === "INCENTIVE") bodies.push(incentiveContractHtml(args));
+
+  // 퇴직유보금 확인서 — 인센티브·비율제. 유보금을 떼는 근거가 이 확인서다.
+  if (scheme === "INCENTIVE" || scheme === "RATIO")
+    bodies.push(confirmRetentionHtml({ employee, company }));
+
+  // 개인사업자 지위 확인서 — 위탁계약(프리랜서). 완전비율제는 성질상 언제나 위탁이다.
+  const contractor = contract.isContractor === true || scheme === "RATIO";
+  if (contractor) bodies.push(confirmSoleProprietorHtml({ employee, company }));
+
   return bodies;
+}
+
+/** 계약서 종류 → 급여형태. 계약이 진실이므로 카드보다 이쪽을 먼저 본다 */
+function paySchemeOfTemplate(templateKey: string): string | null {
+  if (templateKey === "INCENTIVE") return "INCENTIVE";
+  if (templateKey === "RATIO") return "RATIO";
+  if (templateKey === "HOURLY") return "HOURLY";
+  if (templateKey === "MONTHLY" || templateKey === "REGULAR") return "MONTHLY";
+  return null;
 }
 
 /* ============================ 복무서약서 ============================ */
@@ -691,16 +735,353 @@ export function consentDeductionHtml(args: { employee: DocEmployee; company: Doc
   </div>`;
 }
 
+/* ========================== 복무서약서-II (강의 운영) ========================== */
+/**
+ * 강의 시간표·반 배정·교재 선정 등 **강의 운영에 관한 회사 권한**을 확인하는 서약.
+ * 강의를 맡지 않는 부서에는 뜻이 없으므로 부서 정책(`docPledgeServiceII`)으로 가른다.
+ */
+export function pledgeServiceIIHtml(args: {
+  employee: DocEmployee;
+  company: DocCompany;
+  date?: Date;
+}): string {
+  const { employee: e, company: c } = args;
+  const date = args.date ?? new Date();
+  const sub = (items: string[]) =>
+    items.map((t, i) => `<p class="sub">${"가나다라마바사아자차".charAt(i)}. ${esc(t)}</p>`).join("");
+
+  return `${companyHead(c)}
+  <div class="doc-title">복무서약서 - II</div>
+  <p><b>${esc(c.name)}</b> (이하 "회사") 와 <b>${esc(e.name)}</b> (이하 "본인") 은(는) 재직기간 중 아래 사항을 준수할 것을 서약합니다.</p>
+  <p style="text-align:center" class="muted">- 아 래 -</p>
+
+  <div class="clause">
+    <p class="list-num">1. 본인은 근로계약서 정해진 근로계약범위 내에서 진행되는 강의와 관련한 아래의 모든 사항들은 <b>회사의 고유 권한</b>임에 동의하며, 정당한 사유 없이 회사가 정한 내용에 대해 불복하지 아니한다.</p>
+    ${sub([
+      "강의 시간표 (강의 시간, 강의 대상 학교, 강의 대상 학년, 강의 대상 레벨 등 반구성과 관련된 일체)",
+      "기존 수강생의 반 배정 및 반 이동",
+      "신규 등록 수강생의 반 배정",
+      "회사 내 신규반의 개설 혹은 기존반의 폐지에 따른 본인 담당 수강생의 전출 및 전입",
+      "강의 시간표의 변동 (정기적 혹은 비정기적 변동 모두 포함)",
+    ])}
+
+    <p class="list-num">2. 본인은 아래의 사항들은 회사의 고유 권한에 동의하며 정당한 사유 없이 회사가 정한 내용에 대해 불복하지 아니한다. 단, 회사의 요청 또는 필요에 의해 그 내용의 일부 또는 전부를 본인에게 위임할 수 있음을 동의한다.</p>
+    ${sub(["강의 교재의 선정", "강의의 커리큘럼 구성", "강의 내 각 영역별 시간 배분 및 휴식시간 부여"])}
+
+    <p class="list-num">3. 본인은 회사의 발전과 담당 학생의 성적 향상을 위해 회사 또는 상사가 지시하는 정당한 업무지시를 반드시 따를 것이며, 그 지시의 이행이 본인의 이득에 부합되지 않는다는 이유만으로 불복하지 아니한다.</p>
+    <p class="list-num">4. 본인은 회사가 지정한 직원으로서의 역할과 업무를 성실히 수행하여야 한다. 다만 업무상 필요성이 인정되는 경우 회사는 본인의 직무내용을 변경할 수 있으며 본인은 정당한 이유 없이 이를 거부하지 아니한다.</p>
+    <p class="list-num">5. 본인은 회사의 절차서 및 운영 지침 등에 의거하여 정해진 업무를 성실히 수행하여야 하며 회사의 업무지시 및 취업규칙에 정한 사항을 성실히 이행한다.</p>
+
+    <p class="list-num">6. 본인은 회사 내 원생수가 부족하거나 기타 다른 사유로 인해 상호 합의된 정규 수업 시수를 채우지 못하고, 공강이 발생될 수 있음을 인지하고 있으며 이 경우 아래와 같은 조치가 이뤄질 수 있고, 그 어떠한 조치에 대해서도 동의하고 따른다.</p>
+    ${sub([
+      "수업 및 교재 연구",
+      "담임으로써 담당하는 학생에 대한 개별 상담, 보강 및 관리",
+      "정규 수업 외 재원생 홀딩 및 신규생 유치를 위한 목적의 특강 (이 경우 해당 특강을 수강하는 학생은 담당학생 수에 카운팅되지 아니한다)",
+    ])}
+
+    <p class="list-num">7. 본인은 회사의 교직원으로서 품위유지와 함께 언행에 신중하며 아래의 사항을 지키도록 한다.</p>
+    ${sub([
+      "회사의 운영방침 및 학사행정에 적극 협조한다.",
+      "수업시간을 반드시 준수하고, 수업준비를 철저히 한다.",
+      "수업 중 특별한 사유 없이 강의실을 이탈하지 아니한다.",
+      "신체적으로 특별히 불편한 증세가 없는 한 수업은 서서하는 것을 원칙으로 한다.",
+      "회사에서 실시하는 회의는 특별한 사유가 없는 한 반드시 참여한다.",
+      "교재연구와 수업 외에 회사의 교육과 운영의 발전에 관한 업무가 있을 시 최선을 다해 참여한다.",
+      "업의 특성에 맞도록 개개인의 개성을 고려하되 선생님으로서의 품위와 예의를 갖춘 근무복장을 착용한다.",
+      "강사 또는 직원간의 모함 및 비방으로 분쟁을 일으키지 아니한다.",
+      "강사 또는 직원과 연합하여 회사, 상사 또는 타 동료 강사 및 직원을 모함하거나 비방하는 행위를 하지 아니한다.",
+    ])}
+
+    <p class="list-num">8. 본인이 본 서약서에 정한 행위를 고의 또는 과실로 이행하지 아니할 경우 징계 대상이 될 수 있으며 인사 고과 및 급여 책정 등에서 불이익을 당할 수 있다.</p>
+  </div>
+
+  ${pledgeSignFoot(e, c, date, "서약자")}`;
+}
+
+/* ============================== 보안 서약서 ============================== */
+/**
+ * 영업비밀 보호 서약. **전 직원**이 쓰되, 제3조의 **경업금지(반경 2km 취업·운영 금지)** 만
+ * 부서 정책(`docNonCompete`)으로 가른다 — 직업선택의 자유를 제한하는 조항이라
+ * 고객·원생 관계를 실제로 쥐는 자리에만 붙이는 것이 법적으로도 안전하다.
+ */
+export function pledgeSecurityHtml(args: {
+  employee: DocEmployee;
+  company: DocCompany;
+  /** 경업금지(반경 2km) 조항을 넣을지 — 부서 정책 */
+  nonCompete: boolean;
+  date?: Date;
+}): string {
+  const { employee: e, company: c } = args;
+  const date = args.date ?? new Date();
+  const sub = (items: string[]) =>
+    items.map((t, i) => `<p class="sub">${"가나다라마바사아자차".charAt(i)}. ${esc(t)}</p>`).join("");
+
+  const afterTerm = [
+    "제2조 각 호에 해당하는 행위",
+    "회사 소속 원생 또는 원생이었던 자 및 이들의 학부모에게 영업활동을 하여 원생을 유인 또는 유혹하여 본인 또는 제3자의 이익을 취득하는 행위",
+    "회사 소속 강사 또는 강사이었던 자들에게 영업활동을 하여 원생을 유인 또는 유혹하여 본인 또는 제3자의 이익을 취득하는 행위",
+  ];
+  if (args.nonCompete) afterTerm.push("회사 반경 2km 내에서 동일직종에 취업 또는 경영하는 행위");
+
+  return `${companyHead(c)}
+  <div class="doc-title">보 안 서 약 서</div>
+  <p><b>${esc(c.name)}</b> (이하 "회사") 와 <b>${esc(e.name)}</b> (이하 "본인") 은(는) 회사의 발전과 본인의 성장을 위해 최선을 다해 근무하며, 회사의 경영상 비밀을 보호하기 위하여 다음과 같은 사항을 준수할 것을 서약합니다.</p>
+
+  <div class="clause">
+    <p class="list-num">1. 본인은 업무를 수행함에 있어서 지득한 고객 혹은 제3자에 관한 정보, 고객관리 방법, 시스템 개발 방법, 판매방법 그 밖에 영업활동에 유용한 기술상 또는 경영상 정보(이하 "영업비밀") 등 산업재산권 제반규정 전반 및 이와 관계된 사항을 취급·보안 등을 행하는 영업비밀담당자(영업비밀 준수 의무자)임을 확인한다.</p>
+
+    <p class="list-num">2. 본인은 회사 재직기간 중 다음 각 호의 행위를 하지 아니한다.</p>
+    ${sub([
+      "본인의 소관 업무 이외의 회사의 영업비밀을 기망 등의 부정한 수단으로 취득하는 행위",
+      "영업비밀을 본인 또는 제3자의 이익을 위하여 사용하는 행위",
+      "영업비밀을 제3자에게 공개하는 행위 (본인 또는 제3자 이익 취득 불문)",
+      "자격 없는 자에게 영업비밀을 관리하게 하는 행위",
+      "자격 없는 자가 영업비밀을 취득하려고 하거나 공개하는 행위를 과실로 막지 못한 행위",
+      "영업비밀을 제3자의 이익을 위하여 사용하는 행위",
+    ])}
+
+    <p class="list-num">3. 본인은 <b>근로계약 종료 후 6개월</b> 동안 다음 각 호의 행위를 하지 아니한다.</p>
+    ${sub(afterTerm)}
+
+    <p class="list-num">4. 본인은 업무 수행에 따라 사용하던 서적, 메모, 각서, 매뉴얼, 노트북, 외장하드, USB, 도안, 산출내역, 각종 기록 및 문서 등에 기재된 정보(사본을 포함한다)는 회사의 독점적인 재산임에 동의하고 회사가 이를 요구할 경우에는 언제든지 이를 제출하여야 한다. 이 경우 정보가 기재된 노트북, 서류 등이 개인 소유인 경우에도 회사의 요청이 있는 경우 이를 제출한다.</p>
+    <p class="list-num">5. 회사내 E-mail 사용과 관련하여 회사에 손해를 끼칠 수 있는 기술 및 경영정보의 유출을 방지하기 위하여 회사의 메일 통제 및 검열에 동의한다.</p>
+    <p class="list-num">6. 업무상 사용하던 노트북, 외장하드, USB 등의 전자기록 장치의 기록을 임의로 삭제, 변경, 수정 등의 행위를 하여서는 아니 된다.</p>
+    <p class="list-num">7. 본인이 본 서약서에 정한 행위를 고의 또는 과실로 이행하지 아니할 경우 「민법」, 「상법」, 「부정경쟁방지 및 영업비밀보호 등에 관한 법률」 등 관계 법령에 의한 손해배상 책임을 부담한다.</p>
+    <p class="list-num">8. 상기 행위가 「형법」, 「부정경쟁방지 및 영업비밀보호 등에 관한 법률」 등 관계 법령에 의한 범죄의 구성요건에 해당할 경우 위법성 조각 사유를 주장하지 아니한다.</p>
+    <p class="list-num">9. 상기 행위에 대하여 회사가 본인을 상대로 민/형사상 소송을 제기할 경우 해당 소의 반소 또는 수사기관에 진정 및 고소 등 회사의 조치에 이의를 제기하지 아니한다.</p>
+  </div>
+
+  ${pledgeSignFoot(e, c, date, "서약자")}`;
+}
+
+/* ========================== 프로필 홍보 동의서 ========================== */
+export function consentPromotionHtml(args: {
+  employee: DocEmployee;
+  company: DocCompany;
+  date?: Date;
+}): string {
+  const { employee: e, company: c } = args;
+  const date = args.date ?? new Date();
+  return `${companyHead(c)}
+  <div class="doc-title">확 인 서</div>
+  <p style="text-align:center" class="muted">(프로필 홍보 활용 동의)</p>
+  <p><b>${esc(c.name)}</b> (이하 "갑") 과 근로자 <b>${esc(e.name)}</b> 은(는) 아래와 같이 확인, 확약합니다.</p>
+  <p style="text-align:center" class="muted">- 아 래 -</p>
+
+  <div class="clause">
+    <p class="list-num">1. 본인 <b>${esc(e.name)}</b> 은(는) 아래의 개인정보가 학원 홍보용 자료로 사용되는 것에 동의합니다.</p>
+    <p class="sub">· 출신학교 및 전공</p>
+    <p class="sub">· 강사 경력</p>
+    <p class="sub">· 프로필 사진</p>
+    <p class="list-num">2. 위의 정보가 포함된 학원 홍보용 자료는 온라인(블로그, 인스타그램, 맘까페 등), 오프라인(학원 내부 및 옥외 게시물, 가이던스 자료, 브로셔 자료 등) 등에 활용됨에 동의합니다.</p>
+    <p class="list-num">3. 홍보자료의 특성 상 <b>퇴사 후에라도 일정기간(최대 1년)</b> 지속적으로 위의 정보가 게시될 수 있음을 인지하고 있으며 이에 대해 동의합니다.</p>
+  </div>
+
+  ${pledgeSignFoot(e, c, date, "동의자", { rrn: true })}`;
+}
+
+/* ============================== 건강 서약서 ============================== */
+export function pledgeHealthHtml(args: {
+  employee: DocEmployee;
+  company: DocCompany;
+  date?: Date;
+}): string {
+  const { employee: e, company: c } = args;
+  const date = args.date ?? new Date();
+  return `${companyHead(c)}
+  <div class="doc-title">서 약 서</div>
+  <p style="text-align:center" class="muted">(건강상태 고지)</p>
+  <p>상기 본인은 채용과 관련하여 아래와 같은 사항을 서약합니다.</p>
+  <p style="text-align:center" class="muted">- 아 래 -</p>
+
+  <div class="clause">
+    <p class="list-num">1. 채용 절차 당시 기저질환 관련 병력, 복용약 등 본인의 건강상태에 대하여 사실대로 고지하였으며, 채용 이후 해당 내용을 거짓으로 고지하여 발생하는 불이익에 대한 책임은 본인에게 있음을 확인합니다.</p>
+    <p class="list-num">2. 채용 이후 본인은 향후 지속적으로 건강관리 할 것을 약속하며, 본인의 관리 잘못 등으로 업무외 상병이 발생 또는 악화되더라도 이에 대한 책임은 본인에게 있음을 인정합니다.</p>
+    <p class="list-num">3. 채용 이후 의사의 소견이나 본인 생각에 건강상 문제가 있을 경우 사전에 반드시 회사에 그 사실을 알려 문제가 발생하지 않도록 협의를 진행하도록 하겠습니다.</p>
+    <p class="list-num">4. 상기 서약 내용에 대하여 성실히 이행할 것을 확인합니다.</p>
+  </div>
+
+  ${pledgeSignFoot(e, c, date, "서약자", { rrn: true })}`;
+}
+
+/* ===================== 직장 내 괴롭힘 근절 서약서 ===================== */
+/**
+ * 근로기준법 §76조의2·3 은 괴롭힘 금지와 신고 시 조사·조치 의무를 정할 뿐
+ * **서약서 징구를 요구하지는 않는다.** 그래도 넣는 이유는 ① 지금까지 실제로 받아 온 서류이고
+ * ② 분쟁이 생겼을 때 사용자가 예방 노력을 했다는 정황이 되기 때문이다.
+ * 복무서약서 8항(성희롱·괴롭힘 금지)과 겹치므로, 여기서는 **예방·신고자 보호** 쪽에 무게를 둔다.
+ */
+export function pledgeHarassmentHtml(args: {
+  employee: DocEmployee;
+  company: DocCompany;
+  date?: Date;
+}): string {
+  const { employee: e, company: c } = args;
+  const date = args.date ?? new Date();
+  return `${companyHead(c)}
+  <div class="doc-title">서 약 서</div>
+  <p style="text-align:center" class="muted">(직장 내 괴롭힘 근절)</p>
+
+  <table class="kv">
+    <tr><th>성명</th><td>${esc(e.name)}</td><th>업무부서</th><td>${esc(e.department ?? "")}</td></tr>
+    <tr><th>입사일</th><td>${ymd(e.hireDate)}</td><th>생년월일</th><td>${esc(e.birth ?? "")}</td></tr>
+    <tr><th>주소</th><td colspan="3">${esc(e.address ?? "")}</td></tr>
+  </table>
+
+  <p style="margin-top:10px">상기 본인은 직장 내 괴롭힘을 근절하고 상호 존중하는 직장 분위기 조성을 위해 모범이 될 것을 다짐하며 각 호와 같이 서약한다.</p>
+  <div class="clause">
+    <p class="list-num">1. 우리는 '상호 존중하고 배려'하는 마음으로 건강한 직장문화 조성을 위해 노력한다.</p>
+    <p class="list-num">2. 우리는 직무수행 시 인격적인 불이익이나 처우를 하지 아니하며, '동료 근로자 등 이해 관계자'의 인권을 존중한다.</p>
+    <p class="list-num">3. 우리는 공정한 직무수행을 저해하는 부당한 업무 및 사적 지시를 하지 않으며, 자신에게 부여된 지위와 권한을 남용하지 않는다.</p>
+    <p class="list-num">4. 우리는 직장 내 괴롭힘 행위를 예방하는 활동에 적극 참여하고, 신고자와 피해자 보호에 앞장선다.</p>
+  </div>
+  <p class="small">※ 근로기준법 제76조의2(직장 내 괴롭힘의 금지) 및 제76조의3(발생 시 조치)에 따라, 회사는 신고를 접수하면 지체 없이 조사하고 피해자 보호조치를 취합니다. 신고를 이유로 한 불이익 처우는 금지됩니다.</p>
+
+  ${pledgeSignFoot(e, c, date, "서약자")}`;
+}
+
+/* ==================== 사업소득세(3.3%) 신청 확인서 ==================== */
+/**
+ * 4대보험 취득신고 대신 사업소득 원천징수를 **본인이 요청**했음을 남기는 서류.
+ * 사업소득(FREELANCE) 로 신고하는 직원에게만 나간다.
+ */
+export function confirmBusinessIncomeHtml(args: {
+  employee: DocEmployee;
+  company: DocCompany;
+  date?: Date;
+}): string {
+  const { employee: e, company: c } = args;
+  const date = args.date ?? new Date();
+  return `${companyHead(c)}
+  <div class="doc-title">확 인 서</div>
+  <p style="text-align:center" class="muted">(사업소득세 신청)</p>
+  <p><b>${esc(c.name)}</b> (이하 "갑") 과 근로자 <b>${esc(e.name)}</b> 은(는) 아래와 같이 확인, 확약합니다.</p>
+  <p style="text-align:center" class="muted">- 아 래 -</p>
+
+  <div class="clause">
+    <p class="list-num">1. 본인 <b>${esc(e.name)}</b> 은(는) 개인사정으로 입사 시 4대보험(국민연금, 건강보험, 고용보험, 산재보험) 취득 신고를 하지 않고 <b>사업소득세(3.3%)를 원천징수</b>하여 줄 것을 갑에게 요청하였음을 확인한다.</p>
+    <p class="list-num">2. 이는 본인의 자발적인 요청에 기한 것으로 근로계약관계 중 또는 계약 종료 후에도 근로자격 취득 및 급여 수급과 관련하여 행정적, 민·형사상 이의 제기를 일체하지 아니하며 회사에 어떠한 불이익이 없도록 한다.</p>
+    <p class="list-num">3. 만일 향후 갑에 자의 또는 타의에 의한 불이익이 발생하는 경우 모든 책임을 본인이 부담하며 지금까지 납부하지 아니한 4대보험료 일체(사업주 부담분 포함)를 본인이 납부하겠습니다.</p>
+  </div>
+
+  ${pledgeSignFoot(e, c, date, "확인자", { rrn: true })}`;
+}
+
+/* ======================== 퇴직유보금 확인서 ======================== */
+/**
+ * 인센티브·비율제 계약자에게 나가는 서류. 인센티브 원천액의 8.3%(1/12)를 퇴직유보금으로
+ * 미리 지급하고, 그것이 그 계약에 대한 퇴직금을 갈음한다는 확인.
+ * 급여와 **다른 통장**으로 보내므로 통장 기재란을 함께 둔다.
+ */
+export function confirmRetentionHtml(args: {
+  employee: DocEmployee;
+  company: DocCompany;
+  date?: Date;
+}): string {
+  const { employee: e, company: c } = args;
+  const date = args.date ?? new Date();
+  const acct = [e.retentionBank, e.retentionAccount].filter(Boolean).join(" ");
+  return `${companyHead(c)}
+  <div class="doc-title">확 인 서</div>
+  <p style="text-align:center" class="muted">(퇴직유보금)</p>
+
+  <table class="kv">
+    <tr><th>성명</th><td>${esc(e.name)}</td><th>직무</th><td>${esc(e.duty ?? e.position ?? "")}</td></tr>
+    <tr><th>생년월일</th><td>${esc(e.birth ?? "")}</td><th>핸드폰</th><td>${esc(e.phone ?? "")}</td></tr>
+    <tr><th>주소</th><td colspan="3">${esc(e.address ?? "")}</td></tr>
+  </table>
+
+  <p style="margin-top:10px">상기 본인은 퇴직금 산정 방식에 관하여 아래와 같은 사실을 확인합니다.</p>
+  <p style="text-align:center" class="muted">- 아 래 -</p>
+
+  <div class="clause">
+    <p class="list-num">1. 본인은 회사가 지급한 <b>인센티브 원천액의 8.3%</b>가 퇴직유보금에 해당하며 이는 인센티브 계약에 따라 발생하는 퇴직금분에 해당함을 확인합니다.</p>
+    <p class="list-num">2. 따라서 본인은 퇴직 시 회사에서 산정하여 지급할 퇴직금액에서 인센티브 계약에 따라 발생하는 퇴직금에 대한 추가적인 지급을 요구하지 아니하겠습니다.</p>
+    <p class="list-num">3. 인센티브로 인하여 발생한 퇴직금분은 기존 급여통장이 아닌 <b>별도 통장</b>으로 지급해줄 것으로 요청합니다.</p>
+    <table class="kv" style="margin:4px 0 8px">
+      <tr><th>인센티브 퇴직유보금 납입 통장</th><td>${acct ? esc(acct) : blank(34)}</td></tr>
+    </table>
+    <p class="list-num">4. 만일, 퇴직 시 회사에서 지급하는 퇴직금액 이외 인센티브에 따른 퇴직금 지급을 추가로 요구하는 경우 기 지급받은 인센티브 퇴직유보금은 <b>부당이득</b>에 해당함을 확인합니다.</p>
+  </div>
+
+  ${pledgeSignFoot(e, c, date, "작성자")}`;
+}
+
+/* ====================== 개인사업자 지위 확인서 ====================== */
+/**
+ * 위탁계약(프리랜서)에게만 나간다. 사업자등록증 없이 위탁 용역을 수행할 수 있는 근거와,
+ * 근로기준법상 법정수당·퇴직금을 받을 수 없음을 인지했다는 확인.
+ */
+export function confirmSoleProprietorHtml(args: {
+  employee: DocEmployee;
+  company: DocCompany;
+  date?: Date;
+}): string {
+  const { employee: e, company: c } = args;
+  const date = args.date ?? new Date();
+  return `${companyHead(c)}
+  <div class="doc-title">개인사업자 지위 확인서</div>
+
+  <table class="kv">
+    <tr><th>성명</th><td>${esc(e.name)}</td></tr>
+    <tr><th>주민번호</th><td>${maskRRN(e.rrn) || blank(20)}</td></tr>
+    <tr><th>연락처</th><td>${esc(e.phone ?? "")}</td></tr>
+  </table>
+
+  <p style="margin-top:12px">상기 본인은 위탁 용역을 수행하기 위하여 입사함에 있어서, 본인 명의의 사업자등록증을 작성하여 제출하여야 하나, <u>인적용역을 제공하는 개인사업자로서 사업자등록증 발급이 면제되고, 부가가치세 신고 및 납부의 의무 역시 면제되는 "강사" 서비스 분야에 종사</u>하므로 별도의 사업자등록증 발급 없이 본 위탁 용역을 수행할 수 있기에 본 확인서를 제출합니다.</p>
+  <p>본 확인서를 제출하는 이유는 본인의 진실한 의사에 따라 위탁계약을 체결하기 위함입니다. 위탁계약 체결 시, 향후 <b>${esc(c.name)}</b> 와 관계하여 <b>근로기준법상 발생되는 각종 법정수당 및 퇴직금을 지급받을 수 없다</b>는 사실을 분명하게 인지하였습니다.</p>
+
+  ${pledgeSignFoot(e, c, date, "확인자")}`;
+}
+
+/* ---------------------- 서약서·확인서 공통 서명란 ---------------------- */
+/** 서약서류의 아래 서명란 — 문서마다 조금씩 다르던 것을 한곳으로 모은다 */
+function pledgeSignFoot(
+  e: DocEmployee,
+  c: DocCompany,
+  date: Date,
+  label: string,
+  opts: { rrn?: boolean } = {}
+): string {
+  return `<div class="doc-foot">
+    <div class="date-center">${ymdKo(date)}</div>
+    <div class="sign-area">
+      <div class="sign-box"><div class="sign-grid">
+        ${sigField(label, e.name, true)}${
+          opts.rrn ? sigField("주민등록번호", maskRRN(e.rrn) || null) : sigField("생년월일", e.birth)
+        }
+        <div class="full">${sigField("주소", e.address)}</div>
+        ${sigField("연락처", e.phone)}
+      </div></div>
+      <div style="text-align:right;margin-top:12px;font-weight:700"><b>${esc(c.name)}</b> 대표 ${esc(c.ceo)} 귀하</div>
+    </div>
+  </div>`;
+}
+
 /* ============================ 신규입사 패키지 ============================ */
 export function newHirePackageBodies(args: {
   employee: DocEmployee;
   contract: DocContract;
   company: DocCompany;
+  /** 부서가 정하는 서류 정책. **없으면 부서 한정 서류가 통째로 빠진다** */
+  deptPolicy?: DeptDocPolicy | null;
 }): string[] {
-  return [
+  const { employee, company, deptPolicy } = args;
+  const one = { employee, company };
+  const bodies = [
     ...contractBodies(args),
-    pledgeServiceHtml({ employee: args.employee, company: args.company }),
-    consentPrivacyHtml({ employee: args.employee, company: args.company }),
-    consentDeductionHtml({ employee: args.employee, company: args.company }),
+    // --- 전 직원 공통 ---
+    pledgeServiceHtml(one),
+    pledgeSecurityHtml({ ...one, nonCompete: !!deptPolicy?.docNonCompete }),
+    pledgeHarassmentHtml(one),
+    consentPrivacyHtml(one),
+    consentDeductionHtml(one),
   ];
+  // --- 부서에 따라 ---
+  if (deptPolicy?.docPledgeServiceII) bodies.push(pledgeServiceIIHtml(one));
+  if (deptPolicy?.docPromotion) bodies.push(consentPromotionHtml(one));
+  if (deptPolicy?.docHealth) bodies.push(pledgeHealthHtml(one));
+  // --- 세무구분에 따라 ---
+  if (employee.incomeType === "FREELANCE") bodies.push(confirmBusinessIncomeHtml(one));
+  return bodies;
 }

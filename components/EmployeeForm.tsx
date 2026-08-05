@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   INCOME_TYPE_LABEL,
@@ -69,6 +69,21 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
   const [schedule, setSchedule] = useState<ScheduleDay[]>(
     initial?.schedule ? JSON.parse(initial.schedule) : defaultSchedule()
   );
+
+  // 부서는 설정에서 관리자가 늘릴 수 있으므로 DB 에서 가져온다.
+  // 못 불러오면 코드 상수로 떨어져 최소한 고를 수는 있게 한다.
+  const [depts, setDepts] = useState<string[]>(DEPARTMENTS);
+  useEffect(() => {
+    fetch("/api/settings/departments")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        const names = (j?.departments ?? [])
+          .filter((d: any) => d.active || d.name === initial?.department)
+          .map((d: any) => d.name);
+        if (names.length) setDepts(names);
+      })
+      .catch(() => {});
+  }, [initial?.department]);
 
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
   const setDay = (i: number, k: keyof ScheduleDay, v: any) =>
@@ -159,10 +174,17 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
       <div className="card p-5">
         <h2 className="font-bold text-slate-800 mb-4">소속 및 근로형태</h2>
         <div className="grid md:grid-cols-3 gap-4">
-          <Field label="부서">
+          <Field label="부서 *">
             <select className="input" value={f.department} onChange={(e) => set("department", e.target.value)}>
-              {DEPARTMENTS.map((d) => <option key={d}>{d}</option>)}
+              {/* 부서에 따라 입사 서류가 달라진다 — 비워 두면 신규입사 패키지를 발급할 수 없다 */}
+              <option value="">— 선택 —</option>
+              {depts.map((d) => <option key={d}>{d}</option>)}
             </select>
+            {!f.department && (
+              <p className="text-[11px] text-amber-700 mt-1">
+                부서를 정해야 신규입사 패키지를 발급할 수 있습니다 (부서마다 받는 서약서가 다릅니다).
+              </p>
+            )}
           </Field>
           <Field label="직책"><input className="input" placeholder="선임강사 / 조교 / 팀장" value={f.position} onChange={(e) => set("position", e.target.value)} /></Field>
           <Field label="업무"><input className="input" placeholder="강의(학급관리)" value={f.duty} onChange={(e) => set("duty", e.target.value)} /></Field>

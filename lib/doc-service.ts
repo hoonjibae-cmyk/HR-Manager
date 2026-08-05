@@ -16,6 +16,7 @@ import {
   type DocPayroll,
 } from "./documents-pay";
 import { getCompany, empToDoc, contractToDoc } from "./repo";
+import { docPolicyFor, documentBlockReason } from "./departments";
 import { MAKEUP_CATEGORY_LABEL } from "./constants";
 import { incentiveRosterFor, rosterToStudents } from "./payroll-service";
 import { writeFile, mkdir } from "fs/promises";
@@ -52,13 +53,22 @@ async function record(
   });
 }
 
-/** 신규입사 패키지 (계약서 + 복무서약서 + 개인정보동의서 + 임금공제동의서) */
+/**
+ * 신규입사 패키지 — 계약서 세트 + 서약서·동의서 일체.
+ *
+ * 어떤 서약서가 들어가는지는 **부서**가 정한다(복무서약서-II·프로필 홍보 동의서·건강서약서,
+ * 보안서약서의 경업금지 조항). 그래서 부서가 비어 있거나 등록되지 않은 이름이면
+ * **발급을 막는다** — 기본값을 지어내면 조교에게 강사용 서약서가 나가거나 그 반대가 된다.
+ */
 export async function genNewHirePackage(employeeId: number, contractId?: number) {
   const emp = await prisma.employee.findUnique({
     where: { id: employeeId },
     include: { contracts: { orderBy: { startDate: "desc" } } },
   });
   if (!emp) throw new Error("직원 없음");
+  const blocked = await documentBlockReason(emp);
+  if (blocked) throw new Error(blocked);
+  const deptPolicy = await docPolicyFor(emp.department);
   const company = await getCompany();
   const ct = contractId
     ? emp.contracts.find((c) => c.id === contractId)
@@ -79,8 +89,10 @@ export async function genNewHirePackage(employeeId: number, contractId?: number)
         ratioPercent: emp.ratioPercent,
         incThreshold: emp.incThreshold,
         incPerStudent: emp.incPerStudent,
+        incRevenuePercent: emp.incRevenuePercent,
+        isContractor: emp.isContractor,
       };
-  const bodies = newHirePackageBodies({ employee: empToDoc(emp), contract, company });
+  const bodies = newHirePackageBodies({ employee: empToDoc(emp), contract, company, deptPolicy });
   const pdf = await htmlPagesToPdf(bodies);
   const path = await save(pdf, `신규입사패키지_${emp.name}.pdf`);
   await record(emp.id, "NEWHIRE_PKG", `신규입사 패키지 - ${emp.name}`, path);

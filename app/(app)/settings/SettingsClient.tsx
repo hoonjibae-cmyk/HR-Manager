@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export default function SettingsClient() {
   const [data, setData] = useState<any>(null);
@@ -106,6 +106,7 @@ export default function SettingsClient() {
       {msg && <div className="pill bg-emerald-50 text-emerald-700">{msg}</div>}
 
       <CompanyCard company={data.company} onSave={(d: any) => save("company", d)} />
+      <DepartmentCard />
       <RatesCard rates={data.rates} onSave={(d: any) => save("rates", d)} />
       <ScheduleCard
         schedule={data.schedule}
@@ -570,3 +571,201 @@ function F({ l, children, full }: { l: string; children: React.ReactNode; full?:
 }
 function pct(v: number) { return (v * 100).toFixed(4).replace(/\.?0+$/, ""); }
 function unpct(v: string) { return Number(v) / 100; }
+
+/* ============================== 부서 관리 ==============================
+   부서를 코드 상수가 아니라 데이터로 두는 이유는 **부서마다 받아야 할 입사 서류가 다르기
+   때문**이다. 그래서 부서를 추가할 때 서류 정책을 함께 묻는다 — 나중에 "이 부서는 무슨
+   서류를 받아야 하지?" 를 아무도 모르는 채로 남기지 않기 위해서다. */
+function DepartmentCard() {
+  const [data, setData] = useState<any>(null);
+  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const res = await fetch("/api/settings/departments");
+    if (res.ok) setData(await res.json());
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function send(method: string, body: any, url = "/api/settings/departments") {
+    setBusy(true);
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: method === "DELETE" ? undefined : JSON.stringify(body),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      alert((await res.json().catch(() => ({}))).error || "실패");
+      return false;
+    }
+    await load();
+    return true;
+  }
+
+  if (!data) return null;
+  const fields: Array<{ key: string; label: string; hint: string }> = data.docFields ?? [];
+
+  return (
+    <div className="card p-5">
+      <h2 className="font-bold text-slate-800 mb-1">부서 관리</h2>
+      <p className="text-xs text-slate-500 mb-3">
+        부서마다 <b>입사 때 받아야 할 서류가 다릅니다.</b> 부서를 추가할 때 어떤 서류를 발급할지
+        함께 정해 주세요. <b>부서가 비어 있는 직원은 신규입사 패키지를 발급할 수 없습니다</b> —
+        어떤 서약서를 넣을지 판단할 근거가 없기 때문입니다.
+      </p>
+
+      {data.missingDept > 0 && (
+        <div className="rounded border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900 mb-3">
+          ⚠️ 부서가 비어 있는 재직 직원이 <b>{data.missingDept}명</b> 있습니다 — 직원 정보에서
+          부서를 채워야 서류 발급이 됩니다.
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-slate-400 border-b border-slate-100">
+            <tr>
+              <th className="text-left py-1.5">부서</th>
+              <th className="text-center">인원</th>
+              {fields.map((f) => (
+                <th key={f.key} className="text-center px-1" title={f.hint}>
+                  {f.label}
+                </th>
+              ))}
+              <th className="text-center">사용</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {data.departments.map((d: any) => (
+              <tr key={d.id} className={`border-b border-slate-50 ${d.active ? "" : "opacity-50"}`}>
+                <td className="py-1.5 font-semibold text-slate-700">{d.name}</td>
+                <td className="text-center text-slate-500">{d.employeeCount}</td>
+                {fields.map((f) => (
+                  <td key={f.key} className="text-center">
+                    <input
+                      type="checkbox"
+                      checked={!!d[f.key]}
+                      disabled={busy}
+                      onChange={(e) => send("PATCH", { id: d.id, [f.key]: e.target.checked })}
+                    />
+                  </td>
+                ))}
+                <td className="text-center">
+                  <input
+                    type="checkbox"
+                    checked={d.active}
+                    disabled={busy}
+                    onChange={(e) => send("PATCH", { id: d.id, active: e.target.checked })}
+                  />
+                </td>
+                <td className="text-right">
+                  <button
+                    className="text-slate-300 hover:text-rose-600 disabled:opacity-40"
+                    disabled={busy || d.employeeCount > 0}
+                    title={d.employeeCount > 0 ? "소속 직원이 있어 삭제할 수 없습니다" : "삭제"}
+                    onClick={() => {
+                      if (confirm(`'${d.name}' 부서를 삭제할까요?`))
+                        send("DELETE", null, `/api/settings/departments?id=${d.id}`);
+                    }}
+                  >
+                    ✕
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {adding ? (
+        <DeptAddForm
+          fields={fields}
+          busy={busy}
+          onCancel={() => setAdding(false)}
+          onSubmit={async (body) => {
+            if (await send("POST", body)) setAdding(false);
+          }}
+        />
+      ) : (
+        <button className="btn-outline mt-3 text-xs" onClick={() => setAdding(true)}>
+          + 부서 추가
+        </button>
+      )}
+
+      <div className="mt-3 text-[11px] text-slate-400 space-y-0.5">
+        {fields.map((f) => (
+          <div key={f.key}>
+            · <b>{f.label}</b> — {f.hint}
+          </div>
+        ))}
+        <div>· 쓰지 않을 부서는 삭제하지 말고 <b>사용</b> 을 끄세요 — 이미 그 부서인 직원의 서류 판정에는 계속 쓰입니다.</div>
+      </div>
+    </div>
+  );
+}
+
+/** 부서 추가 폼 — 이름과 **서류 정책을 함께** 받는다 */
+function DeptAddForm({
+  fields,
+  busy,
+  onCancel,
+  onSubmit,
+}: {
+  fields: Array<{ key: string; label: string; hint: string }>;
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (body: any) => void;
+}) {
+  const [name, setName] = useState("");
+  const [policy, setPolicy] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(fields.map((f) => [f.key, f.key === "docHealth"]))
+  );
+
+  return (
+    <div className="mt-3 rounded border border-brand-200 bg-brand-50/40 p-3">
+      <div className="text-xs font-bold text-slate-700 mb-2">새 부서</div>
+      <input
+        className="input w-56 text-sm"
+        placeholder="부서명 (예: 상담팀)"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        autoFocus
+      />
+      <div className="text-[11px] text-slate-500 mt-3 mb-1">
+        이 부서 직원에게 <b>어떤 서류를 발급할까요?</b>
+      </div>
+      <div className="space-y-1.5">
+        {fields.map((f) => (
+          <label key={f.key} className="flex items-start gap-2 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={!!policy[f.key]}
+              onChange={(e) => setPolicy((p) => ({ ...p, [f.key]: e.target.checked }))}
+            />
+            <span>
+              <b>{f.label}</b>
+              <span className="block text-[11px] text-slate-400">{f.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="flex gap-2 mt-3">
+        <button
+          className="btn-primary text-xs disabled:opacity-40"
+          disabled={busy || !name.trim()}
+          onClick={() => onSubmit({ name: name.trim(), ...policy })}
+        >
+          추가
+        </button>
+        <button className="btn-outline text-xs" onClick={onCancel} disabled={busy}>
+          취소
+        </button>
+      </div>
+    </div>
+  );
+}

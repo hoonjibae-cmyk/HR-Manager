@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { versionLabel } from "@/lib/version";
 
 const NAV = [
   { href: "/dashboard", label: "대시보드", icon: "▣" },
@@ -54,7 +55,7 @@ export default function Sidebar({ logo, companyName }: { logo?: string | null; c
           </button>
         </form>
         <div className="px-3 pt-2 text-[10px] text-slate-300">
-          주식회사 유쌤에듀 · v1.0
+          주식회사 유쌤에듀 · {versionLabel()}
         </div>
       </div>
     </aside>

@@ -84,6 +84,35 @@ model Holiday {
   name String
 }
 
+/// 부서 — 하드코딩 상수가 아니라 데이터로 둔다.
+///
+/// 부서마다 **입사 때 받아야 할 서류가 다르기 때문**이다(교수부만 복무서약서-II·프로필 홍보
+/// 동의서, 조교팀은 건강서약서 제외 …). 부서를 코드에 박아 두면 부서가 하나 늘 때마다
+/// 배포를 해야 하고, 새 부서에 어떤 서류가 나가야 하는지는 아무도 모르는 채로 남는다.
+/// 그래서 부서를 추가할 때 **그 부서의 서류 정책을 함께 묻는다**(설정 화면).
+model Department {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique
+  /// 화면에 보이는 순서
+  sortOrder Int     @default(0)
+  /// 끈 부서는 새 직원에게 고를 수 없지만, 이미 그 부서인 직원의 서류 판정에는 계속 쓰인다
+  active    Boolean @default(true)
+
+  // --- 입사 서류 정책 — 이 부서 직원에게 무엇을 발급할지 ---
+  /// 복무서약서-II (강의 운영 관련 조항) — 강의를 맡는 부서만
+  docPledgeServiceII Boolean @default(false)
+  /// 프로필 홍보 동의서 (학력·경력·사진의 홍보 활용) — 홍보에 얼굴이 나가는 부서만
+  docPromotion       Boolean @default(false)
+  /// 건강서약서
+  docHealth          Boolean @default(true)
+  /// 보안서약서의 **경업금지 조항**(퇴사 후 6개월·반경 2km 취업·운영 금지).
+  /// 보안서약서 자체는 전 직원이 쓰고, 이 조항만 부서에 따라 붙였다 뗀다.
+  docNonCompete      Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 /// 직원 (근로자/강사/단기근로자 공통)
 model Employee {
   id          Int     @id @default(autoincrement())
