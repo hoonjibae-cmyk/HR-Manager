@@ -5,6 +5,7 @@ import { invalidateTaxCache } from "@/lib/repo";
 import { computeNextRun, formatKst } from "@/lib/scheduler";
 import { gcalConfigured, makeupCalendarConfigured } from "@/lib/gcal";
 import { logActivity } from "@/lib/activity";
+import { encryptionEnabled } from "@/lib/crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,8 @@ export async function GET() {
       at: formatKst(l.sentAt ?? l.createdAt),
     })),
     integrations: {
+      // 개인정보(주민번호·계좌번호) 암호화 키가 들어와 있는지 — 없으면 평문으로 저장된다
+      pii: encryptionEnabled(),
       smtp: !!process.env.SMTP_HOST,
       smtpHost: process.env.SMTP_HOST || null,
       smtpUser: process.env.SMTP_USER || null,

@@ -18,7 +18,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "postinstall": "prisma generate",
-    "db:rls": "node scripts/db-rls.mjs"
+    "db:rls": "node scripts/db-rls.mjs",
+    "db:encrypt-pii": "tsx scripts/encrypt-pii.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

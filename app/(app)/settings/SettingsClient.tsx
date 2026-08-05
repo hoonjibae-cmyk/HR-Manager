@@ -526,6 +526,21 @@ function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyM
           <code>docs/SETUP.md</code> 를 참고하세요.
         </p>
       )}
+      {/* 키가 없으면 조용히 평문으로 저장된다 — 조용한 게 제일 나쁘므로 화면에 띄운다 */}
+      {!g.pii && (
+        <div className="rounded border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 mt-3">
+          <div className="font-bold mb-0.5">⚠️ 개인정보가 평문으로 저장되고 있습니다</div>
+          <div>
+            <code>ENCRYPTION_KEY</code> 가 없어 <b>주민등록번호·계좌번호</b>가 암호화되지 않습니다.
+            DB 백업이 새거나 접속이 뚫리면 그대로 읽힙니다.
+          </div>
+          <div className="mt-1">
+            <code>openssl rand -base64 32</code> 로 키를 만들어 환경변수에 넣은 뒤,{" "}
+            <code>npm run db:encrypt-pii</code> 로 기존 데이터를 옮기세요.
+            <b> 키를 잃으면 복구할 수 없으니 따로 보관하세요.</b>
+          </div>
+        </div>
+      )}
       <p className="text-xs text-slate-400 mt-3">
         연동 설정 방법은 프로젝트의 <code>docs/SETUP.md</code> 를 참고하세요.
       </p>
