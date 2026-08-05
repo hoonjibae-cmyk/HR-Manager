@@ -15,6 +15,13 @@ function b64(file: string): string {
 const SYMBOL_RANGE =
   "U+2460-2487,U+3200-321E,U+3260-327F,U+203B,U+20A9,U+25A0-25CF";
 
+// 낫표(「」) 등 CJK 구두점도 NanumGothic 서브셋에 없다 — 법령 인용(「근로기준법」)에 쓰는데
+// 서버리스에서 빈칸으로 빠지면서 그 자리만큼 문장이 벌어져 보였다(로컬은 시스템 폰트로 대체돼
+// 멀쩡해 보여서 더 늦게 발견된다). 같은 서체의 다른 서브셋(@fontsource nanum-gothic #109)에서
+// 이 구간만 뽑아 2KB 짜리 보강본을 만들어 덧입힌다 — 서체가 같아 본문과 이질감이 없다.
+//   만든 법: fontTools subset 으로 U+3000-303F 만 추출 (assets/fonts/NanumGothic-Punct-*.woff2)
+const PUNCT_RANGE = "U+3000-303F";
+
 /**
  * 바닥글 전용 @font-face — 굵기 하나(400)만.
  *
@@ -42,6 +49,8 @@ export function fontFaceCss(): string {
     // 심볼 보강 서브셋 — 반드시 본체 뒤에 선언(같은 범위는 나중 선언이 우선)
     ["NanumGothic", 400, "NotoSymbols-Regular.woff2", SYMBOL_RANGE],
     ["NanumGothic", 700, "NotoSymbols-Bold.woff2", SYMBOL_RANGE],
+    ["NanumGothic", 400, "NanumGothic-Punct-Regular.woff2", PUNCT_RANGE],
+    ["NanumGothic", 700, "NanumGothic-Punct-Bold.woff2", PUNCT_RANGE],
   ];
   cachedCss = faces
     .map(

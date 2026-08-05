@@ -748,9 +748,10 @@ export function pledgeServiceIIHtml(args: {
   const { employee: e, company: c } = args;
   const date = args.date ?? new Date();
   const sub = (items: string[]) =>
-    items.map((t, i) => `<p class="sub">${"가나다라마바사아자차".charAt(i)}. ${esc(t)}</p>`).join("");
+    items.map((t, i) => `<p class="sub-item">${"가나다라마바사아자차".charAt(i)}. ${esc(t)}</p>`).join("");
 
-  return `${companyHead(c)}
+  // 조항이 많아 한 장을 넘기기 쉬우므로 compact 로 조판한다 (계약서와 같은 방식)
+  return `<div class="compact">${companyHead(c)}
   <div class="doc-title">복무서약서 - II</div>
   <p><b>${esc(c.name)}</b> (이하 "회사") 와 <b>${esc(e.name)}</b> (이하 "본인") 은(는) 재직기간 중 아래 사항을 준수할 것을 서약합니다.</p>
   <p style="text-align:center" class="muted">- 아 래 -</p>
@@ -795,7 +796,7 @@ export function pledgeServiceIIHtml(args: {
     <p class="list-num">8. 본인이 본 서약서에 정한 행위를 고의 또는 과실로 이행하지 아니할 경우 징계 대상이 될 수 있으며 인사 고과 및 급여 책정 등에서 불이익을 당할 수 있다.</p>
   </div>
 
-  ${pledgeSignFoot(e, c, date, "서약자")}`;
+  ${pledgeSignFoot(e, c, date, "서약자")}</div>`;
 }
 
 /* ============================== 보안 서약서 ============================== */
@@ -814,7 +815,7 @@ export function pledgeSecurityHtml(args: {
   const { employee: e, company: c } = args;
   const date = args.date ?? new Date();
   const sub = (items: string[]) =>
-    items.map((t, i) => `<p class="sub">${"가나다라마바사아자차".charAt(i)}. ${esc(t)}</p>`).join("");
+    items.map((t, i) => `<p class="sub-item">${"가나다라마바사아자차".charAt(i)}. ${esc(t)}</p>`).join("");
 
   const afterTerm = [
     "제2조 각 호에 해당하는 행위",
@@ -823,7 +824,8 @@ export function pledgeSecurityHtml(args: {
   ];
   if (args.nonCompete) afterTerm.push("회사 반경 2km 내에서 동일직종에 취업 또는 경영하는 행위");
 
-  return `${companyHead(c)}
+  // 9개 조항 + 하위 항목이라 기본 조판으로는 한 장을 넘겨 서명란만 2장으로 밀린다
+  return `<div class="compact">${companyHead(c)}
   <div class="doc-title">보 안 서 약 서</div>
   <p><b>${esc(c.name)}</b> (이하 "회사") 와 <b>${esc(e.name)}</b> (이하 "본인") 은(는) 회사의 발전과 본인의 성장을 위해 최선을 다해 근무하며, 회사의 경영상 비밀을 보호하기 위하여 다음과 같은 사항을 준수할 것을 서약합니다.</p>
 
@@ -851,7 +853,7 @@ export function pledgeSecurityHtml(args: {
     <p class="list-num">9. 상기 행위에 대하여 회사가 본인을 상대로 민/형사상 소송을 제기할 경우 해당 소의 반소 또는 수사기관에 진정 및 고소 등 회사의 조치에 이의를 제기하지 아니한다.</p>
   </div>
 
-  ${pledgeSignFoot(e, c, date, "서약자")}`;
+  ${pledgeSignFoot(e, c, date, "서약자")}</div>`;
 }
 
 /* ========================== 프로필 홍보 동의서 ========================== */
@@ -870,9 +872,9 @@ export function consentPromotionHtml(args: {
 
   <div class="clause">
     <p class="list-num">1. 본인 <b>${esc(e.name)}</b> 은(는) 아래의 개인정보가 학원 홍보용 자료로 사용되는 것에 동의합니다.</p>
-    <p class="sub">· 출신학교 및 전공</p>
-    <p class="sub">· 강사 경력</p>
-    <p class="sub">· 프로필 사진</p>
+    <p class="sub-item">· 출신학교 및 전공</p>
+    <p class="sub-item">· 강사 경력</p>
+    <p class="sub-item">· 프로필 사진</p>
     <p class="list-num">2. 위의 정보가 포함된 학원 홍보용 자료는 온라인(블로그, 인스타그램, 맘까페 등), 오프라인(학원 내부 및 옥외 게시물, 가이던스 자료, 브로셔 자료 등) 등에 활용됨에 동의합니다.</p>
     <p class="list-num">3. 홍보자료의 특성 상 <b>퇴사 후에라도 일정기간(최대 1년)</b> 지속적으로 위의 정보가 게시될 수 있음을 인지하고 있으며 이에 대해 동의합니다.</p>
   </div>

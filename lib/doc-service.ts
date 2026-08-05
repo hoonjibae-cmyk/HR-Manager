@@ -93,7 +93,17 @@ export async function genNewHirePackage(employeeId: number, contractId?: number)
         isContractor: emp.isContractor,
       };
   const bodies = newHirePackageBodies({ employee: empToDoc(emp), contract, company, deptPolicy });
-  const pdf = await htmlPagesToPdf(bodies);
+  // 각 장 이니셜란 + 쪽번호는 패키지에도 붙인다 — 계약서가 2장을 넘어가는데 세트로 뽑으면
+  // 서명란이 사라져 그 장들이 진정성립 추정(민사소송법 §358)을 못 받는 문제가 있었다.
+  // 여백에 그리므로 쪽 나눔은 그대로다. 12종이 한 묶음이라 쪽번호도 실제로 쓸모가 있다.
+  //
+  // **간인(seamStamp)은 붙이지 않는다** — 간인은 장 경계가 이어졌다는 표시인데,
+  // 서로 다른 문서가 맞닿는 자리에 찍으면 '이 두 문서가 한 건' 이라는 뜻이 되어 버린다.
+  // (계약서 단독 발급 `genContract` 에서는 본문+별지가 한 건의 계약이라 그대로 찍는다.)
+  const pdf = await htmlPagesToPdf(bodies, {
+    initials: company.pageInitials,
+    paginate: true,
+  });
   const path = await save(pdf, `신규입사패키지_${emp.name}.pdf`);
   await record(emp.id, "NEWHIRE_PKG", `신규입사 패키지 - ${emp.name}`, path);
   return { pdf, filename: `신규입사패키지_${emp.name}.pdf` };

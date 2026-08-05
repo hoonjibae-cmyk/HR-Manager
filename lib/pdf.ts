@@ -305,8 +305,14 @@ table.kv.sched{table-layout:fixed;}
 .clause h3{font-size:11pt;margin:11px 0 3px;font-weight:800;color:#1f2d5a;}
 .clause p{margin:3px 0;}
 .clause .sub{margin-left:15px;text-indent:-15px;}
+/* 번호 항목(1. 2. 3.) 아래로 한 단 들어가는 하위 항목(가. 나. 다. / · ). 부모 본문 시작선에
+   맞춰 들여쓰고 그 안에서 다시 매달린 들여쓰기를 준다 — 안 그러면 부모와 같은 줄에서 시작해
+   몇 번 항목에 딸린 것인지 읽히지 않는다. */
+.clause .sub-item{margin-left:36px;text-indent:-16px;}
 .agree-line{margin-top:14px;}
-.doc-foot{margin-top:auto;padding-top:12px;}
+/* 서명란은 쪼개지지도, 혼자 다음 장으로 넘어가지도 않게 한다.
+   break-before:avoid 가 바로 앞 블록을 함께 끌고 넘어가므로 '서명란만 덩그러니 2페이지' 가 안 된다. */
+.doc-foot{margin-top:auto;padding-top:12px;page-break-inside:avoid;break-inside:avoid;page-break-before:avoid;break-before:avoid;}
 .sign-area{padding-top:2px;page-break-inside:avoid;}
 .sign-duo{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
 /* 갑/을 박스 등고 정렬 — 그리드 아이템을 세로 flex 로 만들어 박스가 남은 높이를 채움 */
