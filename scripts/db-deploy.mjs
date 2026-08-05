@@ -37,7 +37,16 @@ const r = spawnSync(
   { stdio: "inherit", env: process.env }
 );
 
+// RLS 켜기 — `prisma db push` 는 RLS 를 모르므로 모델을 추가하면 그 테이블이
+// Supabase 의 공개 API(PostgREST)에 무방비로 열린다. 스키마를 밀 때마다 훑는다.
+//
+// **스키마 반영이 실패해도 이건 돌린다.** 보안 잠금이 스키마 동기화 성공에 매달려 있으면,
+// 관계없는 이유로 push 가 막힌 사이 데이터가 계속 공개된 채로 남는다.
+// 실패해도 배포를 멈추지는 않는다(스키마는 이미 반영된 뒤라 여기서 세우면 더 나쁘다) — 대신 크게 알린다.
+const rls = () => spawnSync("node", ["scripts/db-rls.mjs"], { stdio: "inherit", env: process.env });
+
 if (r.status !== 0) {
+  rls();
   console.error(
     "\n[db-deploy] ❌ 스키마 반영에 실패해 배포를 중단합니다.\n" +
       "  · 'data loss' 경고라면 지워질 수 있는 변경입니다 — 로컬에서 확인 후 직접 반영하세요.\n" +
@@ -47,3 +56,4 @@ if (r.status !== 0) {
   process.exit(r.status ?? 1);
 }
 console.log("[db-deploy] ✅ 스키마 반영 완료");
+rls();

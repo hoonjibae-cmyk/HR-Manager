@@ -17,7 +17,8 @@
     "db:studio": "prisma studio",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "db:rls": "node scripts/db-rls.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

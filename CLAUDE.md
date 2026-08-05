@@ -304,6 +304,19 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - 계산식 변경 시 `lib/*.test.ts` 를 먼저 갱신하고 `npm test` 로 검증.
 - 관리자 로그인은 비밀번호 공유(`ADMIN_PASSWORD`) 방식이라 화면 작업의 '누가' 는 남지 않는다.
   슬랙 경유 작업만 사용자까지 기록된다. 개인 구분이 필요해지면 계정 모델을 도입해야 한다.
+- **Supabase 의 `public` 스키마는 공개 API(PostgREST)로 자동 노출된다 — RLS 로 막아 둔다.**
+  `https://<ref>.supabase.co/rest/v1/...` 는 `anon` 키만 있으면 열리고, 그 키는 원래
+  브라우저에 심으라고 주는 **공개 키**다. RLS 가 꺼져 있으면 그 키를 가진 누구나 전 직원의
+  주민번호·급여·계좌번호를 읽고 고치고 지울 수 있다(Supabase 점검의 `rls_disabled_in_public`).
+  이 앱은 supabase-js 를 안 쓰고 **Prisma 로 직접 접속**하므로 anon 키를 쓸 일이 없다 — 문은 닫는다.
+  `scripts/db-rls.mjs` 가 `public` 의 모든 테이블에 **정책 없이 RLS 만** 켠다:
+  **테이블 주인은 RLS 를 통과하므로**(Postgres 기본. `FORCE ROW LEVEL SECURITY` 를 걸어야 주인도 막힌다)
+  테이블을 만든 역할로 접속하는 앱은 그대로 되고 anon·authenticated 만 전부 거부된다.
+  **`prisma db push` 는 RLS 를 모른다** — 모델을 추가하면 그 테이블은 다시 무방비가 되므로
+  `db-deploy.mjs` 가 배포 때마다 훑는다(멱등). **push 가 실패해도 이건 돌린다** —
+  보안 잠금이 스키마 동기화 성공에 매달리면 그 사이 데이터가 공개된 채로 남는다.
+  접속 역할이 테이블 주인도 아니고 `bypassrls` 도 없으면 **아무것도 하지 않고 멈춘다**
+  (그대로 켜면 앱이 자기 데이터를 못 읽는다). 수동 실행은 `npm run db:rls`.
 - 개인정보(주민번호 등)는 데모상 평문. 실제 운영은 암호화 권장.
 - `.env`, `*.db`, `storage/` 는 커밋 금지(.gitignore).
 
