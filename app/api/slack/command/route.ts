@@ -8,7 +8,7 @@ import {
   leaveModalView,
   makeupModalView,
 } from "@/lib/slack";
-import { makeupListText } from "@/lib/makeup-slack";
+import { makeupListBlocks } from "@/lib/makeup-slack";
 import {
   leaveBalanceOf,
   leaveBalanceText,
@@ -22,8 +22,8 @@ import { isContractorContract } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 
-function ephemeral(text: string) {
-  return Response.json({ response_type: "ephemeral", text });
+function ephemeral(text: string, blocks?: any[]) {
+  return Response.json({ response_type: "ephemeral", text, ...(blocks ? { blocks } : {}) });
 }
 
 export async function POST(req: Request) {
@@ -55,24 +55,31 @@ export async function POST(req: Request) {
       );
     }
   }
-  /* ── /보강 — 보강계획 사전신청 (완전비율제도 일정 공유용으로 등록한다) ── */
+  /* ── /보강 — 보강·주말근무 사전신청 (완전비율제도 일정 공유용으로 등록한다) ── */
   const cmd = (form.get("command") || "").replace(/^\//, "");
-  const isMakeup = /보강|makeup/i.test(cmd);
+  const isMakeup = /보강|주말|makeup|weekend/i.test(cmd);
   if (isMakeup) {
-    if (/^(내역|목록|조회|list)$/i.test(text))
-      return ephemeral(await makeupListText(emp.id, emp.name));
+    if (/^(내역|목록|조회|list)$/i.test(text)) {
+      const { text: t, blocks } = await makeupListBlocks(emp.id, emp.name);
+      return ephemeral(t, blocks);
+    }
     if (/도움|help/i.test(text))
       return ephemeral(
-        "*보강계획 사전신청*\n• 신청 양식 열기: `/보강`\n• 내 보강 내역: `/보강 내역`\n\n" +
-          "_승인 절차 없이 바로 등록되며, 보강캘린더에도 함께 올라갑니다._\n" +
-          "_실제 근무 여부는 관리자가 확인한 뒤 오버타임 수당으로 산정됩니다._"
+        "*보강 · 주말근무 사전신청*\n" +
+          "• 보강 신청: `/보강`\n• 주말근무 신청: `/보강 주말`\n" +
+          "• 내 신청 내역 · 실근무 확정: `/보강 내역`\n\n" +
+          "_승인 절차 없이 바로 등록되며, 보강은 보강캘린더에도 함께 올라갑니다(주말근무는 올라가지 않습니다)._\n" +
+          "_근무가 끝난 **다음날부터** 본인이 실근무 시간을 확정하면 그 시간으로 오버타임 수당이 산정됩니다._"
       );
+    // 주말근무는 대상반·수강인원을 묻지 않는 별도 양식이다 (`/보강 주말` 또는 `/주말근무`)
+    const weekend = /주말|weekend/i.test(text) || /주말|weekend/i.test(cmd);
     await openView(
       form.get("trigger_id") || "",
       makeupModalView({
         empName: emp.name,
         channel: form.get("channel_id") || undefined,
         ratio: isContractorContract(emp),
+        kind: weekend ? "WEEKEND" : "MAKEUP",
       })
     );
     return new Response("", { status: 200 });

@@ -18,15 +18,36 @@ import {
   makeupModalView,
   readMakeupModal,
   makeupRecordBlocks,
+  makeupConfirmModalView,
+  readMakeupConfirmModal,
 } from "@/lib/slack";
 import {
   parseMakeupInput,
+  parseConfirmInput,
+  confirmInitials,
   makeupDateLabel,
-  makeupListText,
+  makeupListBlocks,
 } from "@/lib/makeup-slack";
-import { createMakeupSession } from "@/lib/makeup-service";
+import {
+  createMakeupSession,
+  confirmMakeupActuals,
+  mandatoryCapContext,
+} from "@/lib/makeup-service";
+import {
+  canSelfConfirm,
+  confirmOpensAt,
+  honestyNotice,
+  mandatoryCapNotice,
+  underMandatoryCap,
+} from "@/lib/makeup-confirm";
+import { sessionHours, workWindow } from "@/lib/overtime";
 import { makeupCalendarConfigured } from "@/lib/gcal";
-import { MAKEUP_CATEGORY_LABEL, isContractorContract } from "@/lib/constants";
+import {
+  MAKEUP_CATEGORY_LABEL,
+  isContractorContract,
+  isWeekendWork,
+  makeupKindLabel,
+} from "@/lib/constants";
 import {
   approveLeaveRequest,
   rejectLeaveRequest,
@@ -65,9 +86,15 @@ async function resolveEmployee(userId: string) {
  * 사용자에게 짧은 안내를 보낸다.
  * 채널 안이면 그 자리에만 보이는 임시 메시지, 앱 홈·단축키처럼 채널이 없으면 DM.
  */
-async function tellUser(channelId: string | undefined, userId: string, text: string) {
-  if (channelId) return slackCall("chat.postEphemeral", { channel: channelId, user: userId, text });
-  return slackCall("chat.postMessage", { channel: userId, text });
+async function tellUser(
+  channelId: string | undefined,
+  userId: string,
+  text: string,
+  blocks?: any[]
+) {
+  const body: any = { text, ...(blocks ? { blocks } : {}) };
+  if (channelId) return slackCall("chat.postEphemeral", { channel: channelId, user: userId, ...body });
+  return slackCall("chat.postMessage", { channel: userId, ...body });
 }
 
 /** 연결 실패 사유를 구체적으로 안내 (관리자가 바로 조치할 수 있도록) */
@@ -119,7 +146,12 @@ async function openLeaveForm(triggerId: string, userId: string, channelId?: stri
  * 보강계획 사전신청 모달 열기 — 채널 버튼·앱 홈·슬래시 명령이 공유한다.
  * 휴가와 달리 완전비율제도 막지 않는다 — 수당은 안 붙지만 일정 공유는 필요하다.
  */
-async function openMakeupForm(triggerId: string, userId: string, channelId?: string) {
+async function openMakeupForm(
+  triggerId: string,
+  userId: string,
+  channelId?: string,
+  kind: "MAKEUP" | "WEEKEND" = "MAKEUP"
+) {
   const { emp, info } = await resolveEmployee(userId);
   if (!emp) {
     await tellUser(channelId, userId, notLinkedText(info));
@@ -127,7 +159,66 @@ async function openMakeupForm(triggerId: string, userId: string, channelId?: str
   }
   await openView(
     triggerId,
-    makeupModalView({ empName: emp.name, channel: channelId, ratio: isContractorContract(emp) })
+    makeupModalView({
+      empName: emp.name,
+      channel: channelId,
+      ratio: isContractorContract(emp),
+      kind,
+    })
+  );
+}
+
+/**
+ * 실근무 확정 모달 열기 — **신청자 본인만**, 근무 다음날부터.
+ * 남의 신청을 열 수 없게 신청자 본인인지 확인한다(버튼 value 로 id 가 넘어오므로).
+ */
+async function openConfirmForm(
+  triggerId: string,
+  userId: string,
+  sessionId: number,
+  channelId?: string
+) {
+  const { emp, info } = await resolveEmployee(userId);
+  if (!emp) {
+    await tellUser(channelId, userId, notLinkedText(info));
+    return;
+  }
+  const row = await prisma.makeupSession.findUnique({ where: { id: sessionId } });
+  if (!row || row.employeeId !== emp.id) {
+    await tellUser(channelId, userId, "본인이 신청한 내역만 확정할 수 있습니다.");
+    return;
+  }
+  const v = canSelfConfirm(row as any, new Date());
+  if (!v.ok) {
+    await tellUser(channelId, userId, v.reason ?? "지금은 확정할 수 없습니다.");
+    return;
+  }
+
+  // 내신의무보강이면 이미 상한을 넘겼는지 미리 보여준다 (넘겨도 막지는 않는다)
+  let capNotice: string | null = null;
+  if (underMandatoryCap(row.category)) {
+    const ctx = await mandatoryCapContext(emp.id, row.id, workWindow(row as any).start);
+    capNotice = mandatoryCapNotice({
+      capHours: ctx.capHours,
+      otherHours: ctx.otherHours,
+      thisHours: sessionHours(row as any),
+      periodName: ctx.periodName,
+    });
+  }
+
+  await openView(
+    triggerId,
+    makeupConfirmModalView({
+      id: row.id,
+      kindLabel: makeupKindLabel(row.category),
+      dateLabel: makeupDateLabel(row.planStart, row.planEnd),
+      categoryLabel: MAKEUP_CATEGORY_LABEL[row.category] ?? row.category,
+      targetClass: row.targetClass,
+      ...confirmInitials(row),
+      note: row.reviewNote,
+      honesty: honestyNotice(row.category),
+      capNotice,
+    })
   );
 }
 
@@ -198,7 +289,7 @@ export async function POST(req: Request) {
     return Response.json({ response_action: "clear" });
   }
 
-  /* ---------- 보강계획 사전신청 모달 제출 ---------- */
+  /* ---------- 보강 · 주말근무 사전신청 모달 제출 ---------- */
   if (payload.type === "view_submission" && payload.view?.callback_id === "makeup_plan_submit") {
     const userId = payload.user?.id as string;
     const { emp, info } = await resolveEmployee(userId);
@@ -230,7 +321,11 @@ export async function POST(req: Request) {
       slackUserId: userId,
     });
 
+    const weekend = isWeekendWork(f.category);
+    const what = makeupKindLabel(f.category);
+    const icon = weekend ? "🗓" : "📚";
     const dateLabel = makeupDateLabel(parsed.start!, parsed.end!);
+    const opensAt = confirmOpensAt(row as any);
     const blocks = makeupRecordBlocks({
       name: emp.name,
       dept: emp.department,
@@ -241,10 +336,17 @@ export async function POST(req: Request) {
       detail: f.detail,
       note: f.note,
       calendarSynced: makeupCalendarConfigured(),
+      weekend,
+      confirmOpensLabel: `${opensAt.getUTCFullYear()}.${String(opensAt.getUTCMonth() + 1).padStart(
+        2,
+        "0"
+      )}.${String(opensAt.getUTCDate()).padStart(2, "0")}`,
     });
 
     // 신청자 확인 DM
-    await postMessage(userId, `📚 보강계획이 등록되었습니다 — ${dateLabel}`, blocks).catch(() => {});
+    await postMessage(userId, `${icon} ${what} 신청이 등록되었습니다 — ${dateLabel}`, blocks).catch(
+      () => {}
+    );
     // 공유 채널이 지정돼 있으면 함께 게시 (승인 버튼 없음 — 기록용)
     let meta: any = {};
     try {
@@ -252,7 +354,9 @@ export async function POST(req: Request) {
     } catch {}
     const channel = process.env.SLACK_MAKEUP_CHANNEL || meta.channel;
     if (channel)
-      await postMessage(channel, `📚 보강계획 등록: ${emp.name} · ${dateLabel}`, blocks).catch(() => {});
+      await postMessage(channel, `${icon} ${what} 신청: ${emp.name} · ${dateLabel}`, blocks).catch(
+        () => {}
+      );
 
     await logActivity({
       action: "MAKEUP_CREATE",
@@ -260,10 +364,85 @@ export async function POST(req: Request) {
       actorName: userId,
       employeeId: emp.id,
       target: emp.name,
-      summary: `${emp.name}님이 보강계획을 사전신청했습니다 — ${dateLabel} · ${
+      summary: `${emp.name}님이 ${what}을 사전신청했습니다 — ${dateLabel} · ${
         MAKEUP_CATEGORY_LABEL[f.category] ?? f.category
       } (${f.targetClass}).`,
       meta: { makeupId: row.id, category: f.category, targetClass: f.targetClass },
+    }).catch(() => {});
+
+    await refreshHomeTab(userId).catch(() => {});
+    return Response.json({ response_action: "clear" });
+  }
+
+  /* ---------- 실근무 확정 모달 제출 (신청자 본인) ---------- */
+  if (payload.type === "view_submission" && payload.view?.callback_id === "makeup_confirm_submit") {
+    const userId = payload.user?.id as string;
+    const { emp, info } = await resolveEmployee(userId);
+    if (!emp)
+      return Response.json({
+        response_action: "errors",
+        errors: { sdate: notLinkedText(info).replace(/\n/g, " ").slice(0, 150) },
+      });
+
+    const f = readMakeupConfirmModal(payload.view);
+    if (!f.id)
+      return Response.json({
+        response_action: "errors",
+        errors: { sdate: "어느 신청인지 알 수 없습니다. 목록에서 다시 눌러 주세요." },
+      });
+    const target = await prisma.makeupSession.findUnique({ where: { id: f.id } });
+    if (!target || target.employeeId !== emp.id)
+      return Response.json({
+        response_action: "errors",
+        errors: { sdate: "본인이 신청한 내역만 확정할 수 있습니다." },
+      });
+
+    const parsed = parseConfirmInput(f);
+    if (!parsed.ok)
+      return Response.json({
+        response_action: "errors",
+        errors: { [parsed.field ?? "sdate"]: parsed.error ?? "입력을 확인해 주세요." },
+      });
+
+    let res;
+    try {
+      res = await confirmMakeupActuals(f.id, {
+        actualStart: parsed.start!,
+        actualEnd: parsed.end!,
+        by: "EMPLOYEE",
+        note: f.note,
+      });
+    } catch (e: any) {
+      return Response.json({
+        response_action: "errors",
+        errors: { sdate: String(e.message).slice(0, 150) },
+      });
+    }
+
+    const what = makeupKindLabel(res.row.category);
+    const label = makeupDateLabel(parsed.start!, parsed.end!);
+    await postMessage(
+      userId,
+      [
+        `✅ *${what} 실근무 시간이 확정되었습니다.*`,
+        "",
+        `• 확정 시간: ${label}`,
+        `• ${MAKEUP_CATEGORY_LABEL[res.row.category] ?? res.row.category} · ${res.row.targetClass}`,
+        ...(f.note ? [`• 특이사항: ${f.note}`] : []),
+        ...(res.capNotice ? ["", res.capNotice] : []),
+        "",
+        "_확정 내용은 HR 시스템의 보강·오버타임 화면에 반영되었습니다. 급여 마감 전까지는 다시 고칠 수 있습니다._",
+      ].join("\n")
+    ).catch(() => {});
+
+    await logActivity({
+      action: "MAKEUP_CONFIRM",
+      actor: "SLACK",
+      actorName: userId,
+      employeeId: emp.id,
+      target: emp.name,
+      summary: `${emp.name}님이 ${what} 실근무 시간을 직접 확정했습니다 — ${label}.`,
+      meta: { makeupId: f.id, confirmedBy: "EMPLOYEE", capExceeded: !!res.capNotice },
     }).catch(() => {});
 
     await refreshHomeTab(userId).catch(() => {});
@@ -357,7 +536,29 @@ export async function POST(req: Request) {
     return new Response("", { status: 200 });
   }
 
-  /* ---------- '내 보강 내역' 버튼 ---------- */
+  /* ---------- '주말근무 신청' 버튼 — 교수부가 아닌 직원의 주말 근무 ---------- */
+  if (action.action_id === "open_weekend_modal") {
+    await openMakeupForm(
+      payload.trigger_id,
+      payload.user?.id,
+      payload.container?.channel_id || payload.channel?.id,
+      "WEEKEND"
+    );
+    return new Response("", { status: 200 });
+  }
+
+  /* ---------- '실근무 확정' 버튼 (목록 · 확정 요청 DM) ---------- */
+  if (action.action_id === "open_makeup_confirm") {
+    await openConfirmForm(
+      payload.trigger_id,
+      payload.user?.id,
+      Number(action.value),
+      payload.container?.channel_id || payload.channel?.id
+    );
+    return new Response("", { status: 200 });
+  }
+
+  /* ---------- '내 신청 내역 · 실근무 확정' 버튼 ---------- */
   if (action.action_id === "check_makeup_list") {
     const uid = payload.user?.id as string;
     const channelId = payload.container?.channel_id || payload.channel?.id;
@@ -366,7 +567,8 @@ export async function POST(req: Request) {
       await tellUser(channelId, uid, notLinkedText(info));
       return new Response("", { status: 200 });
     }
-    await tellUser(channelId, uid, await makeupListText(emp.id, emp.name));
+    const { text, blocks } = await makeupListBlocks(emp.id, emp.name);
+    await tellUser(channelId, uid, text, blocks);
     return new Response("", { status: 200 });
   }
 

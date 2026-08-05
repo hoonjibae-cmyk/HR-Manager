@@ -4,7 +4,7 @@ import { isAuthed } from "@/lib/auth";
 import { logActivity } from "@/lib/activity";
 import { updateMakeupSession, deleteMakeupSession } from "@/lib/makeup-service";
 import { makeupDateLabel } from "@/lib/makeup-slack";
-import { MAKEUP_STATUS_LABEL } from "@/lib/constants";
+import { MAKEUP_STATUS_LABEL, makeupKindLabel } from "@/lib/constants";
 import { postMessage, slackConfigured } from "@/lib/slack";
 
 export const dynamic = "force-dynamic";
@@ -37,15 +37,18 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ error: "실근무 종료가 시작보다 빠릅니다." }, { status: 400 });
 
   try {
+    // 신청자가 스스로 확정한 건인지는 **고치기 전에** 봐야 안다
+    const before = await prisma.makeupSession.findUnique({ where: { id } });
     const row = await updateMakeupSession(id, patch);
     const label = makeupDateLabel(row.actualStart ?? row.planStart, row.actualEnd ?? row.planEnd);
 
+    const what = makeupKindLabel(row.category);
     await logActivity({
       action: "MAKEUP_UPDATE",
       employeeId: row.employeeId,
       target: row.employee.name,
       summary:
-        `${row.employee.name}님의 보강을 ${MAKEUP_STATUS_LABEL[row.status] ?? row.status}(으)로 ` +
+        `${row.employee.name}님의 ${what}을 ${MAKEUP_STATUS_LABEL[row.status] ?? row.status}(으)로 ` +
         `처리했습니다 — ${label}.` +
         (patch.payEligible !== undefined
           ? ` 수당 ${patch.payEligible === true ? "반영" : patch.payEligible === false ? "미반영" : "기본값"}.`
@@ -53,16 +56,22 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       meta: { makeupId: id, patch: { ...patch } },
     });
 
-    // 수당에 영향을 주는 결정은 당사자에게 알린다 (실패해도 처리는 되돌리지 않는다)
-    if (b.notify && slackConfigured() && row.slackUserId) {
+    // 수당에 영향을 주는 결정은 당사자에게 알린다 (실패해도 처리는 되돌리지 않는다).
+    // 신청자가 스스로 확정한 건을 관리자가 고친 경우에는 **고쳤다는 사실을 알려야 한다** —
+    // 본인이 적은 시간과 다른 시간으로 수당이 나가면 명세서를 받고서야 알게 된다.
+    const overridden = before?.confirmedBy === "EMPLOYEE" && patch.status === "CONFIRMED";
+    if ((b.notify || overridden) && slackConfigured() && row.slackUserId) {
       const lines = [
-        `📚 *${row.employee.name}님의 보강이 확인되었습니다.*`,
+        overridden
+          ? `✏️ *${row.employee.name}님이 확정한 ${what} 시간을 관리자가 조정했습니다.*`
+          : `📚 *${row.employee.name}님의 ${what}이 확인되었습니다.*`,
         "",
         `• 일시: ${label}`,
         `• 처리: ${MAKEUP_STATUS_LABEL[row.status] ?? row.status}`,
         ...(row.reviewNote ? [`• 메모: ${row.reviewNote}`] : []),
         "",
         "수당 반영 내역은 급여명세서의 「보강 오버타임 산정 내역서」에서 확인할 수 있습니다.",
+        ...(overridden ? ["_조정 내용이 사실과 다르면 관리자에게 알려 주세요._"] : []),
       ];
       await postMessage(row.slackUserId, lines.join("\n")).catch(() => {});
     }

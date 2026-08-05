@@ -20,6 +20,7 @@ export interface OtPolicyRow {
   mandatoryDefault: boolean;
   absenceDefault: boolean;
   otherDefault: boolean;
+  weekendDefault: boolean;
 }
 
 export interface ExamPeriodRow {
@@ -160,13 +161,19 @@ export default function MakeupPolicyPanel({
             "끄면 평일 소정 외·토요일 근무는 시간에 관계없이 가산 없이 지급합니다 (기본값)"
           )}
           {check("야간(22~06시) 가산을 산정한다", "countNight", "기본 꺼짐 — 켜면 22~06시 근무에 +0.5 가 더 붙습니다")}
-          <div className="text-xs font-bold text-slate-500 pt-2">보강 종류별 수당 반영 기본값</div>
+          <div className="text-xs font-bold text-slate-500 pt-2">종류별 수당 반영 기본값</div>
           <div className="grid sm:grid-cols-2 gap-2">
             {check("직전보강", "immediateDefault")}
             {check("내신의무보강 (상한 적용)", "mandatoryDefault")}
             {check("결시보강", "absenceDefault", "끄면 관리자가 건건이 판단합니다 (권장)")}
+            {check("주말근무", "weekendDefault", "교수부가 아닌 직원의 주말 근무 신청")}
             {check("기타", "otherDefault")}
           </div>
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            여기서 켜 둔 종류는 근무 다음날 <b>신청자에게 실근무 확정 요청이 자동으로</b> 나갑니다.
+            꺼 둔 종류(결시보강 등)는 수당 반영 여부를 먼저 정해야 하므로 달력에서{" "}
+            <b>골라서</b> 보냅니다.
+          </p>
         </div>
 
         {warn.length > 0 && (

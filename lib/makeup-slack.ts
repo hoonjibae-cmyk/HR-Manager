@@ -1,8 +1,14 @@
-// 슬랙 보강계획 사전신청 공통 처리 (모달 제출 · 슬래시 명령 · 앱 홈이 함께 쓴다)
+// 슬랙 보강·주말근무 사전신청 공통 처리 (모달 제출 · 슬래시 명령 · 앱 홈이 함께 쓴다)
 
 import { prisma } from "./db";
-import { MAKEUP_CATEGORY_LABEL, MAKEUP_STATUS_LABEL } from "./constants";
+import {
+  MAKEUP_CATEGORY_LABEL,
+  MAKEUP_STATUS_LABEL,
+  MAKEUP_CONFIRMED_BY_LABEL,
+  makeupKindLabel,
+} from "./constants";
 import { sessionHours, workWindow } from "./overtime";
+import { canSelfConfirm, type ConfirmableSession } from "./makeup-confirm";
 import type { MakeupModalValues } from "./slack";
 
 const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
@@ -53,39 +59,100 @@ export function parseMakeupInput(v: MakeupModalValues): MakeupParseResult {
   return { ok: true, start, end };
 }
 
-/** 직원이 '내 보강 내역' 을 눌렀을 때 보여줄 문구 */
-export async function makeupListText(employeeId: number, name: string): Promise<string> {
-  const today = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
+/** 한 줄 요약 — 목록·홈이 함께 쓴다 */
+function lineOf(r: { category: string; status: string; targetClass: string; confirmedBy?: string | null }, label: string) {
+  const cat = MAKEUP_CATEGORY_LABEL[r.category] ?? r.category;
+  const st = MAKEUP_STATUS_LABEL[r.status] ?? r.status;
+  const by = r.confirmedBy ? ` · ${MAKEUP_CONFIRMED_BY_LABEL[r.confirmedBy] ?? r.confirmedBy}` : "";
+  return `• ${label}\n   ${cat} · ${r.targetClass} · _${st}${by}_`;
+}
+
+/**
+ * 직원이 '내 신청 내역' 을 눌렀을 때 보여줄 화면.
+ *
+ * **지난 건에는 「실근무 확정」 버튼이 붙는다** — 확정은 관리자가 아니라 신청자가 한다.
+ * 근무 다음날부터 열리고, 이미 확정한 건도 기간 안이면 다시 고칠 수 있다(`canSelfConfirm`).
+ */
+export async function makeupListBlocks(
+  employeeId: number,
+  name: string,
+  now: Date = new Date()
+): Promise<{ text: string; blocks: any[] }> {
+  const today = new Date(now.toISOString().slice(0, 10) + "T00:00:00Z");
   const from = new Date(today.getTime() - 60 * 86400000);
   const rows = await prisma.makeupSession.findMany({
     where: { employeeId, planStart: { gte: from } },
     orderBy: { planStart: "asc" },
     take: 30,
   });
-  if (!rows.length)
-    return `*${name}님의 보강 내역*\n\n_최근 두 달 안에 등록된 보강이 없습니다._\n\`/보강\` 으로 새 계획을 등록할 수 있습니다.`;
+  const title = `*${name}님의 보강 · 주말근무 내역*`;
+  if (!rows.length) {
+    const text = `${title}\n\n_최근 두 달 안에 등록된 신청이 없습니다._\n\`/보강\` 으로 새로 신청할 수 있습니다.`;
+    return { text, blocks: [{ type: "section", text: { type: "mrkdwn", text } }] };
+  }
 
   const upcoming = rows.filter((r) => r.planStart >= today);
   const past = rows.filter((r) => r.planStart < today).slice(-8);
-  const line = (r: (typeof rows)[number]) => {
+  const label = (r: (typeof rows)[number]) => {
     const w = workWindow(r as any);
-    const label = makeupDateLabel(w.start, w.end);
-    const cat = MAKEUP_CATEGORY_LABEL[r.category] ?? r.category;
-    const st = MAKEUP_STATUS_LABEL[r.status] ?? r.status;
-    return `• ${label}\n   ${cat} · ${r.targetClass} · _${st}_`;
+    return makeupDateLabel(w.start, w.end);
   };
 
-  const out = [`*${name}님의 보강 내역*`];
-  out.push("", "*예정*", ...(upcoming.length ? upcoming.map(line) : ["_예정된 보강이 없습니다._"]));
-  if (past.length) out.push("", "*지난 보강*", ...past.map(line));
-  out.push(
+  const blocks: any[] = [{ type: "section", text: { type: "mrkdwn", text: title } }];
+  const push = (heading: string, list: typeof rows, withButton: boolean) => {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `*${heading}*` } });
+    if (!list.length) {
+      blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "_없습니다._" }] });
+      return;
+    }
+    for (const r of list) {
+      const section: any = {
+        type: "section",
+        text: { type: "mrkdwn", text: lineOf(r, label(r)) },
+      };
+      if (withButton && canSelfConfirm(r as unknown as ConfirmableSession, now).ok) {
+        section.accessory = {
+          type: "button",
+          style: r.status === "CONFIRMED" ? undefined : "primary",
+          text: {
+            type: "plain_text",
+            text: r.status === "CONFIRMED" ? "확정 수정" : "실근무 확정",
+            emoji: true,
+          },
+          action_id: "open_makeup_confirm",
+          value: String(r.id),
+        };
+        if (!section.accessory.style) delete section.accessory.style;
+      }
+      blocks.push(section);
+    }
+  };
+
+  push("예정", upcoming, false);
+  if (past.length) push("지난 근무 — 실근무 시간을 확정해 주세요", past, true);
+  blocks.push({
+    type: "context",
+    elements: [
+      {
+        type: "mrkdwn",
+        text:
+          "확정은 근무가 끝난 *다음날부터* 가능하며, 확정한 시간이 그대로 오버타임 수당으로 산정됩니다. " +
+          "확정 후에도 해당 월 급여가 마감되기 전까지는 고칠 수 있습니다.",
+      },
+    ],
+  });
+
+  const text = [
+    title,
     "",
-    "_실제 근무 여부는 관리자가 확인한 뒤 오버타임 수당으로 산정됩니다._"
-  );
-  return out.join("\n");
+    "*예정*",
+    ...(upcoming.length ? upcoming.map((r) => lineOf(r, label(r))) : ["_없습니다._"]),
+    ...(past.length ? ["", "*지난 근무*", ...past.map((r) => lineOf(r, label(r)))] : []),
+  ].join("\n");
+  return { text, blocks };
 }
 
-/** 앱 홈 '예정된 보강' 목록 */
+/** 앱 홈 '예정된 보강·주말근무' 목록 */
 export async function upcomingMakeups(employeeId: number) {
   const today = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
   const rows = await prisma.makeupSession.findMany({
@@ -101,3 +168,40 @@ export async function upcomingMakeups(employeeId: number) {
     };
   });
 }
+
+/** 확정 모달의 초기값 — 실근무 시각이 있으면 그것, 없으면 예정값 */
+export function confirmInitials(r: {
+  planStart: Date;
+  planEnd: Date;
+  actualStart?: Date | null;
+  actualEnd?: Date | null;
+}) {
+  const s = r.actualStart ?? r.planStart;
+  const e = r.actualEnd ?? r.planEnd;
+  const d = (x: Date) => x.toISOString().slice(0, 10);
+  const t = (x: Date) => x.toISOString().slice(11, 16);
+  return { startDate: d(s), startTime: t(s), endDate: d(e), endTime: t(e) };
+}
+
+/** 확정 모달 제출값 검증 — 신청 검증과 같은 규칙(자정 넘김·24시간 상한) */
+export function parseConfirmInput(v: {
+  startDate: string | null;
+  startTime: string | null;
+  endDate: string | null;
+  endTime: string | null;
+}): MakeupParseResult {
+  if (!v.startDate || !v.startTime)
+    return { ok: false, error: "실제 시작 시간을 선택해 주세요.", field: "sdate" };
+  if (!v.endTime) return { ok: false, error: "실제 종료 시간을 선택해 주세요.", field: "etime" };
+  const start = slackDateTime(v.startDate, v.startTime);
+  let end = slackDateTime(v.endDate || v.startDate, v.endTime);
+  if (!v.endDate && end <= start) end = new Date(end.getTime() + 86400000);
+  if (end <= start)
+    return { ok: false, error: "종료 시간이 시작 시간보다 빠릅니다.", field: "etime" };
+  if ((end.getTime() - start.getTime()) / 3600000 > 24)
+    return { ok: false, error: "한 건이 24시간을 넘습니다. 날짜를 확인해 주세요.", field: "edate" };
+  return { ok: true, start, end };
+}
+
+/** 신청 종류 라벨 — 화면·메시지가 함께 쓴다 */
+export { makeupKindLabel };

@@ -43,6 +43,8 @@ export interface OtPolicy {
   mandatoryDefault: boolean;
   absenceDefault: boolean;
   otherDefault: boolean;
+  /** 주말근무 — 실제로 나와 일한 것이라 기본 반영 */
+  weekendDefault: boolean;
 }
 
 export const DEFAULT_OT_POLICY: OtPolicy = {
@@ -62,6 +64,7 @@ export const DEFAULT_OT_POLICY: OtPolicy = {
   mandatoryDefault: true,
   absenceDefault: false,
   otherDefault: false,
+  weekendDefault: true,
 };
 
 export interface OtSession {
@@ -198,7 +201,14 @@ function roundHours(h: number, minutes: number): number {
 
 /* ───────────── 산정 ───────────── */
 
-function categoryDefault(category: string, p: OtPolicy): boolean {
+/**
+ * 카테고리별 '수당 반영' 기본값.
+ *
+ * 여기가 **확정 요청 알림을 자동으로 보낼지**도 가른다 — 기본 반영되는 유형은
+ * 근무 다음날 신청자에게 알림이 나가고, 기본 미반영(결시보강 등)은 관리자가
+ * 반영 여부를 정한 뒤 직접 보낸다(`lib/makeup-service.ts`).
+ */
+export function categoryDefault(category: string, p: OtPolicy = DEFAULT_OT_POLICY): boolean {
   switch (category) {
     case "IMMEDIATE":
       return p.immediateDefault;
@@ -206,6 +216,8 @@ function categoryDefault(category: string, p: OtPolicy): boolean {
       return p.mandatoryDefault;
     case "ABSENCE":
       return p.absenceDefault;
+    case "WEEKEND":
+      return p.weekendDefault;
     default:
       return p.otherDefault;
   }

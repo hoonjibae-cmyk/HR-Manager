@@ -3,7 +3,14 @@
 // 여기서 모아 넘기고, 결과를 급여·화면·명세서가 쓸 형태로 돌려준다.
 
 import { prisma } from "./db";
-import { parseSchedule, MAKEUP_CATEGORY_LABEL, MAKEUP_STATUS_LABEL, isContractorContract } from "./constants";
+import {
+  parseSchedule,
+  MAKEUP_CATEGORY_LABEL,
+  MAKEUP_STATUS_LABEL,
+  isContractorContract,
+  isWeekendWork,
+  makeupKindLabel,
+} from "./constants";
 import {
   createMakeupEvent,
   updateMakeupEvent,
@@ -15,12 +22,19 @@ import {
   overtimeAmount,
   sessionHours,
   workWindow,
+  categoryDefault,
   DEFAULT_OT_POLICY,
   type ExamWindow,
   type OtPolicy,
   type OtResult,
   type OtSession,
 } from "./overtime";
+import {
+  canSelfConfirm,
+  mandatoryCapNotice,
+  underMandatoryCap,
+  type ConfirmableSession,
+} from "./makeup-confirm";
 import { computeWeeklyHours, inclusiveWageBreakdown } from "./payroll";
 import { empToPayInput } from "./repo";
 import { wageSegmentsFor, applyMidMonthBlend, type MonthContractTerms } from "./payroll-service";
@@ -203,18 +217,8 @@ export async function overtimeForMonth(
   return out;
 }
 
-function defaultOf(category: string, p: OtPolicy): boolean {
-  switch (category) {
-    case "IMMEDIATE":
-      return p.immediateDefault;
-    case "MANDATORY":
-      return p.mandatoryDefault;
-    case "ABSENCE":
-      return p.absenceDefault;
-    default:
-      return p.otherDefault;
-  }
-}
+/** 카테고리별 '수당 반영' 기본값 — 판정은 엔진 것 하나만 쓴다(둘로 두면 어긋난다) */
+const defaultOf = categoryDefault;
 
 /**
  * 통상시급 — **명세서에 찍히는 값과 같아야** 하므로 급여 엔진을 그대로 통과시킨다.
@@ -282,6 +286,9 @@ export async function overtimeInputsFor(
  * 보강 일정을 구글 '보강캘린더' 에 맞춘다.
  * 연차 캘린더와 별개의 캘린더(GOOGLE_MAKEUP_CALENDAR_ID)를 쓰고,
  * **캘린더 실패가 신청·확인 자체를 되돌리지는 않는다** (연차 흐름과 같은 원칙).
+ *
+ * **주말근무는 올리지 않는다** — 보강캘린더는 '누가 언제 어떤 반을 보강하는지' 를
+ * 강사·학생이 함께 보는 달력이다. 교무 외 직원의 주말 근무가 섞이면 보강을 못 읽는다.
  */
 export async function syncMakeupCalendar(sessionId: number): Promise<string | null> {
   if (!makeupCalendarConfigured()) return null;
@@ -291,8 +298,9 @@ export async function syncMakeupCalendar(sessionId: number): Promise<string | nu
   });
   if (!r) return null;
 
-  // 취소·미실시는 캘린더에서 내린다 (실제로 하지 않은 수업이 남아 있으면 안 된다)
-  if (r.status === "CANCELED" || r.status === "NOSHOW") {
+  // 취소·미실시는 캘린더에서 내린다 (실제로 하지 않은 수업이 남아 있으면 안 된다).
+  // 주말근무도 마찬가지 — 보강으로 넣었다가 주말근무로 바꾼 건이면 이미 올라간 일정을 내린다.
+  if (r.status === "CANCELED" || r.status === "NOSHOW" || isWeekendWork(r.category)) {
     if (r.gcalEventId) {
       await deleteMakeupEvent(r.gcalEventId);
       await prisma.makeupSession.update({ where: { id: r.id }, data: { gcalEventId: null } });
@@ -368,10 +376,13 @@ export interface MakeupPatch {
   note?: string | null;
 }
 
-/** 관리자 확인 — 실근무 시각·수당 반영 여부를 고치고 캘린더를 다시 맞춘다 */
+/**
+ * 관리자 확인 — 실근무 시각·수당 반영 여부를 고치고 캘린더를 다시 맞춘다.
+ * **관리자에게는 확정 기간 제한이 없다**(신청자 확정이 닫힌 뒤에도 정정할 수 있어야 한다).
+ */
 export async function updateMakeupSession(id: number, patch: MakeupPatch) {
   const before = await prisma.makeupSession.findUnique({ where: { id } });
-  if (!before) throw new Error("보강 신청을 찾을 수 없습니다.");
+  if (!before) throw new Error("신청 내역을 찾을 수 없습니다.");
 
   const data: any = { ...patch };
   // 실근무 시각을 따로 안 적고 확정하면 신청한 시각을 그대로 인정한다
@@ -379,6 +390,9 @@ export async function updateMakeupSession(id: number, patch: MakeupPatch) {
     data.actualStart = patch.actualStart ?? before.actualStart ?? before.planStart;
     data.actualEnd = patch.actualEnd ?? before.actualEnd ?? before.planEnd;
     data.reviewedAt = new Date();
+    // 관리자가 손댔으면 확정 주체는 관리자다 — 신청자 확정분을 고쳐도 마찬가지다(최종 권한)
+    data.confirmedBy = "ADMIN";
+    data.confirmedAt = new Date();
   }
   const row = await prisma.makeupSession.update({
     where: { id },
@@ -387,6 +401,232 @@ export async function updateMakeupSession(id: number, patch: MakeupPatch) {
   });
   await syncMakeupCalendar(id).catch(() => null);
   return row;
+}
+
+/* ───────────── 신청자 자체 확정 ───────────── */
+
+export interface CapContext {
+  capHours: number;
+  /** 같은 내신 기간에서 이미 확정된 다른 내신의무보강 시간 */
+  otherHours: number;
+  periodName: string | null;
+}
+
+/**
+ * 이 건이 속한 내신 기간의 상한 현황.
+ * 상한은 **기간 전체**가 단위라 그 기간에 걸친 다른 확정분까지 함께 봐야 한다.
+ * 내신 기간이 등록돼 있지 않으면 엔진과 같은 규칙으로 분기(연 4회)로 묶는다.
+ */
+export async function mandatoryCapContext(
+  employeeId: number,
+  sessionId: number | null,
+  workDate: Date
+): Promise<CapContext> {
+  const [policy, exams] = await Promise.all([getOvertimePolicy(), getExamPeriods()]);
+  const win = exams.find((e) => workDate >= e.startDate && workDate <= e.endDate);
+  let from: Date;
+  let to: Date;
+  let capHours: number;
+  let periodName: string | null;
+  if (win) {
+    from = win.startDate;
+    to = win.endDate;
+    capHours = win.capHours ?? policy.mandatoryCapHours;
+    periodName = win.name;
+  } else {
+    const q = Math.floor(workDate.getUTCMonth() / 3);
+    from = new Date(Date.UTC(workDate.getUTCFullYear(), q * 3, 1));
+    to = new Date(Date.UTC(workDate.getUTCFullYear(), q * 3 + 3, 1) - 1000);
+    capHours = policy.mandatoryCapHours;
+    periodName = null;
+  }
+
+  const rows = await prisma.makeupSession.findMany({
+    where: {
+      employeeId,
+      category: "MANDATORY",
+      status: "CONFIRMED",
+      planStart: { gte: from, lte: to },
+      ...(sessionId ? { id: { not: sessionId } } : {}),
+    },
+  });
+  const otherHours = rows.reduce((a, r) => a + sessionHours(r as any), 0);
+  return { capHours, otherHours: Math.round(otherHours * 1000) / 1000, periodName };
+}
+
+export interface ConfirmActualsInput {
+  actualStart: Date;
+  actualEnd: Date;
+  /** EMPLOYEE = 신청자 본인(기간 제한 있음) · ADMIN = 관리자(제한 없음) */
+  by: "EMPLOYEE" | "ADMIN";
+  note?: string | null;
+  now?: Date;
+}
+
+export interface ConfirmActualsResult {
+  row: Awaited<ReturnType<typeof updateMakeupSession>>;
+  /** 내신 상한을 넘겼을 때 신청자에게 보여줄 안내 (없으면 null) */
+  capNotice: string | null;
+}
+
+/**
+ * 실근무 시각 확정 — **신청자가 근무 다음날부터 직접** 한다.
+ *
+ * 확정한 값이 그대로 오버타임 원장이 되어 보강·오버타임 화면과 급여 산정에 실린다.
+ * 내신의무보강이 기간 상한을 넘기면 **막지 않고 안내만** 돌려준다 —
+ * 상한 범위 안에서 수당이 큰 근무부터 채워지므로 초과분을 적어 두는 편이 유리하다.
+ */
+export async function confirmMakeupActuals(
+  id: number,
+  input: ConfirmActualsInput
+): Promise<ConfirmActualsResult> {
+  const before = await prisma.makeupSession.findUnique({ where: { id } });
+  if (!before) throw new Error("신청 내역을 찾을 수 없습니다.");
+  if (!(input.actualEnd > input.actualStart))
+    throw new Error("종료 시간이 시작 시간보다 빠릅니다.");
+  const hours = (input.actualEnd.getTime() - input.actualStart.getTime()) / 3600000;
+  if (hours > 24) throw new Error("한 건이 24시간을 넘습니다. 날짜를 확인해 주세요.");
+
+  if (input.by === "EMPLOYEE") {
+    const v = canSelfConfirm(before as unknown as ConfirmableSession, input.now ?? new Date());
+    if (!v.ok) throw new Error(v.reason ?? "지금은 확정할 수 없습니다.");
+  }
+
+  let capNotice: string | null = null;
+  if (underMandatoryCap(before.category)) {
+    const ctx = await mandatoryCapContext(before.employeeId, id, workWindow(before as any).start);
+    capNotice = mandatoryCapNotice({
+      capHours: ctx.capHours,
+      otherHours: ctx.otherHours,
+      thisHours: Math.round(hours * 1000) / 1000,
+      periodName: ctx.periodName,
+    });
+  }
+
+  const row = await prisma.makeupSession.update({
+    where: { id },
+    data: {
+      status: "CONFIRMED",
+      actualStart: input.actualStart,
+      actualEnd: input.actualEnd,
+      reviewNote: input.note?.trim() || before.reviewNote,
+      confirmedBy: input.by,
+      confirmedAt: new Date(),
+      // 관리자가 확정하면 관리자 확인 시각도 함께 새긴다
+      ...(input.by === "ADMIN" ? { reviewedAt: new Date() } : {}),
+    },
+    include: { employee: true },
+  });
+  await syncMakeupCalendar(id).catch(() => null);
+  return { row, capNotice };
+}
+
+/* ───────────── 실근무 확정 요청 알림 ───────────── */
+
+/**
+ * 이 건은 확정 요청 알림을 **자동으로** 보내도 되는가.
+ *
+ * 기준은 '수당이 기본으로 반영되는 유형인가' 다 — 직전보강·내신의무보강·주말근무처럼
+ * 신청만으로 수당 대상이 되는 건은 실근무 시간만 채우면 그대로 지급되므로 바로 재촉한다.
+ * 결시보강처럼 **기본 미반영**인 건은 관리자가 수당 반영 여부부터 정해야 한다 —
+ * 반영하지 않기로 한 건에 "시간을 확정해 달라" 고 보내면 지급되는 줄 알게 된다.
+ * 그런 건은 관리자가 화면에서 **골라서** 보낸다(`sendConfirmRequest`).
+ */
+export function autoNotifiesConfirm(
+  s: { category: string; payEligible?: boolean | null },
+  policy: OtPolicy
+): boolean {
+  if (s.payEligible === false) return false;
+  if (s.payEligible === true) return true;
+  return defaultOf(s.category, policy);
+}
+
+export interface ConfirmRequestResult {
+  ok: boolean;
+  /** 못 보낸 이유 (슬랙 미연결·슬랙 계정 없음 등) */
+  reason?: string;
+}
+
+/**
+ * 신청자에게 '실근무 시간을 확정해 주세요' DM.
+ * 같은 건에 두 번 보내지 않도록 `confirmNotifiedAt` 를 새긴다 —
+ * 관리자가 일부러 다시 보낼 때(`force`)만 그 검사를 건너뛴다.
+ */
+export async function sendConfirmRequest(
+  id: number,
+  opts: { force?: boolean } = {}
+): Promise<ConfirmRequestResult> {
+  const { postMessage, slackConfigured, makeupConfirmRequestBlocks } = await import("./slack");
+  const { makeupDateLabel } = await import("./makeup-slack");
+
+  const r = await prisma.makeupSession.findUnique({ where: { id }, include: { employee: true } });
+  if (!r) return { ok: false, reason: "신청 내역을 찾을 수 없습니다." };
+  if (!slackConfigured()) return { ok: false, reason: "슬랙이 연결되어 있지 않습니다." };
+  if (!r.slackUserId)
+    return { ok: false, reason: `${r.employee.name}님의 슬랙 계정을 알 수 없습니다.` };
+  if (r.status === "CANCELED" || r.status === "NOSHOW")
+    return { ok: false, reason: "취소·미실시 건에는 보내지 않습니다." };
+  if (r.confirmNotifiedAt && !opts.force) return { ok: false, reason: "이미 보냈습니다." };
+
+  const w = workWindow(r as any);
+  const blocks = makeupConfirmRequestBlocks({
+    id: r.id,
+    name: r.employee.name,
+    kindLabel: makeupKindLabel(r.category),
+    categoryLabel: MAKEUP_CATEGORY_LABEL[r.category] ?? r.category,
+    dateLabel: makeupDateLabel(w.start, w.end),
+    targetClass: r.targetClass,
+    alreadyConfirmed: r.status === "CONFIRMED",
+  });
+  await postMessage(
+    r.slackUserId,
+    `⏱ ${makeupKindLabel(r.category)} 실근무 시간을 확정해 주세요 — ${makeupDateLabel(w.start, w.end)}`,
+    blocks
+  );
+  await prisma.makeupSession.update({ where: { id }, data: { confirmNotifiedAt: new Date() } });
+  return { ok: true };
+}
+
+/**
+ * 근무가 끝난 건에 확정 요청을 자동 발송 (크론이 하루 한 번 부른다).
+ *
+ * 대상: 어제까지 끝난 · 아직 확정 안 된 · 아직 알림을 안 보낸 · **수당이 기본 반영되는** 건.
+ * 되돌리기 어려운 작업이 아니라 실패해도 조용히 지나간다(다음 날 다시 시도된다 —
+ * `confirmNotifiedAt` 는 실제로 보낸 뒤에만 찍힌다).
+ */
+export async function runMakeupConfirmReminders(now: Date = new Date()) {
+  const policy = await getOvertimePolicy();
+  // '근무가 끝난 날의 다음날' 부터 확정할 수 있다(lib/makeup-confirm.ts) — 그 시점에 재촉한다.
+  //
+  // 저장된 시각은 KST 벽시계를 UTC 필드에 담은 것이고 `now` 는 진짜 UTC 다. 그래서 이 경계는
+  // **다음날 09:00 KST** 에 넘어간다 — 의도한 것이다. 벽시계로 맞춰 자정 직후에 보내면
+  // 새벽에 DM 이 울린다(보강은 밤늦게 끝나는 일이 잦다).
+  const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  // 너무 오래된 건까지 거슬러 올라가 무더기로 보내지 않는다 (도입 직후 30일치 폭탄 방지)
+  const from = new Date(cutoff.getTime() - 14 * 86400000);
+
+  const rows = await prisma.makeupSession.findMany({
+    where: {
+      planEnd: { gte: from, lt: cutoff },
+      status: "PLANNED",
+      confirmNotifiedAt: null,
+      slackUserId: { not: null },
+    },
+    orderBy: { planStart: "asc" },
+    take: 200,
+  });
+
+  let sent = 0;
+  const skipped: number[] = [];
+  for (const r of rows) {
+    if (!autoNotifiesConfirm(r, policy)) {
+      skipped.push(r.id);
+      continue;
+    }
+    const res = await sendConfirmRequest(r.id).catch(() => ({ ok: false }) as ConfirmRequestResult);
+    if (res.ok) sent++;
+  }
+  return { scanned: rows.length, sent, needsAdminDecision: skipped };
 }
 
 /** 신청 삭제 — 캘린더 일정도 함께 내린다 */
@@ -424,6 +664,16 @@ export interface MakeupRow {
   actualStart: string | null;
   actualEnd: string | null;
   hasGcal: boolean;
+  /** 주말근무는 보강이 아니다 — 캘린더에 올리지 않고 화면 문구도 갈린다 */
+  weekend: boolean;
+  /** EMPLOYEE(신청자 확정) | ADMIN(관리자 확정) | null(아직) */
+  confirmedBy: string | null;
+  /** 확정 요청 알림을 보낸 시각 (ISO). null 이면 아직 안 보냈다 */
+  confirmNotifiedAt: string | null;
+  /** 수당이 기본 반영되는 유형이라 알림이 자동으로 나가는가 (아니면 관리자가 골라 보낸다) */
+  autoNotify: boolean;
+  /** 슬랙 계정이 없으면 알림을 보낼 수 없다 */
+  slackLinked: boolean;
   /** 산정 결과 — 확정된 건만 채워진다 */
   kind: string | null;
   countedHours: number;
@@ -496,6 +746,11 @@ export async function makeupMonth(year: number, month: number) {
       actualStart: r.actualStart?.toISOString() ?? null,
       actualEnd: r.actualEnd?.toISOString() ?? null,
       hasGcal: !!r.gcalEventId,
+      weekend: isWeekendWork(r.category),
+      confirmedBy: r.confirmedBy,
+      confirmNotifiedAt: r.confirmNotifiedAt?.toISOString() ?? null,
+      autoNotify: autoNotifiesConfirm(r, policy),
+      slackLinked: !!r.slackUserId,
       kind: hit?.kinds.size ? Array.from(hit.kinds).join("+") : null,
       countedHours: Math.round((hit?.counted ?? 0) * 100) / 100,
       amount: hit?.amount ?? 0,

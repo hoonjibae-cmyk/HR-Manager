@@ -502,8 +502,9 @@ model IncentiveStudent {
   @@index([employeeId, year, month])
 }
 
-/// 보강계획 사전신청 — 슬랙으로 직원이 직접 등록(승인 절차 없음).
-/// 관리자가 실근무 시각을 확정하면 오버타임 수당 산정의 원장이 된다.
+/// 보강 · 주말근무 사전신청 — 슬랙으로 직원이 직접 등록(승인 절차 없음).
+/// 실근무 시각이 확정되면 오버타임 수당 산정의 원장이 된다.
+/// 확정은 **근무 다음날부터 신청자가 직접** 하고, 관리자가 최종적으로 다시 고칠 수 있다.
 /// 시각은 **KST 벽시계 값을 UTC 필드에 그대로** 담는다(앱 전체 규칙).
 model MakeupSession {
   id         Int      @id @default(autoincrement())
@@ -511,22 +512,32 @@ model MakeupSession {
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   // --- 신청 내용 (슬랙 양식 그대로) ---
-  planStart   DateTime // 보강 시작 시간(예정)
-  planEnd     DateTime // 보강 종료 시간(예정)
-  // IMMEDIATE(직전보강) | MANDATORY(내신의무보강) | ABSENCE(결시보강) | OTHER(기타)
+  planStart   DateTime // 근무 시작 시간(예정)
+  planEnd     DateTime // 근무 종료 시간(예정)
+  /// IMMEDIATE(직전보강) | MANDATORY(내신의무보강) | ABSENCE(결시보강) | OTHER(기타)
+  /// | WEEKEND(주말근무 — 교수부가 아닌 직원의 주말 근무. 보강이 아니라 캘린더에 올리지 않는다)
   category    String
-  targetClass String // 대상반 (개별 보강이면 학생 이름)
-  headcount   Int? // 수강 예상인원
-  detail      String   @default("") // 세부 보강내역
+  targetClass String // 대상반 (개별 보강이면 학생 이름) / 주말근무는 담당 업무
+  headcount   Int? // 수강 예상인원 (주말근무는 쓰지 않는다)
+  detail      String   @default("") // 세부 보강내역 / 근무내역
   note        String? // 기타 특이사항
 
-  // --- 관리자 확인 ---
+  // --- 실근무 확정 ---
   // PLANNED(신청됨) | CONFIRMED(실근무 확정) | NOSHOW(미실시) | CANCELED(취소)
   status      String    @default("PLANNED")
   actualStart DateTime? // 실근무 시작 (미입력 시 확정할 때 예정값으로 채움)
   actualEnd   DateTime?
-  reviewNote  String? // 관리자 메모
+  reviewNote  String? // 확정 메모 (신청자·관리자 공용)
   reviewedAt  DateTime?
+
+  /// 누가 확정했는가 — EMPLOYEE(신청자 본인) | ADMIN(관리자).
+  /// 관리자가 나중에 고치면 ADMIN 으로 덮인다(최종 권한은 관리자에게 있다).
+  confirmedBy String?
+  confirmedAt DateTime?
+
+  /// '실근무 시간을 확정해 주세요' 알림을 보낸 시각 — 같은 건에 두 번 보내지 않기 위함.
+  /// 수당이 기본 반영되는 유형은 근무 다음날 자동으로, 그 외는 관리자가 눌러서 보낸다.
+  confirmNotifiedAt DateTime?
 
   /// 수당 반영 여부 — null 이면 카테고리 기본값(OvertimePolicy).
   /// 결시보강처럼 건건이 판단해야 하는 건 관리자가 여기서 켜고 끈다.
@@ -583,6 +594,8 @@ model OvertimePolicy {
   mandatoryDefault Boolean @default(true) // 내신의무보강 — 대상(상한 적용)
   absenceDefault   Boolean @default(false) // 결시보강 — 관리자가 건건이 판단
   otherDefault     Boolean @default(false)
+  // 주말근무 — 실제로 나와 일한 것이라 기본 반영. 상한(내신)은 적용되지 않는다.
+  weekendDefault   Boolean @default(true)
 
   updatedAt DateTime @updatedAt
 }

@@ -3,7 +3,11 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { MAKEUP_CATEGORY_LABEL, MAKEUP_STATUS_LABEL } from "@/lib/constants";
+import {
+  MAKEUP_CATEGORY_LABEL,
+  MAKEUP_STATUS_LABEL,
+  MAKEUP_CONFIRMED_BY_LABEL,
+} from "@/lib/constants";
 import type { MakeupRow } from "@/lib/makeup-service";
 
 const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
@@ -60,6 +64,8 @@ export default function MakeupCalendar({
   const [open, setOpen] = useState<MakeupRow | null>(null);
   const [dept, setDept] = useState("");
   const [emp, setEmp] = useState("");
+  // 근무가 끝났는데 아직 확정이 안 된 건을 표시하기 위한 오늘 날짜 (KST 벽시계 규칙)
+  const todayYmd = useMemo(() => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10), []);
 
   const holidayMap = useMemo(
     () => new Map(holidays.map((h) => [h.date, h.name])),
@@ -217,12 +223,16 @@ export default function MakeupCalendar({
                           className={`w-full text-left rounded px-1.5 py-0.5 text-[11px] leading-tight truncate hover:brightness-95 ${chipTone(r)}`}
                           title={`${r.name} · ${MAKEUP_CATEGORY_LABEL[r.category]} · ${r.targetClass}`}
                         >
+                          {/* 주말근무는 보강이 아니다 — 달력에서 한눈에 갈라 보이게 표시한다 */}
+                          {r.weekend && <span title="주말근무">🗓 </span>}
                           <span className="font-semibold">{r.name}</span>{" "}
                           <span className="tnum">{r.startTime}</span>
                           {r.status === "CONFIRMED" && r.countedHours > 0 && (
                             <span className="tnum"> · {r.countedHours}h</span>
                           )}
                           {r.needsDecision && " ⚠"}
+                          {/* 근무는 끝났는데 아직 실근무 확정이 안 된 건 */}
+                          {r.status === "PLANNED" && r.date < todayYmd && " ⏱"}
                         </button>
                       ))}
                     </div>
@@ -374,11 +384,31 @@ function DetailModal({
   }
 
   async function remove() {
-    if (!confirm("이 보강 신청을 삭제할까요? 보강캘린더 일정도 함께 삭제됩니다.")) return;
+    const what = row.weekend ? "주말근무" : "보강";
+    const also = row.weekend ? "" : " 보강캘린더 일정도 함께 삭제됩니다.";
+    if (!confirm(`이 ${what} 신청을 삭제할까요?${also}`)) return;
     setBusy(true);
     const res = await fetch(`/api/makeup/${row.id}`, { method: "DELETE" });
     setBusy(false);
     if (!res.ok) return setErr("삭제하지 못했습니다.");
+    onSaved();
+  }
+
+  /**
+   * 신청자에게 '실근무 시간을 확정해 주세요' 요청 — 관리자가 골라서 보낸다.
+   * 수당이 기본 반영되는 유형은 근무 다음날 자동으로 나가므로 여기서 다시 보낼 일은 드물다.
+   */
+  async function remind(force: boolean) {
+    setBusy(true);
+    setErr("");
+    const res = await fetch(`/api/makeup/${row.id}/remind`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) return setErr(j.error || "보내지 못했습니다.");
     onSaved();
   }
 
@@ -393,6 +423,7 @@ function DetailModal({
             <p className="text-xs text-slate-500 mt-1">
               {row.date} {row.startTime}~{row.endTime} ({row.hours}시간) ·{" "}
               {MAKEUP_STATUS_LABEL[row.status] ?? row.status}
+              {row.confirmedBy && ` · ${MAKEUP_CONFIRMED_BY_LABEL[row.confirmedBy] ?? row.confirmedBy}`}
               {row.hasGcal && " · 보강캘린더 등록됨"}
             </p>
           </div>
@@ -403,12 +434,15 @@ function DetailModal({
 
         <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm space-y-1 mb-4">
           <div>
-            <span className="text-slate-400 text-xs">대상반</span> {row.targetClass}
+            <span className="text-slate-400 text-xs">{row.weekend ? "담당 업무" : "대상반"}</span>{" "}
+            {row.targetClass}
             {row.headcount ? <span className="text-slate-400"> · 예상 {row.headcount}명</span> : null}
           </div>
           {row.detail && (
             <div className="whitespace-pre-line">
-              <span className="text-slate-400 text-xs">세부 보강내역</span>
+              <span className="text-slate-400 text-xs">
+                세부 {row.weekend ? "근무" : "보강"}내역
+              </span>
               <div className="text-slate-600">{row.detail}</div>
             </div>
           )}
@@ -433,6 +467,57 @@ function DetailModal({
             {row.reason && <div className="text-xs text-amber-700 mt-1">· {row.reason}</div>}
           </div>
         )}
+
+        {/* 실근무 확정은 신청자가 직접 한다 — 관리자는 재촉하고, 필요하면 최종적으로 고친다 */}
+        <div className="rounded-lg border border-slate-200 p-3 text-xs mb-4 space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="text-slate-500 leading-relaxed">
+              {row.confirmedBy === "EMPLOYEE" ? (
+                <>
+                  <b className="text-slate-700">신청자가 직접 확정</b>한 건입니다. 아래에서 고치면
+                  관리자 확정으로 바뀝니다.
+                </>
+              ) : row.confirmedBy === "ADMIN" ? (
+                <>관리자가 확정한 건입니다.</>
+              ) : row.confirmNotifiedAt ? (
+                <>
+                  확정 요청을 보냈으나 아직 신청자가 확정하지 않았습니다
+                  <span className="text-slate-400">
+                    {" "}
+                    ({row.confirmNotifiedAt.slice(0, 10)} 발송)
+                  </span>
+                  .
+                </>
+              ) : row.autoNotify ? (
+                <>근무 다음날 신청자에게 확정 요청이 자동으로 나갑니다.</>
+              ) : (
+                <>
+                  <b className="text-amber-700">수당 반영 여부를 먼저 정해 주세요.</b> 기본 미반영
+                  종류라 확정 요청이 자동으로 나가지 않습니다 — 반영하기로 했다면 아래 버튼으로
+                  보냅니다.
+                </>
+              )}
+            </div>
+            <button
+              type="button"
+              className="btn-outline shrink-0"
+              onClick={() => remind(!!row.confirmNotifiedAt)}
+              disabled={busy || !row.slackLinked}
+              title={
+                row.slackLinked
+                  ? "신청자에게 실근무 확정 요청 DM 을 보냅니다"
+                  : "슬랙 계정이 연결되어 있지 않습니다"
+              }
+            >
+              {row.confirmNotifiedAt ? "확정 요청 다시 보내기" : "확정 요청 보내기"}
+            </button>
+          </div>
+          {!row.slackLinked && (
+            <p className="text-slate-400">
+              이 신청은 슬랙 계정이 연결되어 있지 않아 알림을 보낼 수 없습니다 (화면에서 등록된 건).
+            </p>
+          )}
+        </div>
 
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -466,14 +551,19 @@ function DetailModal({
               value={f.payEligible}
               onChange={(e) => set("payEligible", e.target.value)}
             >
-              <option value="">보강 종류 기본값 따르기</option>
+              <option value="">종류 기본값 따르기</option>
               <option value="true">수당 반영</option>
               <option value="false">수당 미반영</option>
             </select>
           </div>
 
           <div>
-            <label className="label">관리자 메모 (선택)</label>
+            <label className="label">
+              메모 (선택){" "}
+              <span className="text-slate-400 font-normal">
+                — 신청자가 확정하며 적은 특이사항도 여기에 들어옵니다
+              </span>
+            </label>
             <input
               className="input"
               placeholder="예: 학생 3명 실제 참석 확인"
@@ -505,7 +595,7 @@ function DetailModal({
               저장만
             </button>
             <button className="btn-primary" onClick={() => send("CONFIRMED")} disabled={busy}>
-              {busy ? "저장 중…" : "실근무 확정"}
+              {busy ? "저장 중…" : row.confirmedBy ? "확정 내용 수정" : "실근무 확정"}
             </button>
           </div>
         </div>

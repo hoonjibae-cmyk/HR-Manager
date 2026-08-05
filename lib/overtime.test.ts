@@ -5,6 +5,7 @@ import {
   sessionHours,
   isPayEligible,
   needsDecision,
+  categoryDefault,
   DEFAULT_OT_POLICY,
   type OtSession,
 } from "./overtime";
@@ -365,5 +366,62 @@ describe("정책 조정", () => {
     expect(DEFAULT_OT_POLICY.countNight).toBe(false);
     expect(DEFAULT_OT_POLICY.holidayMultiplier).toBe(1.5);
     expect(DEFAULT_OT_POLICY.holidayOverMultiplier).toBe(2.0);
+  });
+});
+
+/* ───────────── 주말근무 (교수부가 아닌 직원) ───────────── */
+
+describe("주말근무 — 보강과 같은 원장, 기본 반영", () => {
+  it("카테고리 기본값은 '반영' 이다 (실제로 나와 일한 것이다)", () => {
+    expect(categoryDefault("WEEKEND", DEFAULT_OT_POLICY)).toBe(true);
+    expect(isPayEligible({ category: "WEEKEND", payEligible: null })).toBe(true);
+  });
+
+  it("관리자가 끄면 기본값을 이긴다", () => {
+    expect(isPayEligible({ category: "WEEKEND", payEligible: false })).toBe(false);
+  });
+
+  it("모르는 카테고리는 '기타' 기본값(꺼짐)으로 떨어진다", () => {
+    expect(categoryDefault("NOPE", DEFAULT_OT_POLICY)).toBe(false);
+  });
+
+  it("일요일 주말근무는 휴일근로로 ×1.5 가 붙는다", () => {
+    const r = computeOvertime({
+      sessions: [
+        {
+          id: 1,
+          category: "WEEKEND",
+          status: "CONFIRMED",
+          // 2026-08-16 은 일요일
+          planStart: new Date("2026-08-16T09:00:00Z"),
+          planEnd: new Date("2026-08-16T14:00:00Z"),
+        },
+      ],
+      schedule: [],
+      holidays: [],
+    });
+    expect(r.holidayHours).toBe(5);
+    expect(r.lines[0].kind).toBe("HOLIDAY");
+    expect(r.lines[0].multiplier).toBe(1.5);
+  });
+
+  it("내신 상한은 내신의무보강에만 걸린다 — 주말근무는 10시간을 넘겨도 온전히 인정된다", () => {
+    const day = (d: string, h1: string, h2: string, category: string, id: number) => ({
+      id,
+      category,
+      status: "CONFIRMED",
+      planStart: new Date(`${d}T${h1}:00Z`),
+      planEnd: new Date(`${d}T${h2}:00Z`),
+    });
+    const r = computeOvertime({
+      sessions: [
+        day("2026-08-08", "09:00", "16:00", "WEEKEND", 1), // 토 7h
+        day("2026-08-15", "09:00", "16:00", "WEEKEND", 2), // 토 7h
+      ],
+      schedule: [],
+      holidays: [],
+    });
+    expect(r.extraHours).toBe(14);
+    expect(r.excluded).toHaveLength(0);
   });
 });

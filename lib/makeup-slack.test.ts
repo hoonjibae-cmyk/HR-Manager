@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { parseMakeupInput, makeupDateLabel, slackDateTime } from "./makeup-slack";
+import {
+  parseMakeupInput,
+  makeupDateLabel,
+  slackDateTime,
+  parseConfirmInput,
+  confirmInitials,
+} from "./makeup-slack";
 import { buildMakeupEvent } from "./gcal";
 import type { MakeupModalValues } from "./slack";
 
@@ -91,5 +97,86 @@ describe("보강캘린더 일정 본문", () => {
     expect(ev.description).toContain("예정 시간: 7시간");
     expect(ev.description).toContain("실전모의고사 응시 및 풀이.");
     expect(ev.description).toContain("교재 준비 필요");
+  });
+});
+
+/* ───────────── 실근무 확정 (신청자 본인) ───────────── */
+
+describe("confirmInitials — 확정 모달 초기값", () => {
+  it("실근무 시각이 없으면 예정값을 채운다", () => {
+    const r = {
+      planStart: new Date("2026-08-15T09:00:00Z"),
+      planEnd: new Date("2026-08-15T16:00:00Z"),
+    };
+    expect(confirmInitials(r)).toEqual({
+      startDate: "2026-08-15",
+      startTime: "09:00",
+      endDate: "2026-08-15",
+      endTime: "16:00",
+    });
+  });
+
+  it("이미 확정한 시각이 있으면 그쪽을 보여준다 (수정하러 다시 열었을 때)", () => {
+    const r = {
+      planStart: new Date("2026-08-15T09:00:00Z"),
+      planEnd: new Date("2026-08-15T16:00:00Z"),
+      actualStart: new Date("2026-08-15T09:30:00Z"),
+      actualEnd: new Date("2026-08-15T14:00:00Z"),
+    };
+    expect(confirmInitials(r).startTime).toBe("09:30");
+    expect(confirmInitials(r).endTime).toBe("14:00");
+  });
+});
+
+describe("parseConfirmInput — 확정 입력 검증", () => {
+  it("정상 입력", () => {
+    const r = parseConfirmInput({
+      startDate: "2026-08-15",
+      startTime: "09:00",
+      endDate: null,
+      endTime: "14:30",
+    });
+    expect(r.ok).toBe(true);
+    expect(r.start!.toISOString()).toBe("2026-08-15T09:00:00.000Z");
+    expect(r.end!.toISOString()).toBe("2026-08-15T14:30:00.000Z");
+  });
+
+  it("종료일을 안 적었는데 시각이 더 이르면 자정을 넘긴 것으로 본다", () => {
+    const r = parseConfirmInput({
+      startDate: "2026-08-15",
+      startTime: "21:00",
+      endDate: null,
+      endTime: "01:00",
+    });
+    expect(r.ok).toBe(true);
+    expect(r.end!.toISOString()).toBe("2026-08-16T01:00:00.000Z");
+  });
+
+  it("종료가 시작보다 빠르면 막는다", () => {
+    const r = parseConfirmInput({
+      startDate: "2026-08-15",
+      startTime: "14:00",
+      endDate: "2026-08-15",
+      endTime: "09:00",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.field).toBe("etime");
+  });
+
+  it("24시간을 넘기면 날짜를 잘못 고른 것으로 본다", () => {
+    const r = parseConfirmInput({
+      startDate: "2026-08-15",
+      startTime: "09:00",
+      endDate: "2026-08-17",
+      endTime: "09:00",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.field).toBe("edate");
+  });
+
+  it("시작 시각이 비면 첫 칸을 가리킨다", () => {
+    const r = parseConfirmInput({ startDate: null, startTime: null, endDate: null, endTime: "14:00" });
+    expect(r.ok).toBe(false);
+    expect(r.field).toBe("sdate");
   });
 });

@@ -25,6 +25,7 @@ const BOOL = [
   "mandatoryDefault",
   "absenceDefault",
   "otherDefault",
+  "weekendDefault",
 ] as const;
 
 export async function GET() {

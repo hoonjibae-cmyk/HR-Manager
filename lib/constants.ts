@@ -185,14 +185,22 @@ export function isHalfDayLeave(leaveType: string | null | undefined): boolean {
   return HALF_DAY_LEAVE_TYPES.includes(leaveType as any);
 }
 
-/* ==================== 보강계획 사전신청 / 오버타임 ==================== */
+/* ==================== 보강 · 주말근무 사전신청 / 오버타임 ==================== */
 
-/** 보강 종류 — 슬랙 신청 양식의 '어떤 보강인가요?' 선택지 */
+/**
+ * 신청 종류 — 슬랙 신청 양식의 '어떤 보강인가요?' 선택지 + 주말근무.
+ *
+ * **주말근무(WEEKEND)를 별도 컬럼이 아니라 이 카테고리로 둔다.** 한 건의 신청은
+ * 어차피 오버타임 원장의 한 줄이고, 카테고리가 이미 ① 수당 반영 기본값 ② 내신 상한
+ * 적용 여부를 가르는 자리다. 컬럼을 따로 두면 둘이 어긋날 수 있다 —
+ * '보강이냐 주말근무냐' 는 `isWeekendWork(category)` 하나로 판정한다.
+ */
 export const MAKEUP_CATEGORY = {
   IMMEDIATE: "IMMEDIATE", // 직전보강 — 수당 산출 대상
   MANDATORY: "MANDATORY", // 내신의무보강 — 내신기간당 상한(기본 10시간)까지만
   ABSENCE: "ABSENCE", // 결시보강 — 관리자가 건건이 판단
   OTHER: "OTHER", // 기타 보강/근무
+  WEEKEND: "WEEKEND", // 주말근무 — 교수부가 아닌 직원의 주말 근무 신청
 } as const;
 export type MakeupCategory = keyof typeof MAKEUP_CATEGORY;
 
@@ -201,7 +209,22 @@ export const MAKEUP_CATEGORY_LABEL: Record<string, string> = {
   MANDATORY: "내신의무보강",
   ABSENCE: "결시보강",
   OTHER: "기타",
+  WEEKEND: "주말근무",
 };
+
+/**
+ * 주말근무 신청인가 — **보강이 아니다**.
+ * 구글 보강캘린더에는 보강만 올리고, 신청·확정 화면의 문구도 여기서 갈린다
+ * (대상반/수강인원은 보강의 개념이라 주말근무에는 묻지 않는다).
+ */
+export function isWeekendWork(category: string | null | undefined): boolean {
+  return category === MAKEUP_CATEGORY.WEEKEND;
+}
+
+/** 신청 종류에 따른 화면 명칭 — "보강" / "주말근무" */
+export function makeupKindLabel(category: string | null | undefined): string {
+  return isWeekendWork(category) ? "주말근무" : "보강";
+}
 
 /** 보강 신청 상태 */
 export const MAKEUP_STATUS_LABEL: Record<string, string> = {
@@ -209,6 +232,12 @@ export const MAKEUP_STATUS_LABEL: Record<string, string> = {
   CONFIRMED: "실근무 확정",
   NOSHOW: "미실시",
   CANCELED: "취소",
+};
+
+/** 실근무를 누가 확정했는가 — 신청자 본인 / 관리자 */
+export const MAKEUP_CONFIRMED_BY_LABEL: Record<string, string> = {
+  EMPLOYEE: "신청자 확정",
+  ADMIN: "관리자 확정",
 };
 
 /** 오버타임 구분 */

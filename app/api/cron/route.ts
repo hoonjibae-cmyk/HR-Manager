@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runDueSchedules } from "@/lib/scheduler";
+import { runMakeupConfirmReminders } from "@/lib/makeup-service";
 
 export const dynamic = "force-dynamic";
 // Vercel Pro: 함수 최대 실행시간 300초 (인원이 많아도 한 번에 발송 가능)
@@ -32,12 +33,21 @@ async function handle(req: Request) {
 
   // 기본은 시:분까지 확인(strict). loose=1 이면 날짜·요일만 확인.
   const loose = searchParams.get("loose") === "1" || searchParams.get("strict") === "0";
+  const dryRun = searchParams.get("dry") === "1";
   const result = await runDueSchedules(new Date(), {
     force: searchParams.get("force") === "1",
-    dryRun: searchParams.get("dry") === "1",
+    dryRun,
     ignoreClock: loose,
   });
-  return NextResponse.json(result);
+
+  // 근무가 끝난 보강·주말근무에 '실근무 시간을 확정해 주세요' 알림.
+  // 이미 보낸 건은 `confirmNotifiedAt` 로 걸러지므로 매시 호출돼도 하루 한 번만 나간다.
+  // **발송 실패가 급여 예약발송을 되돌리지 않는다** — 다음 호출에서 다시 시도된다.
+  let makeupReminders: any = null;
+  if (!dryRun) {
+    makeupReminders = await runMakeupConfirmReminders().catch((e) => ({ error: String(e?.message ?? e) }));
+  }
+  return NextResponse.json({ ...result, makeupReminders });
 }
 
 export async function GET(req: Request) {
