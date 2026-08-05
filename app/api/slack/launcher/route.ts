@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   const name = company?.name ?? "유쌤에듀";
   const posted: any = await postMessage(
     channel,
-    isMakeup ? "보강계획 사전신청" : "휴가 신청",
+    isMakeup ? "보강 · 주말근무 사전신청" : "휴가 신청",
     isMakeup ? makeupLauncherBlocks(name) : leaveLauncherBlocks(name)
   );
   if (!posted?.ok) {

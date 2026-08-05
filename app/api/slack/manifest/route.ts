@@ -58,8 +58,8 @@ features:
       usage_hint: "10/15 연차 가족행사  |  조회  |  도움말"
     - command: /보강
       url: ${origin}/api/slack/command
-      description: 보강계획 사전신청 및 내 보강 내역
-      usage_hint: "양식 열기  |  내역"
+      description: 보강·주말근무 사전신청 및 실근무 확정
+      usage_hint: "양식 열기  |  주말  |  내역"
       should_escape: false
 
 oauth_config:
