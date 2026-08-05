@@ -1,12 +1,6 @@
 import { prisma } from "./db";
-import { htmlToPdf, htmlPagesToPdf } from "./pdf";
-import {
-  newHirePackageBodies,
-  contractBodies,
-  pledgeServiceHtml,
-  consentPrivacyHtml,
-  consentDeductionHtml,
-} from "./documents";
+import { htmlToPdf, htmlPagesToPdf, docGroupsToPdf, type PdfOptions } from "./pdf";
+import { newHirePackageGroups, contractGroups } from "./documents";
 import {
   payslipHtml,
   rosterDetailHtml,
@@ -39,6 +33,19 @@ async function save(buf: Buffer, name: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * 양자가 서명하는 서류(근로계약서·별지)의 조판.
+ * 계약서 단독 발급과 신규입사 패키지가 **같은 모양**이어야 한다 — 어느 경로로 뽑았느냐에 따라
+ * 간인이 있고 없고가 달라지면 같은 계약서로 안 보인다.
+ */
+function bilateralPdfOpts(company: { stampSeam?: boolean; stamp?: string | null; pageInitials?: boolean }): PdfOptions {
+  return {
+    seamStamp: company.stampSeam ? company.stamp ?? null : null,
+    initials: company.pageInitials,
+    paginate: true,
+  };
 }
 
 async function record(
@@ -92,18 +99,19 @@ export async function genNewHirePackage(employeeId: number, contractId?: number)
         incRevenuePercent: emp.incRevenuePercent,
         isContractor: emp.isContractor,
       };
-  const bodies = newHirePackageBodies({ employee: empToDoc(emp), contract, company, deptPolicy });
-  // 각 장 이니셜란 + 쪽번호는 패키지에도 붙인다 — 계약서가 2장을 넘어가는데 세트로 뽑으면
-  // 서명란이 사라져 그 장들이 진정성립 추정(민사소송법 §358)을 못 받는 문제가 있었다.
-  // 여백에 그리므로 쪽 나눔은 그대로다. 12종이 한 묶음이라 쪽번호도 실제로 쓸모가 있다.
-  //
-  // **간인(seamStamp)은 붙이지 않는다** — 간인은 장 경계가 이어졌다는 표시인데,
-  // 서로 다른 문서가 맞닿는 자리에 찍으면 '이 두 문서가 한 건' 이라는 뜻이 되어 버린다.
-  // (계약서 단독 발급 `genContract` 에서는 본문+별지가 한 건의 계약이라 그대로 찍는다.)
-  const pdf = await htmlPagesToPdf(bodies, {
-    initials: company.pageInitials,
-    paginate: true,
-  });
+  // 묶음마다 따로 렌더해 합친다 — 쪽번호·이니셜란·간인은 **한 건의 서류 안에서만** 뜻이 있다.
+  // 서로 다른 서류를 한 파일로 묶었다고 통째로 이어 번호를 매기면 안 된다.
+  //  · 근로계약서(+별지) — 양자가 서명하는 한 건이라 계약서 단독 발급과 똑같이 조판한다
+  //  · 확인서·서약서·동의서 — 을이 혼자 내는 서류라 갑의 서명란이 없다 → 이니셜란·쪽번호 없음
+  const pdf = await docGroupsToPdf(
+    newHirePackageGroups({
+      employee: empToDoc(emp),
+      contract,
+      company,
+      deptPolicy,
+      bilateralOpts: bilateralPdfOpts(company),
+    })
+  );
   const path = await save(pdf, `신규입사패키지_${emp.name}.pdf`);
   await record(emp.id, "NEWHIRE_PKG", `신규입사 패키지 - ${emp.name}`, path);
   return { pdf, filename: `신규입사패키지_${emp.name}.pdf` };
@@ -117,20 +125,16 @@ export async function genContract(contractId: number) {
   });
   if (!ct) throw new Error("계약 없음");
   const company = await getCompany();
-  // 인센티브 계약은 별지 「인센티브 산정 계약서」가 함께 붙는다
-  // 계약서는 본문+별지가 한 건의 계약이라 장 경계에 간인을 찍고 쪽번호를 단다.
-  // 신규입사 패키지는 서로 다른 문서 4종의 묶음이라 문서 경계를 넘는 간인은 뜻이 달라져 붙이지 않는다.
-  const pdf = await htmlPagesToPdf(
-    contractBodies({
+  // 인센티브 계약은 별지 「인센티브 산정 계약서」가 함께 붙는다 — 본문+별지가 한 건의 계약이라
+  // 장 경계에 간인을 찍고 쪽번호를 단다. 함께 나가는 확인서(퇴직유보금·개인사업자 지위)는
+  // 을이 혼자 내는 별개 서류라 다른 묶음으로 빠지고, 거기엔 이니셜란·쪽번호가 붙지 않는다.
+  const pdf = await docGroupsToPdf(
+    contractGroups({
       employee: empToDoc(ct.employee),
       contract: contractToDoc(ct),
       company,
-    }),
-    {
-      seamStamp: company.stampSeam ? company.stamp : null,
-      initials: company.pageInitials,
-      paginate: true,
-    }
+      bilateralOpts: bilateralPdfOpts(company),
+    })
   );
   const path = await save(pdf, `근로계약서_${ct.employee.name}.pdf`);
   await record(ct.employeeId, "CONTRACT", `계약서 - ${ct.employee.name}`, path, {

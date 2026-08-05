@@ -192,21 +192,52 @@ export interface PdfOptions {
  * 그래서 먼저 한 번 뽑아 장수를 세고, 2장 이상일 때만 다시 뽑는다. 1장이면 그대로 쓴다.
  */
 async function renderPdf(innerBody: string, opts: PdfOptions = {}): Promise<Buffer> {
-  const wantsCount = !!opts.seamStamp || !!opts.paginate || !!opts.initials;
-  if (!wantsCount) return renderOnce(innerBody, opts, 0);
-
-  const first = await renderOnce(innerBody, opts, 0);
-  const pages = countPdfPages(first);
-  if (pages < 2) return first; // 1장짜리엔 간인도 쪽번호도 필요 없다
-  return renderOnce(innerBody, opts, pages);
+  return withBrowser((b) => renderDoc(b, innerBody, opts));
 }
 
-/** 실제 렌더 1회. `pages`>0 이면 그 장수에 맞춰 간인·쪽번호를 얹는다 */
-async function renderOnce(innerBody: string, opts: PdfOptions, pages: number): Promise<Buffer> {
+/**
+ * 문서 하나를 뽑는다 (브라우저는 밖에서 받는다).
+ *
+ * **마지막 장에는 이니셜란을 넣지 않는다** — 그 장에는 이미 양자 서명란이 통째로 있어서
+ * 같은 자리에 약식 서명을 또 받을 이유가 없다. 넣고 뺀 두 벌을 뽑아 장별로 골라 붙인다.
+ */
+async function renderDoc(browser: Browser, innerBody: string, opts: PdfOptions): Promise<Buffer> {
+  const wantsCount = !!opts.seamStamp || !!opts.paginate || !!opts.initials;
+  if (!wantsCount) return renderOnce(browser, innerBody, opts, 0);
+
+  const first = await renderOnce(browser, innerBody, opts, 0);
+  const pages = countPdfPages(first);
+  if (pages < 2) return first; // 1장짜리엔 간인도 쪽번호도 이니셜란도 필요 없다
+
+  const marked = await renderOnce(browser, innerBody, opts, pages);
+  if (!opts.initials) return marked;
+
+  // 마지막 장만 이니셜란 없는 판으로 갈아 끼운다
+  const plainLast = await renderOnce(browser, innerBody, opts, pages, false);
+  return pickPages([
+    { pdf: marked, pages: range(0, pages - 1) },
+    { pdf: plainLast, pages: [pages - 1] },
+  ]);
+}
+
+const range = (from: number, to: number) =>
+  Array.from({ length: Math.max(to - from, 0) }, (_, i) => from + i);
+
+/**
+ * 실제 렌더 1회. `pages`>0 이면 그 장수에 맞춰 간인·쪽번호를 얹는다.
+ * `withInitials` 로 이 렌더에만 이니셜란을 켜고 끈다 — 마지막 장(서명란이 있는 장)을
+ * 빼기 위해 같은 문서를 두 번 뽑아 골라 쓰기 때문이다.
+ */
+async function renderOnce(
+  browser: Browser,
+  innerBody: string,
+  opts: PdfOptions,
+  pages: number,
+  withInitials = !!opts.initials
+): Promise<Buffer> {
   const margin = opts.marginMm ?? 15;
   const seam = pages > 1 && opts.seamStamp ? seamLayer(pages, opts.seamStamp, margin) : "";
   const html = wrapHtml(seam + innerBody);
-  const browser = onServerless ? await launchBrowser() : await getCachedBrowser();
   const page = await browser.newPage();
   try {
     page.setDefaultTimeout(45000);
@@ -219,7 +250,7 @@ async function renderOnce(innerBody: string, opts: PdfOptions, pages: number): P
       }),
       new Promise((r) => setTimeout(r, 8000)),
     ]);
-    const footer = pages > 1 && (!!opts.paginate || !!opts.initials);
+    const footer = pages > 1 && (!!opts.paginate || withInitials);
     const pdf = await page.pdf({
       format: "A4",
       landscape: !!opts.landscape,
@@ -228,7 +259,7 @@ async function renderOnce(innerBody: string, opts: PdfOptions, pages: number): P
       displayHeaderFooter: footer,
       headerTemplate: "<span></span>",
       footerTemplate: footer
-        ? footerTemplate({ fontCss: footerFontCss(), initials: !!opts.initials })
+        ? footerTemplate({ fontCss: footerFontCss(), initials: withInitials })
         : "<span></span>",
       margin: {
         top: `${margin}mm`,
@@ -240,6 +271,18 @@ async function renderOnce(innerBody: string, opts: PdfOptions, pages: number): P
     return Buffer.from(pdf);
   } finally {
     await page.close().catch(() => {});
+  }
+}
+
+/**
+ * 브라우저를 한 번만 띄워 여러 번 렌더한다.
+ * 서버리스에서는 렌더마다 새로 띄우면(2~3초씩) 문서 수만큼 곱해져 시간·메모리가 감당이 안 된다.
+ */
+async function withBrowser<T>(fn: (b: Browser) => Promise<T>): Promise<T> {
+  const browser = onServerless ? await launchBrowser() : await getCachedBrowser();
+  try {
+    return await fn(browser);
+  } finally {
     if (onServerless) await browser.close().catch(() => {});
   }
 }
@@ -249,9 +292,13 @@ export async function htmlToPdf(bodyHtml: string, opts: PdfOptions = {}): Promis
   return renderPdf(`<section class="doc-page">${bodyHtml}</section>`, opts);
 }
 
-/** 여러 문서(HTML 본문)를 페이지 구분하여 하나의 PDF 로 병합 */
+/** 여러 문서(HTML 본문)를 페이지 구분하여 하나의 PDF 로 병합 — 조판 옵션은 전체에 공통 적용 */
 export async function htmlPagesToPdf(bodies: string[], opts: PdfOptions = {}): Promise<Buffer> {
-  const joined = bodies
+  return renderPdf(joinBodies(bodies), opts);
+}
+
+function joinBodies(bodies: string[]): string {
+  return bodies
     .map(
       (b, i) =>
         `<section class="doc-page"${
@@ -259,7 +306,65 @@ export async function htmlPagesToPdf(bodies: string[], opts: PdfOptions = {}): P
         }>${b}</section>`
     )
     .join("\n");
-  return renderPdf(joined, opts);
+}
+
+/**
+ * 문서 묶음 하나 — **한 건의 서류**로 취급되는 단위.
+ *
+ * 쪽번호·이니셜란·간인은 모두 '한 건의 서류' 안에서만 뜻이 있다. 서로 다른 서류를 한 파일로
+ * 묶는다고 해서 통째로 이어 번호를 매기면 안 된다(신규입사 패키지의 12장짜리 `1/12`).
+ * 그래서 묶음마다 따로 렌더하고 마지막에 PDF 로 합친다.
+ */
+export interface DocGroup {
+  /** 이 서류의 본문. 보통 1개이고, 본문+별지처럼 한 건으로 묶이는 것만 여러 개다 */
+  bodies: string[];
+  /** 이 서류에만 적용할 조판. 생략하면 바닥글이 아예 없다(1장짜리 서약서·동의서) */
+  opts?: PdfOptions;
+}
+
+/**
+ * 서류 묶음들을 각각 렌더해 하나의 PDF 로 합친다.
+ * 브라우저는 한 번만 띄운다 — 서버리스에서 묶음마다 새로 띄우면 감당이 안 된다.
+ */
+export async function docGroupsToPdf(groups: DocGroup[]): Promise<Buffer> {
+  const live = groups.filter((g) => g.bodies.length);
+  if (!live.length) throw new Error("빈 문서 묶음");
+  if (live.length === 1) return renderPdf(joinBodies(live[0].bodies), live[0].opts ?? {});
+
+  const parts = await withBrowser(async (b) => {
+    const out: Buffer[] = [];
+    for (const g of live) out.push(await renderDoc(b, joinBodies(g.bodies), g.opts ?? {}));
+    return out;
+  });
+  return mergePdfs(parts);
+}
+
+/* --------------------------- PDF 합치기 --------------------------- */
+
+/** 여러 PDF 를 순서대로 이어 붙인다 */
+export async function mergePdfs(parts: Buffer[]): Promise<Buffer> {
+  if (parts.length === 1) return parts[0];
+  const { PDFDocument } = await import("pdf-lib");
+  const out = await PDFDocument.create();
+  for (const part of parts) {
+    const src = await PDFDocument.load(new Uint8Array(part));
+    const pages = await out.copyPages(src, src.getPageIndices());
+    for (const pg of pages) out.addPage(pg);
+  }
+  return Buffer.from(await out.save());
+}
+
+/** 여러 PDF 에서 지정한 장(0-based)만 골라 순서대로 이어 붙인다 */
+async function pickPages(picks: Array<{ pdf: Buffer; pages: number[] }>): Promise<Buffer> {
+  const { PDFDocument } = await import("pdf-lib");
+  const out = await PDFDocument.create();
+  for (const { pdf, pages } of picks) {
+    if (!pages.length) continue;
+    const src = await PDFDocument.load(new Uint8Array(pdf));
+    const copied = await out.copyPages(src, pages);
+    for (const pg of copied) out.addPage(pg);
+  }
+  return Buffer.from(await out.save());
 }
 
 function wrapHtml(body: string): string {

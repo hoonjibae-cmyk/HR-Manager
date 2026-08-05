@@ -268,3 +268,87 @@ describe("주민등록번호는 문서에 마스킹해 찍는다", () => {
     expect(doc).toContain("900101-1");
   });
 });
+
+/* ============ 묶음(DocGroup) 나누기 — 쪽번호·이니셜란이 미치는 범위 ============ */
+
+import { contractGroups, newHirePackageGroups } from "./documents";
+
+const OPTS = { initials: true, paginate: true, seamStamp: null };
+/** 조판 옵션이 붙은 묶음인가 (= 양자 서명 서류) */
+const bilateral = (g: { opts?: any }) => !!g.opts && Object.keys(g.opts).length > 0;
+
+describe("문서 묶음 — 서류마다 따로 렌더해야 하는 이유", () => {
+  it("근로계약서와 별지는 각각 다른 묶음이다", () => {
+    // 한 묶음이면 계약서 마지막 장(양자 서명란이 있는 장)에도 이니셜란이 붙고
+    // 쪽번호가 별지까지 이어져 `2 / 3` 처럼 매겨진다
+    const g = contractGroups({
+      employee: emp({ payScheme: "INCENTIVE" }),
+      contract: ct({ templateKey: "INCENTIVE" }),
+      company,
+      bilateralOpts: OPTS,
+    });
+    expect(g[0].bodies).toHaveLength(1);
+    expect(g[0].bodies[0]).toContain("근로계약서");
+    expect(g[1].bodies[0]).toContain("인센티브 산정 계약서");
+    expect(bilateral(g[0])).toBe(true);
+    expect(bilateral(g[1])).toBe(true);
+  });
+
+  it("확인서는 을이 혼자 내는 서류라 조판 옵션이 없다 (이니셜란·쪽번호 없음)", () => {
+    const g = contractGroups({
+      employee: emp({ payScheme: "RATIO" }),
+      contract: ct({ templateKey: "RATIO" }),
+      company,
+      bilateralOpts: OPTS,
+    });
+    const solo = g.find((x) => x.bodies.some((b) => b.includes(RETENTION_DOC)))!;
+    expect(bilateral(solo)).toBe(false);
+    // 개인사업자 지위 확인서도 같은 묶음에 들어간다
+    expect(solo.bodies.some((b) => b.includes("개인사업자 지위 확인서"))).toBe(true);
+  });
+
+  it("월급제는 계약서 한 묶음뿐이다", () => {
+    const g = contractGroups({ employee: emp(), contract: ct(), company, bilateralOpts: OPTS });
+    expect(g).toHaveLength(1);
+    expect(bilateral(g[0])).toBe(true);
+  });
+
+  it("서약서·동의서는 통째로 조판 옵션 없는 한 묶음이다", () => {
+    const g = newHirePackageGroups({
+      employee: emp(),
+      contract: ct(),
+      company,
+      deptPolicy: POLICY_ALL,
+      bilateralOpts: OPTS,
+    });
+    const pledgeGroup = g[g.length - 1];
+    expect(bilateral(pledgeGroup)).toBe(false);
+    expect(pledgeGroup.bodies.some((b) => b.includes("복 무 서 약 서"))).toBe(true);
+    expect(pledgeGroup.bodies.some((b) => b.includes("보 안 서 약 서"))).toBe(true);
+    expect(pledgeGroup.bodies.some((b) => b.includes("건강상태 고지"))).toBe(true);
+  });
+
+  it("양자 서명 서류에만 조판 옵션이 붙는다", () => {
+    const g = newHirePackageGroups({
+      employee: emp({ payScheme: "RATIO" }),
+      contract: ct({ templateKey: "RATIO" }),
+      company,
+      deptPolicy: POLICY_NONE,
+      bilateralOpts: OPTS,
+    });
+    // 계약서 하나만 양자 서명 (완전비율제는 인센티브 별지가 없다)
+    expect(g.filter(bilateral)).toHaveLength(1);
+    expect(g.filter(bilateral)[0].bodies[0]).toContain("강의위탁계약서");
+  });
+
+  it("묶음을 평평하게 펴면 기존 본문 목록과 같다", () => {
+    const args = {
+      employee: emp({ payScheme: "INCENTIVE" }),
+      contract: ct({ templateKey: "INCENTIVE" }),
+      company,
+      deptPolicy: POLICY_ALL,
+    };
+    const flat = newHirePackageGroups(args).flatMap((x) => x.bodies);
+    expect(flat).toEqual(newHirePackageBodies(args));
+  });
+});

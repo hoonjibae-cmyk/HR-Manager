@@ -4,6 +4,7 @@
 import { won, wonUnit, ymd, ymdKo, maskRRN } from "./format";
 import { DAY_KO, PAY_SCHEME_LABEL, parseSchedule, type ScheduleDay } from "./constants";
 import { computeWeeklyHours, inclusiveWageBreakdown, WEEKS_PER_MONTH } from "./payroll";
+import type { DocGroup, PdfOptions } from "./pdf";
 
 /**
  * 부서가 정하는 서류 정책 — 어떤 서류를 발급할지.
@@ -598,28 +599,48 @@ export function incentiveContractHtml(args: {
  * **갱신계약에서도 그대로 붙는다.** 신규입사 때는 해당이 없다가 갱신하면서 인센티브·비율제나
  * 위탁계약으로 바뀌는 일이 있는데, 그때 확인서를 따로 챙기지 않으면 근거 없이 유보금을 떼거나
  * 위탁으로 처리하게 된다. 그래서 계약 조건을 보고 그 자리에서 함께 낸다.
+ *
+ * **서로 다른 서류라 묶음(DocGroup)으로 나눠 돌려준다** — 쪽번호·이니셜란·간인은 한 건의
+ * 서류 안에서만 뜻이 있기 때문이다. 근로계약서와 별지는 한 건이지만, 확인서는 을이 혼자
+ * 내는 별개 서류다.
  */
+export function contractGroups(args: {
+  employee: DocEmployee;
+  contract: DocContract;
+  company: DocCompany;
+  /** 양자 서명 서류에 줄 조판 옵션 (간인·각 장 이니셜란·쪽번호) */
+  bilateralOpts?: PdfOptions;
+}): DocGroup[] {
+  const { employee, company, contract, bilateralOpts } = args;
+  const scheme = paySchemeOfTemplate(contract.templateKey) ?? employee.payScheme;
+
+  // ① 양자가 서명하는 서류 — **각각이 별개의 서명 문서**라 묶음을 따로 둔다.
+  //    한 묶음으로 합치면 근로계약서의 마지막 장(양자 서명란이 있는 장)에도 이니셜란이 붙고
+  //    쪽번호가 별지까지 이어져 `2 / 3` 처럼 매겨진다.
+  const groups: DocGroup[] = [{ bodies: [contractHtml(args)], opts: bilateralOpts ?? {} }];
+  if (scheme === "INCENTIVE")
+    groups.push({ bodies: [incentiveContractHtml(args)], opts: bilateralOpts ?? {} });
+
+  // ② 확인서 — 을이 혼자 내는 서류라 갑의 서명이 없다. 이니셜란·쪽번호를 붙이지 않는다.
+  const solo: string[] = [];
+  // 퇴직유보금 확인서 — 인센티브·비율제. 유보금을 떼는 근거가 이 확인서다.
+  if (scheme === "INCENTIVE" || scheme === "RATIO")
+    solo.push(confirmRetentionHtml({ employee, company }));
+  // 개인사업자 지위 확인서 — 위탁계약(프리랜서). 완전비율제는 성질상 언제나 위탁이다.
+  if (contract.isContractor === true || scheme === "RATIO")
+    solo.push(confirmSoleProprietorHtml({ employee, company }));
+  if (solo.length) groups.push({ bodies: solo });
+
+  return groups;
+}
+
+/** 계약서 세트의 본문만 평평하게 (묶음 구분이 필요 없는 곳·테스트용) */
 export function contractBodies(args: {
   employee: DocEmployee;
   contract: DocContract;
   company: DocCompany;
 }): string[] {
-  const { employee, company, contract } = args;
-  const bodies = [contractHtml(args)];
-  const scheme = paySchemeOfTemplate(contract.templateKey) ?? employee.payScheme;
-
-  // 인센티브 산정 계약서 (별지)
-  if (scheme === "INCENTIVE") bodies.push(incentiveContractHtml(args));
-
-  // 퇴직유보금 확인서 — 인센티브·비율제. 유보금을 떼는 근거가 이 확인서다.
-  if (scheme === "INCENTIVE" || scheme === "RATIO")
-    bodies.push(confirmRetentionHtml({ employee, company }));
-
-  // 개인사업자 지위 확인서 — 위탁계약(프리랜서). 완전비율제는 성질상 언제나 위탁이다.
-  const contractor = contract.isContractor === true || scheme === "RATIO";
-  if (contractor) bodies.push(confirmSoleProprietorHtml({ employee, company }));
-
-  return bodies;
+  return contractGroups(args).flatMap((g) => g.bodies);
 }
 
 /** 계약서 종류 → 급여형태. 계약이 진실이므로 카드보다 이쪽을 먼저 본다 */
@@ -1061,29 +1082,36 @@ function pledgeSignFoot(
 }
 
 /* ============================ 신규입사 패키지 ============================ */
-export function newHirePackageBodies(args: {
+export function newHirePackageGroups(args: {
   employee: DocEmployee;
   contract: DocContract;
   company: DocCompany;
   /** 부서가 정하는 서류 정책. **없으면 부서 한정 서류가 통째로 빠진다** */
   deptPolicy?: DeptDocPolicy | null;
-}): string[] {
+  /** 계약서(양자 서명)에 줄 조판 옵션 — 간인·각 장 이니셜란·쪽번호 */
+  bilateralOpts?: PdfOptions;
+}): DocGroup[] {
   const { employee, company, deptPolicy } = args;
   const one = { employee, company };
-  const bodies = [
-    ...contractBodies(args),
-    // --- 전 직원 공통 ---
+
+  // 서약서·동의서는 **을이 회사에 내는 일방 서류**라 갑의 서명란이 없다.
+  // 그래서 각 장 이니셜란(갑·을 상호 서명)도, 쪽번호도 붙이지 않는다.
+  const pledges = [
     pledgeServiceHtml(one),
     pledgeSecurityHtml({ ...one, nonCompete: !!deptPolicy?.docNonCompete }),
     pledgeHarassmentHtml(one),
     consentPrivacyHtml(one),
     consentDeductionHtml(one),
   ];
-  // --- 부서에 따라 ---
-  if (deptPolicy?.docPledgeServiceII) bodies.push(pledgeServiceIIHtml(one));
-  if (deptPolicy?.docPromotion) bodies.push(consentPromotionHtml(one));
-  if (deptPolicy?.docHealth) bodies.push(pledgeHealthHtml(one));
-  // --- 세무구분에 따라 ---
-  if (employee.incomeType === "FREELANCE") bodies.push(confirmBusinessIncomeHtml(one));
-  return bodies;
+  if (deptPolicy?.docPledgeServiceII) pledges.push(pledgeServiceIIHtml(one));
+  if (deptPolicy?.docPromotion) pledges.push(consentPromotionHtml(one));
+  if (deptPolicy?.docHealth) pledges.push(pledgeHealthHtml(one));
+  if (employee.incomeType === "FREELANCE") pledges.push(confirmBusinessIncomeHtml(one));
+
+  return [...contractGroups(args), { bodies: pledges }];
+}
+
+/** 패키지의 본문만 평평하게 (묶음 구분이 필요 없는 곳·테스트용) */
+export function newHirePackageBodies(args: Parameters<typeof newHirePackageGroups>[0]): string[] {
+  return newHirePackageGroups(args).flatMap((g) => g.bodies);
 }
