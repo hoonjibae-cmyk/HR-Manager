@@ -53,6 +53,16 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   간인은 **법적 의무가 아니다**(근로기준법 §17 은 서면 명시·교부만 요구). 인쇄된 간인은 매 장에
   같은 그림이 찍히므로 증거력도 없다 — 관행상의 모양을 옮긴 것이고, 실제 증거력은 출력 후 사람이
   직접 찍는 도장에서 나온다.
+- **각 장 이니셜란**: 2장 이상인 계약서의 아래 여백에 `갑 (서명) ____  을 (서명) ____` 줄을 넣는다
+  (`footerTemplate()` in `lib/pdf-seam.ts`, `Company.pageInitials` 로 끄고 켠다).
+  **간인보다 이쪽이 곧바르다** — 민사소송법 §358 은 「사문서는 본인 또는 대리인의 서명이나 날인 또는
+  무인이 있는 때에는 진정한 것으로 추정한다」고 정한다. 추정이 붙는 건 **그 장에 있는 서명**이고,
+  간인은 장들이 이어졌다는 정황만 만든다.
+  **본문이 아니라 아래 여백(puppeteer `footerTemplate`)에 그린다** — 본문에 넣으면 마지막 줄과 겹치고,
+  자리를 비우려 여백을 넓히면 쪽 나눔이 달라져 2장짜리가 3장이 된다. 여백에 그리면 쪽 나눔이 그대로다.
+  **바닥글 틀에는 폰트를 따로 심어야 한다**(`footerFontCss()`) — 틀은 본문과 다른 문서라 본문에 심은
+  폰트가 닿지 않고, 서버리스 Chromium 에는 시스템 한글 폰트가 없어 한글이 빈칸으로 나간다.
+  로컬에는 우연히 있어(WenQuanYiZenHei) 안 심어도 되는 것처럼 보이니 주의.
 - **문서→PDF**: `lib/documents.ts`(계약서/서약서/동의서), `lib/documents-pay.ts`(명세서/증명서) 가
   HTML 을 만들고 `lib/pdf.ts` 가 puppeteer-core 로 PDF 렌더(Vercel=@sparticuz/chromium, 로컬=설치된 Chrome/Edge).
   한글폰트는 `assets/fonts/` 를 base64 임베드(`lib/fonts.ts`).

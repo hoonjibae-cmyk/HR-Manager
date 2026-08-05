@@ -33,24 +33,36 @@ export async function POST(req: Request) {
   return NextResponse.json({ ok: true, bytes: chk.bytes });
 }
 
-/** 간인(2장 이상 계약서에 장 경계마다 반씩 날인) 켜고 끄기 */
+/**
+ * 2장 이상 계약서 장치 켜고 끄기 — 간인(`seam`) / 각 장 이니셜란(`initials`).
+ * 보낸 항목만 바꾼다(둘 다 보내지 않아도 된다).
+ */
 export async function PATCH(req: Request) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const b = await req.json().catch(() => ({}) as any);
-  const seam = !!b.seam;
-  await prisma.company.upsert({
+  const data: { stampSeam?: boolean; pageInitials?: boolean } = {};
+  const notes: string[] = [];
+  if ("seam" in b) {
+    data.stampSeam = !!b.seam;
+    notes.push(b.seam ? "간인 켬" : "간인 끔");
+  }
+  if ("initials" in b) {
+    data.pageInitials = !!b.initials;
+    notes.push(b.initials ? "각 장 이니셜란 켬" : "각 장 이니셜란 끔");
+  }
+  if (!notes.length) return NextResponse.json({ error: "바꿀 항목이 없습니다" }, { status: 400 });
+
+  const saved = await prisma.company.upsert({
     where: { id: 1 },
-    update: { stampSeam: seam },
-    create: { id: 1, stampSeam: seam },
+    update: data,
+    create: { id: 1, ...data },
   });
   await logActivity({
     action: "SETTINGS_UPDATE",
-    target: "법인 인감",
-    summary: seam
-      ? "계약서 간인을 켰습니다 — 2장 이상이면 장 경계마다 인감이 반씩 찍힙니다."
-      : "계약서 간인을 껐습니다.",
+    target: "계약서 서명 장치",
+    summary: `2장 이상 계약서 설정을 바꿨습니다 — ${notes.join(", ")}.`,
   });
-  return NextResponse.json({ ok: true, seam });
+  return NextResponse.json({ ok: true, seam: saved.stampSeam, initials: saved.pageInitials });
 }
 
 export async function DELETE() {

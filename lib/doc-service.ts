@@ -104,7 +104,11 @@ export async function genContract(contractId: number) {
       contract: contractToDoc(ct),
       company,
     }),
-    { seamStamp: company.stampSeam ? company.stamp : null, paginate: true }
+    {
+      seamStamp: company.stampSeam ? company.stamp : null,
+      initials: company.pageInitials,
+      paginate: true,
+    }
   );
   const path = await save(pdf, `근로계약서_${ct.employee.name}.pdf`);
   await record(ct.employeeId, "CONTRACT", `계약서 - ${ct.employee.name}`, path, {

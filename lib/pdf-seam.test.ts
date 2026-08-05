@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { countPdfPages, seamLayer, SEAM_VISIBLE_MM, A4_H_MM } from "./pdf-seam";
+import { countPdfPages, footerTemplate, seamLayer, SEAM_VISIBLE_MM, A4_H_MM } from "./pdf-seam";
 
 const STAMP = "data:image/png;base64,iVBORw0KGgo=";
 const MARGIN = 15;
@@ -68,5 +68,32 @@ describe("간인 배치", () => {
 
   it("본문 흐름을 밀지 않게 절대배치 레이어로 감싼다", () => {
     expect(seamLayer(2, STAMP, MARGIN)).toMatch(/^<div class="seam-layer">/);
+  });
+});
+
+describe("바닥글 — 쪽번호와 각 장 이니셜란", () => {
+  it("쪽번호는 언제나 들어간다", () => {
+    const html = footerTemplate();
+    expect(html).toContain('class="pageNumber"');
+    expect(html).toContain('class="totalPages"');
+  });
+
+  it("이니셜란을 끄면 갑·을 서명줄이 없다", () => {
+    expect(footerTemplate({ initials: false })).not.toContain("서명");
+  });
+
+  it("이니셜란을 켜면 갑·을 서명줄이 각각 하나씩", () => {
+    const html = footerTemplate({ initials: true });
+    expect(html).toContain("갑 (서명)");
+    expect(html).toContain("을 (서명)");
+    expect((html.match(/border-bottom/g) ?? []).length).toBe(2);
+  });
+
+  it("한글을 쓰려면 폰트를 함께 심는다 — 서버리스에는 시스템 한글 폰트가 없다", () => {
+    const withFont = footerTemplate({ initials: true, fontCss: "@font-face{}" });
+    expect(withFont).toContain("<style>@font-face{}</style>");
+    expect(withFont).toContain("'NanumGothic'");
+    // 폰트를 안 주면 한글을 못 그리므로 기본 글꼴만 지정한다
+    expect(footerTemplate({ initials: true })).not.toContain("NanumGothic");
   });
 });

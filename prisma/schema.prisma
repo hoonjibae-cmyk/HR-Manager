@@ -43,6 +43,9 @@ model Company {
   /// 간인(間印) — 2장 이상인 계약서에 장 경계마다 인감을 반씩 걸쳐 찍을지.
   /// 종이를 접어 찍던 관행을 그대로 옮긴 것이라 기본으로 켠다. 인감이 없으면 무관.
   stampSeam            Boolean  @default(true)
+  /// 각 장 이니셜란 — 2장 이상인 계약서의 아래 여백에 `갑 (서명) ___ 을 (서명) ___` 줄을 넣을지.
+  /// 장마다 서명을 받으면 민사소송법 §358 의 진정성립 추정이 그 장에 직접 붙는다(간인보다 곧바르다).
+  pageInitials         Boolean  @default(true)
   updatedAt            DateTime @updatedAt
 }
 

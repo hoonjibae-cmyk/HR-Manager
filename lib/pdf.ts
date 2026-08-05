@@ -1,7 +1,7 @@
 import puppeteer, { type Browser } from "puppeteer-core";
 import { existsSync, readdirSync } from "fs";
-import { fontFaceCss } from "./fonts";
-import { countPdfPages, seamLayer, FOOTER_TEMPLATE } from "./pdf-seam";
+import { fontFaceCss, footerFontCss } from "./fonts";
+import { countPdfPages, seamLayer, footerTemplate } from "./pdf-seam";
 
 // 서버리스(Vercel/AWS Lambda) 환경 여부
 const onServerless =
@@ -177,6 +177,12 @@ export interface PdfOptions {
   seamStamp?: string | null;
   /** 쪽번호 `1 / 3` 을 아래 여백에 찍는다. 1장짜리면 저절로 생략된다 */
   paginate?: boolean;
+  /**
+   * **각 장 이니셜란** — 아래 여백에 `갑 (서명) ____  을 (서명) ____` 줄을 넣는다.
+   * 장마다 서명을 받으면 민사소송법 §358 의 진정성립 추정이 그 장에 직접 붙는다.
+   * 쪽번호와 같은 줄에 그려지고, 간인과 마찬가지로 **2장 이상일 때만** 나온다.
+   */
+  initials?: boolean;
 }
 
 /**
@@ -186,7 +192,7 @@ export interface PdfOptions {
  * 그래서 먼저 한 번 뽑아 장수를 세고, 2장 이상일 때만 다시 뽑는다. 1장이면 그대로 쓴다.
  */
 async function renderPdf(innerBody: string, opts: PdfOptions = {}): Promise<Buffer> {
-  const wantsCount = !!opts.seamStamp || !!opts.paginate;
+  const wantsCount = !!opts.seamStamp || !!opts.paginate || !!opts.initials;
   if (!wantsCount) return renderOnce(innerBody, opts, 0);
 
   const first = await renderOnce(innerBody, opts, 0);
@@ -213,15 +219,17 @@ async function renderOnce(innerBody: string, opts: PdfOptions, pages: number): P
       }),
       new Promise((r) => setTimeout(r, 8000)),
     ]);
-    const paginate = pages > 1 && !!opts.paginate;
+    const footer = pages > 1 && (!!opts.paginate || !!opts.initials);
     const pdf = await page.pdf({
       format: "A4",
       landscape: !!opts.landscape,
       printBackground: true,
       timeout: 45000,
-      displayHeaderFooter: paginate,
+      displayHeaderFooter: footer,
       headerTemplate: "<span></span>",
-      footerTemplate: paginate ? FOOTER_TEMPLATE : "<span></span>",
+      footerTemplate: footer
+        ? footerTemplate({ fontCss: footerFontCss(), initials: !!opts.initials })
+        : "<span></span>",
       margin: {
         top: `${margin}mm`,
         bottom: `${margin}mm`,

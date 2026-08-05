@@ -15,6 +15,23 @@ function b64(file: string): string {
 const SYMBOL_RANGE =
   "U+2460-2487,U+3200-321E,U+3260-327F,U+203B,U+20A9,U+25A0-25CF";
 
+/**
+ * 바닥글 전용 @font-face — 굵기 하나(400)만.
+ *
+ * puppeteer 의 머리글/바닥글 틀은 **본문과 다른 문서**라 본문에 심은 폰트가 닿지 않는다.
+ * 서버리스 Chromium 에는 시스템 한글 폰트가 아예 없어(로컬은 우연히 있다) 그냥 두면
+ * 바닥글의 한글이 빈칸으로 나간다. 그래서 틀 안에 폰트를 따로 심는다.
+ * 본문용(`fontFaceCss`)은 굵은체·심볼까지 1MB 라 바닥글엔 과하다.
+ */
+let cachedFooterCss: string | null = null;
+export function footerFontCss(): string {
+  if (cachedFooterCss) return cachedFooterCss;
+  cachedFooterCss =
+    `@font-face{font-family:'NanumGothic';font-style:normal;font-weight:400;` +
+    `src:url(data:font/woff2;base64,${b64("NanumGothic-Regular.woff2")}) format('woff2');}`;
+  return cachedFooterCss;
+}
+
 /** 문서용 @font-face CSS (base64 임베드). 최초 1회 로드 후 캐시. */
 export function fontFaceCss(): string {
   if (cachedCss) return cachedCss;

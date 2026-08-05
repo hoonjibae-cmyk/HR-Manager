@@ -55,10 +55,34 @@ export function seamLayer(pages: number, stamp: string, marginMm: number): strin
 }
 
 /**
- * 쪽번호 틀 — 아래 여백에 찍는다(본문에 넣으면 마지막 줄과 겹친다).
- * 머리글/바닥글 틀은 본문과 **다른 문서**라 우리 한글 폰트가 없다 → 숫자와 '/' 만 쓴다.
+ * 아래 여백에 찍는 바닥글 — 쪽번호와, 원하면 **각 장 이니셜란**.
+ *
+ * 본문 안이 아니라 여백에 그린다. 본문에 넣으면 마지막 줄과 겹치고, 자리를 비우려고
+ * 여백을 넓히면 쪽 나눔이 달라져 2장짜리 계약서가 3장이 된다.
+ *
+ * 머리글/바닥글 틀은 본문과 **다른 문서**라 본문에 심은 폰트가 닿지 않는다.
+ * 한글을 쓰려면 `fontCss`(lib/fonts 의 `footerFontCss()`)를 반드시 함께 넘겨야 한다 —
+ * 서버리스 Chromium 에는 시스템 한글 폰트가 없어 그냥 두면 빈칸으로 나간다
+ * (로컬에는 우연히 있어 넣지 않아도 되는 것처럼 보인다).
+ *
+ * **이니셜란을 두는 이유**: 민사소송법 §358 은 「사문서는 본인 또는 대리인의 서명이나 날인
+ * 또는 무인이 있는 때에는 진정한 것으로 추정한다」고 정한다. 추정이 붙는 것은 **그 장에 있는
+ * 서명**이므로, 장들이 이어졌다는 정황만 만드는 간인보다 장마다 서명을 받는 쪽이 곧바르다.
  */
-export const FOOTER_TEMPLATE =
-  `<div style="width:100%;padding:0 14mm;font-size:7pt;color:#94a3b8;` +
-  `font-family:sans-serif;text-align:right;">` +
-  `<span class="pageNumber"></span> / <span class="totalPages"></span></div>`;
+export function footerTemplate(args: { fontCss?: string; initials?: boolean } = {}): string {
+  const style = args.fontCss ? `<style>${args.fontCss}</style>` : "";
+  const family = args.fontCss ? "'NanumGothic',sans-serif" : "sans-serif";
+  const rule = "display:inline-block;width:20mm;border-bottom:0.4pt solid #94a3b8;";
+  const left = args.initials
+    ? `<span>갑 (서명) <span style="${rule}"></span>` +
+      `&nbsp;&nbsp;&nbsp;을 (서명) <span style="${rule}"></span></span>`
+    : "<span></span>";
+  return (
+    `${style}<div style="width:100%;box-sizing:border-box;padding:0 15mm 5mm;` +
+    `font-size:8pt;color:#475569;font-family:${family};` +
+    `display:flex;justify-content:space-between;align-items:flex-end;">` +
+    left +
+    `<span style="color:#94a3b8"><span class="pageNumber"></span> / <span class="totalPages"></span></span>` +
+    `</div>`
+  );
+}
