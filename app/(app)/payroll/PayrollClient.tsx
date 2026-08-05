@@ -9,6 +9,13 @@ import {
   isContractorContract,
 } from "@/lib/constants";
 import { Pill } from "@/components/ui";
+import {
+  useTableSort,
+  useStoredState,
+  SortTh,
+  FilterSelect,
+  FilterBar,
+} from "@/components/TableTools";
 
 interface Rec {
   id: number;
@@ -59,6 +66,24 @@ interface Rec {
 
 const now = new Date();
 
+/** 브라우저에 기억해 두는 필터 — 다음에 들어와도 이대로 걸려 있다 */
+const DEFAULT_FILTER = { scheme: "", income: "", status: "" };
+
+/** 정렬 키 → 비교할 값 */
+function pickRec(r: Rec, key: string): any {
+  switch (key) {
+    case "name":
+      return r.employee.name;
+    // '형태' 는 급여형태 + 세무구분이 한 칸에 있으므로 보이는 순서대로 이어 붙여 줄 세운다
+    case "scheme":
+      return `${PAY_SCHEME_LABEL[r.payScheme] ?? r.payScheme} ${INCOME_TYPE_LABEL[r.incomeType] ?? ""}`;
+    case "status":
+      return PAYROLL_STATUS_LABEL[r.status] ?? r.status;
+    default:
+      return (r as any)[key];
+  }
+}
+
 /** 저장된 레코드 → 변동입력 폼 값 */
 function rowInputsOf(r: Rec) {
   return {
@@ -90,8 +115,14 @@ function cleanRowInput(v: any) {
 }
 
 export default function PayrollClient() {
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
+  // 마지막으로 보던 연·월을 기억한다 — 급여 작업은 한 달을 며칠에 걸쳐 여러 번 드나들며 한다
+  const [period, setPeriod] = useStoredState("payroll.period", {
+    year: now.getFullYear(),
+    month: now.getMonth() + 1,
+  });
+  const { year, month } = period;
+  const setYear = (y: number) => setPeriod((p) => ({ ...p, year: y }));
+  const setMonth = (m: number) => setPeriod((p) => ({ ...p, month: m }));
   const [recs, setRecs] = useState<Rec[]>([]);
   const [inputs, setInputs] = useState<Record<number, any>>({});
   const [loading, setLoading] = useState(false);
@@ -99,6 +130,9 @@ export default function PayrollClient() {
   const [openDedId, setOpenDedId] = useState<number | null>(null);
   const [tsResult, setTsResult] = useState<any>(null);
   const [incResult, setIncResult] = useState<any>(null);
+  // 이름 검색은 기억하지 않는다 — 그때그때 한 사람 찾는 동작이지 기본값이 아니다
+  const [q, setQ] = useState("");
+  const [filter, setFilter, clearFilter] = useStoredState("payroll.filter", DEFAULT_FILTER);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -321,8 +355,38 @@ export default function PayrollClient() {
   const setInput = (id: number, k: string, v: any) =>
     setInputs((p) => ({ ...p, [id]: { ...p[id], [k]: v } }));
 
+  // 합계 카드는 **거른 것과 무관하게 그 달 전체**를 보여 준다 — 은행·세무로 나가는 실제 총액이라
+  // 화면을 걸렀다고 줄어들면 안 된다. 대신 필터가 걸려 있으면 카드에 '전체 기준' 을 붙인다.
   const totalNet = recs.reduce((s, r) => s + r.net, 0);
   const totalGross = recs.reduce((s, r) => s + r.gross, 0);
+
+  const filtered = React.useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return recs.filter((r) => {
+      if (filter.scheme && r.payScheme !== filter.scheme) return false;
+      if (filter.income && r.incomeType !== filter.income) return false;
+      if (filter.status && r.status !== filter.status) return false;
+      if (
+        needle &&
+        ![r.employee.name, r.employee.department, r.employee.position]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(needle))
+      )
+        return false;
+      return true;
+    });
+  }, [recs, q, filter]);
+
+  const { sorted, sort, toggle, resetSort } = useTableSort(filtered, pickRec, "payroll.sort");
+  // 정렬도 기억하므로 '되돌릴 게 있는지' 판단에 함께 넣는다
+  const dirty = !!(q || filter.scheme || filter.income || filter.status || sort);
+  const resetView = () => {
+    setQ("");
+    clearFilter();
+    resetSort();
+  };
+  const setF = (k: keyof typeof DEFAULT_FILTER) => (v: string) =>
+    setFilter((p) => ({ ...p, [k]: v }));
 
   return (
     /* 화면을 두 층으로 나눈다 — 연·월 선택과 합계는 늘 붙어 있고 **표만 안에서 스크롤**한다.
@@ -535,22 +599,64 @@ export default function PayrollClient() {
 
       {recs.length > 0 && (
         <div className="grid grid-cols-3 gap-4 mb-5">
-          <div className="card p-4"><div className="text-xs text-slate-500">지급 인원</div><div className="stat-num">{recs.length}명</div></div>
-          <div className="card p-4"><div className="text-xs text-slate-500">지급총액</div><div className="stat-num">{won(totalGross)}원</div></div>
-          <div className="card p-4"><div className="text-xs text-slate-500">실지급액</div><div className="stat-num text-brand-600">{won(totalNet)}원</div></div>
+          {([
+            ["지급 인원", `${recs.length}명`, ""],
+            ["지급총액", `${won(totalGross)}원`, ""],
+            ["실지급액", `${won(totalNet)}원`, "text-brand-600"],
+          ] as Array<[string, string, string]>).map(([label, value, cls]) => (
+            <div className="card p-4" key={label}>
+              <div className="text-xs text-slate-500">
+                {label}
+                {/* 걸러 보는 중이라도 카드는 그 달 전체 금액이다 — 오해하지 않게 밝혀 둔다 */}
+                {dirty && <span className="text-slate-300 ml-1">· 전체 기준</span>}
+              </div>
+              <div className={`stat-num ${cls}`}>{value}</div>
+            </div>
+          ))}
         </div>
       )}
 
       </div>
 
-      {/* 표 — 남은 높이를 채우고 여기 안에서만 스크롤한다(머리글은 sticky 로 붙어 있다) */}
-      <div className="card flex-1 min-h-0 overflow-auto">
+      {/* 표 — 남은 높이를 채우고 여기 안에서만 스크롤한다(필터 줄과 머리글은 붙어 있다) */}
+      <div className="card flex flex-col flex-1 min-h-0">
+        {recs.length > 0 && (
+          <FilterBar shown={sorted.length} total={recs.length} dirty={dirty} onReset={resetView}>
+            <input
+              className="input py-1 text-xs w-40"
+              placeholder="이름·부서·직책 검색"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <FilterSelect
+              label="급여형태"
+              value={filter.scheme}
+              onChange={setF("scheme")}
+              options={Object.entries(PAY_SCHEME_LABEL).map(([v, l]) => ({ value: v, label: l }))}
+            />
+            <FilterSelect
+              label="세무/보험"
+              value={filter.income}
+              onChange={setF("income")}
+              options={Object.entries(INCOME_TYPE_LABEL).map(([v, l]) => ({ value: v, label: l }))}
+            />
+            <FilterSelect
+              label="상태"
+              value={filter.status}
+              onChange={setF("status")}
+              options={Object.entries(PAYROLL_STATUS_LABEL).map(([v, l]) => ({ value: v, label: l }))}
+            />
+          </FilterBar>
+        )}
+        <div className="flex-1 min-h-0 overflow-auto">
         {loading ? (
           <div className="text-center text-slate-400 py-12">불러오는 중…</div>
         ) : recs.length === 0 ? (
           <div className="text-center text-slate-400 py-12">
             {year}년 {month}월 급여 기록이 없습니다. <b>급여 일괄 산정</b>을 눌러 계산하세요.
           </div>
+        ) : sorted.length === 0 ? (
+          <div className="text-center text-slate-400 py-12">조건에 맞는 직원이 없습니다.</div>
         ) : (
           <table className="w-full min-w-[1180px] text-sm [&_td]:px-2 [&_th]:px-2">
             {/* 머리글 고정 — th 마다 걸어야 한다(thead 만으로는 안 붙는 브라우저가 있다).
@@ -558,8 +664,8 @@ export default function PayrollClient() {
                 스크롤할 때 같이 밀려 사라진다. */}
             <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-slate-50 [&_th]:shadow-[inset_0_-1px_0_#e2e8f0]">
               <tr>
-                <th className="th">직원</th>
-                <th className="th">형태</th>
+                <SortTh label="직원" sortKey="name" sort={sort} onSort={toggle} />
+                <SortTh label="형태" sortKey="scheme" sort={sort} onSort={toggle} />
                 <th className="th">
                   {/* 입력칸 라벨은 여기 한 번만 — 행마다 반복하면 폭이 두 배가 되고 값도 라벨에 밀린다.
                       아래 각 행의 그리드와 **같은 열 정의**를 써야 위아래가 맞는다. */}
@@ -580,15 +686,15 @@ export default function PayrollClient() {
                     <span />
                   </div>
                 </th>
-                <th className="th text-right">지급액</th>
-                <th className="th text-right">공제액</th>
-                <th className="th text-right">실수령</th>
-                <th className="th">상태</th>
+                <SortTh label="지급액" sortKey="gross" sort={sort} onSort={toggle} align="right" />
+                <SortTh label="공제액" sortKey="totalDeduct" sort={sort} onSort={toggle} align="right" />
+                <SortTh label="실수령" sortKey="net" sort={sort} onSort={toggle} align="right" />
+                <SortTh label="상태" sortKey="status" sort={sort} onSort={toggle} />
                 <th className="th">명세서</th>
               </tr>
             </thead>
             <tbody>
-              {recs.map((r) => {
+              {sorted.map((r) => {
                 // 근로기준법 항목(가산·연차)을 다루는 행인가 — 위탁계약이면 아니다
                 const statutory = !isContractorContract({
                   payScheme: r.payScheme,
@@ -743,6 +849,7 @@ export default function PayrollClient() {
             </tbody>
           </table>
         )}
+        </div>
       </div>
       {/* 계산 규칙 설명 — 표 높이를 뺏지 않게 접어 둔다. 표가 화면에 고정된 뒤로는
           400px 짜리 설명이 늘 펼쳐져 있으면 정작 볼 행이 두 줄밖에 남지 않는다. */}
