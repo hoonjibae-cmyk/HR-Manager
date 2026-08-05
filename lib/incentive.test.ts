@@ -345,6 +345,57 @@ describe("parseRosterWorkbook — 인원 기준 양식(좌·우 두 벌)", () =>
   });
 });
 
+describe("시트가 스스로 낸 금액과 대조", () => {
+  const rows = [
+    ["26년 7월"],
+    ["최은희 선생님"],
+    [...HEAD_HEAD, ...HEAD_HEAD],
+    [1, "재원", "만근1", "A반", "미사고", null, null, 0,
+     3, "전입", "초과전입", "B반", "미사고", "7/6(7회)", null, 87_500],
+    [2, "전입", "기준안의전입", "A반", "미사고", "7/6(7회)", null, null,
+     null, null, null, null, null, null, null, null],
+  ];
+
+  it("인원 기준 명단은 학생별 인센티브 칸의 합을 시트 금액으로 읽는다", () => {
+    const [b] = rostersForMonth(parseRosterWorkbook(wbOf({ 최은희: rows })), 2026, 7);
+    expect(b.sheetTotalAmount).toBe(87_500);
+  });
+
+  it("기준 인원 안에 중도 학생이 섞이면 시트 금액과 시스템 산정액이 갈린다", () => {
+    // 기준 2명: 만근1(1.0) + 기준안의전입(0.875) = 1.875 → 기준에 0.125 못 미친다
+    const [b] = rostersForMonth(parseRosterWorkbook(wbOf({ 최은희: rows })), 2026, 7);
+    const s = summarizeIncentive(b.students, { threshold: 2, perStudent: 100_000 });
+    expect(s.units).toBeCloseTo(2.75, 6); // 1 + 0.875 + 0.875
+    expect(s.amount).toBe(75_000); // (2.75 − 2) × 100,000
+    // 시트는 왼쪽 칸 2명이 기준을 채운 것으로 보고 오른쪽 0.875명분만 지급한다
+    expect(b.sheetTotalAmount).toBe(87_500);
+    expect(b.sheetTotalAmount).not.toBe(s.amount); // → 업로드 시 경고 대상
+  });
+
+  it("기준 인원이 만근으로만 채워지면 두 방식이 같은 답을 낸다", () => {
+    const full2 = rows.map((r) => [...r]);
+    full2[4][5] = null; // '기준안의전입' 의 입학일(7/6(7회))을 지워 만근으로
+    full2[4][1] = "재원";
+    const [b] = rostersForMonth(parseRosterWorkbook(wbOf({ 최은희: full2 })), 2026, 7);
+    const s = summarizeIncentive(b.students, { threshold: 2, perStudent: 100_000 });
+    expect(s.amount).toBe(87_500);
+    expect(b.sheetTotalAmount).toBe(s.amount); // 경고 없음
+  });
+
+  it("매출 기준은 TOTAL 행의 값을 그대로 쓴다 (인센티브 칸 합산으로 덮어쓰지 않는다)", () => {
+    const rev = [
+      ["사업소득 상세 내역 - 26년7월"],
+      ["김은진 선생님"],
+      [...REV_HEAD],
+      [1, "재원", "가", "A반", "미사고", null, null, 380_000, 171_000, null],
+      ["TOTAL", null, null, null, null, null, null, 380_000, 171_000, null],
+    ];
+    const [b] = rostersForMonth(parseRosterWorkbook(wbOf({ 김은진: rev })), 2026, 7);
+    expect(b.sheetTotalRevenue).toBe(380_000);
+    expect(b.sheetTotalAmount).toBe(171_000);
+  });
+});
+
 describe("findMonthBlocks — 제목 줄 찾기", () => {
   it("제목이 가장 많이 잡힌 줄을 제목 줄로 본다 (제목이 2행에 있는 시트)", () => {
     const grid = [

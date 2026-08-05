@@ -38,6 +38,8 @@ interface TeacherResult {
   perStudent?: number;
   units?: number;
   over?: number;
+  /** 시트가 스스로 적어 둔 인센티브 합계 (대조용) */
+  sheetAmount?: number | null;
   /** 산정 금액 (사업소득 또는 인센티브) */
   amount: number;
   /** 시트가 스스로 낸 합계와 어긋나면 남긴다 */
@@ -216,6 +218,28 @@ export async function POST(req: Request) {
       row.perStudent = s.perStudent;
       row.units = s.units;
       row.over = s.over;
+      row.sheetAmount = b.sheetTotalAmount ?? null;
+
+      // 시트가 스스로 낸 금액과 다르면 반드시 알린다.
+      // 갈리는 지점은 **기준 인원을 무엇으로 채우느냐** 하나뿐이다 —
+      // 시트는 명단 왼쪽 칸에 이름이 기준 인원수만큼 있으면 채운 것으로 보고,
+      // 시스템은 재원계수 합에서 기준 인원을 뺀다(계약서 제3조 문언대로).
+      // 왼쪽 칸에 중도 입·전입 학생이 섞여 계수가 기준에 못 미치면 그만큼 차이가 난다.
+      // 조용히 지나가면 시트보다 적게 지급되므로, 차액을 짚어 사람이 판단하게 한다.
+      if (b.sheetTotalAmount != null && b.sheetTotalAmount !== s.amount) {
+        const diff = b.sheetTotalAmount - s.amount;
+        const shortfall = Math.max(s.threshold - s.units, 0);
+        warnings.push(
+          `시트에 적힌 인센티브(${b.sheetTotalAmount.toLocaleString()}원)와 시스템 산정액(${s.amount.toLocaleString()}원)이 ` +
+            `${diff > 0 ? "" : "−"}${Math.abs(diff).toLocaleString()}원 다릅니다.` +
+            (shortfall > 0
+              ? ` 명단 전체의 가중 인원(${s.units.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}명)이 ` +
+                `기준 인원(${s.threshold}명)에 ${shortfall.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}명 못 미쳐 그만큼 차감됐습니다 ` +
+                `— 중도 입학·전입 학생이 기준 인원 안에 섞여 있을 때 생깁니다.`
+              : "") +
+            ` 시트 금액으로 맞추려면 급여 화면의 '인센티브' 칸에 차액을 직접 넣으세요.`
+        );
+      }
       if (b.monthlyPay != null && emp.baseWage && b.monthlyPay !== emp.baseWage) {
         warnings.push(
           `파일의 월급여(${b.monthlyPay.toLocaleString()}원)와 직원 카드 기본급(${emp.baseWage.toLocaleString()}원)이 다릅니다.`

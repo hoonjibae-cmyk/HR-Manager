@@ -496,6 +496,9 @@ function parseBlock(
   };
 
   // 5) 데이터행
+  // 인원 기준 명단은 TOTAL 행이 없는 대신 학생마다 '인센티브' 칸에 금액이 적혀 있다.
+  // 그 합이 시트가 스스로 낸 답이므로, 우리 산정과 대조해 어긋나면 알린다.
+  let sheetIncentiveSum: number | null = null;
   for (const cols of subBlocks) {
     if (cols.name == null) continue;
     for (let r = headerRow + 1; r < grid.length; r++) {
@@ -517,6 +520,12 @@ function parseBlock(
       if (cols.pay != null && out.monthlyPay == null) {
         const pv = row[cols.pay];
         if (typeof pv === "number" && pv > 100000) out.monthlyPay = pv;
+      }
+
+      // 시트가 학생마다 적어 둔 인센티브 (인원 기준 명단). 요약행은 위에서 걸러졌다.
+      if (cols.incentive != null) {
+        const iv = numOf(row[cols.incentive]);
+        if (iv != null) sheetIncentiveSum = (sheetIncentiveSum ?? 0) + iv;
       }
 
       const status =
@@ -556,6 +565,10 @@ function parseBlock(
       });
     }
   }
+
+  // 매출 기준은 TOTAL 행에서 이미 받았고, 인원 기준은 학생별 인센티브 칸의 합이 시트의 답이다
+  if (out.sheetTotalAmount == null && sheetIncentiveSum != null)
+    out.sheetTotalAmount = sheetIncentiveSum;
 
   return out.students.length ? out : null;
 }
