@@ -41,6 +41,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   for (const f of [
     "incThreshold",
     "incPerStudent",
+    "incRevenuePercent",
     "ratioPercent",
     "ratioMinGuarantee",
     "fixedBaseHours",

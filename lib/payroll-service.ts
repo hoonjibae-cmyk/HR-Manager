@@ -7,7 +7,7 @@ import {
   type EmployeePayInput,
 } from "./payroll";
 import { getActiveRates, getTaxTable, empToPayInput } from "./repo";
-import { summarizeIncentive, type RosterStudent } from "./incentive";
+import { summarizeIncentive, isRevenueRoster, type RosterStudent } from "./incentive";
 import { overtimeInputsFor } from "./makeup-service";
 import { parkingDeductionOf } from "./constants";
 
@@ -124,6 +124,8 @@ export function rosterToStudents(rows: any[]): RosterStudent[] {
     withdrawDate: r.withdrawDate,
     sessions: r.sessions,
     fullSessions: r.fullSessions,
+    revenue: r.revenue ?? null,
+    sharePercent: r.sharePercent ?? null,
   }));
 }
 
@@ -325,8 +327,10 @@ export async function runPayrollMonth(
     month,
     emps.map((e) => e.id)
   );
-  // 인센티브 강사: 학생 명단(회차 비례 가중 인원) 일괄 조회
-  const incEmpIds = emps.filter((e) => e.payScheme === "INCENTIVE").map((e) => e.id);
+  // 학생 명단 일괄 조회 — 월급+인센티브(인원 기준·매출 기준)와 완전비율제(사업소득 매출) 둘 다.
+  const incEmpIds = emps
+    .filter((e) => e.payScheme === "INCENTIVE" || e.payScheme === "RATIO")
+    .map((e) => e.id);
   const rosterMap = new Map<number, any[]>();
   if (incEmpIds.length) {
     const rosterRows = await prisma.incentiveStudent.findMany({
@@ -388,12 +392,21 @@ export async function runPayrollMonth(
     const payInput = empToPayInput(emp);
     const blend = applyMidMonthBlend(payInput, segMap.get(emp.id));
 
-    // 인센티브: 학생 명단이 있으면 회차 비례 가중 인원으로 산정
+    // 학생 명단은 두 갈래다 — 매출 열이 있으면 매출 기준, 없으면 회차 비례 가중 인원.
+    // 매출 기준이면 그 달 매출 합계가 곧 산정 기준이므로 classRevenue 로 넣는다
+    // (완전비율제의 사업소득, 월급+인센티브의 매출비율 인센티브가 같은 값을 쓴다).
+    const roster = rosterMap.get(emp.id);
+    const rosterStudents = roster?.length ? rosterToStudents(roster) : null;
+    const rosterRevenue =
+      rosterStudents && isRevenueRoster(rosterStudents)
+        ? rosterStudents.reduce((a, s) => a + Math.round(s.revenue ?? 0), 0)
+        : null;
+    if (rosterRevenue != null) mInput.classRevenue = rosterRevenue;
+
     let incSummary: ReturnType<typeof summarizeIncentive> | null = null;
     if (emp.payScheme === "INCENTIVE") {
-      const roster = rosterMap.get(emp.id);
-      if (roster?.length) {
-        incSummary = summarizeIncentive(rosterToStudents(roster), {
+      if (rosterStudents && rosterRevenue == null) {
+        incSummary = summarizeIncentive(rosterStudents, {
           threshold: payInput.incThreshold ?? 0,
           perStudent: payInput.incPerStudent ?? 0,
         });
@@ -408,6 +421,10 @@ export async function runPayrollMonth(
       if (mInput.incentiveManual === undefined)
         mInput.incentiveManual = existing?.incentiveManual ?? 0;
     }
+    // 매출도 마찬가지로 보존한다 — 명단이 없는 달에 강사 한 명만 지목해 재산정하면
+    // (`runPayrollMonth(y, m, {}, [id])`) 화면이 보낸 값이 없어 매출이 0 으로 지워졌었다.
+    if (mInput.classRevenue === undefined)
+      mInput.classRevenue = existing?.classRevenue ?? null;
 
     const r = computePayroll(payInput, mInput, rates, tax);
 

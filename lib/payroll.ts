@@ -54,6 +54,9 @@ export interface EmployeePayInput {
   // 인센티브
   incThreshold?: number | null;
   incPerStudent?: number | null;
+  /** 매출 비율 인센티브 (0.15 = 15%) — 담당 학생 수강료 매출의 %.
+   *  인원 기준(incThreshold/incPerStudent)과 다른 갈래이고, 둘 다 있으면 더해진다. */
+  incRevenuePercent?: number | null;
   /** 포괄임금 기본급 산정시간(월) — 계약서 '기본급 (209시간)'. 없으면 스케줄 환산시간 */
   fixedBaseHours?: number | null;
   /** 포괄임금 약정 시간외근로시간(월) — 월 급여에 미리 포함된 시간 */
@@ -142,7 +145,9 @@ export interface MonthlyInput {
   /** 인센티브 가중 인원 — 학생 명단 기반. 월중 입학·전출·퇴원은 회차 비례(0~1)로
    *  환산되므로 소수. 지정 시 studentCount 대신 사용한다. */
   studentUnits?: number | null;
-  classRevenue?: number | null; // 비율제용
+  /** 비율제용 반 매출액. **매출비율 인센티브의 산정 기준이기도 하다** —
+   *  학생 명단(매출 기준)을 올리면 그 달 매출 합계가 여기 들어온다. */
+  classRevenue?: number | null;
   bonus?: number; // 특별상여
   incentiveManual?: number; // 수동 인센티브 조정
   unusedLeaveDays?: number; // 연차미사용 일수
@@ -492,6 +497,9 @@ export function computePayroll(
   }
 
   // --- 인센티브 ---
+  // 두 갈래가 있고 둘 다 정해져 있으면 더한다.
+  //  ① 인원 기준: (가중 인원 − 기준 인원) × 기준금액
+  //  ② 매출 비율: 담당 학생 수강료 매출 × 배분율 (명단 업로드로 매출이 들어온 달)
   let incentiveP = 0;
   if (emp.payScheme === "INCENTIVE") {
     const th = emp.incThreshold ?? 0;
@@ -504,6 +512,16 @@ export function computePayroll(
       const cntTxt = Number.isInteger(cnt) ? String(cnt) : cnt.toFixed(3);
       notes.push(
         `인센티브: (학생 ${cntTxt}${month.studentUnits != null ? "명(가중)" : ""} - 기준 ${th}) × ${per.toLocaleString()}원`
+      );
+    }
+    // 매출 비율 인센티브 — 첨부되는 「인센티브 산정 내역서」와 같은 자리에서 반올림한다
+    const revPct = emp.incRevenuePercent ?? 0;
+    const rev = month.classRevenue ?? 0;
+    if (revPct > 0 && rev > 0) {
+      const revInc = round0(rev * revPct);
+      incentiveP += revInc;
+      notes.push(
+        `인센티브(매출 비율): 매출 ${rev.toLocaleString()}원 × ${(revPct * 100).toFixed(1)}% = ${revInc.toLocaleString()}원`
       );
     }
   }

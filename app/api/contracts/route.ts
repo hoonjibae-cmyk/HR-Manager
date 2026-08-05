@@ -71,6 +71,7 @@ export async function POST(req: Request) {
         carAllow: num(body.carAllow, emp.carAllow),
         incThreshold: numOrNull(body.incThreshold, emp.incThreshold),
         incPerStudent: numOrNull(body.incPerStudent, emp.incPerStudent),
+        incRevenuePercent: numOrNull(body.incRevenuePercent, emp.incRevenuePercent),
         ratioPercent: numOrNull(body.ratioPercent, emp.ratioPercent),
         ratioMinGuarantee: numOrNull(body.ratioMinGuarantee, emp.ratioMinGuarantee),
         // 위탁계약(프리랜서) — 주휴·연차·퇴직금·4대보험 미적용

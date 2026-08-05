@@ -9,7 +9,7 @@ import {
 } from "./documents";
 import {
   payslipHtml,
-  incentiveDetailHtml,
+  rosterDetailHtml,
   overtimeDetailHtml,
   certEmploymentHtml,
   certCareerHtml,
@@ -129,23 +129,32 @@ export async function genPayslip(payrollId: number) {
   const employee = empToDoc(pr.employee);
   const pages = [payslipHtml({ employee, payroll, company })];
 
-  // 인센티브 강사: 학생 명단이 있으면 '인센티브 산정 내역서'를 첨부
-  if (pr.employee.payScheme === "INCENTIVE") {
+  // 월급+인센티브·완전비율제: 그 달 학생 명단이 있으면 산정 내역서를 뒤에 붙인다.
+  //  · 명단에 매출 열이 있으면 「사업소득/인센티브 산정 내역서」(매출 × 배분율)
+  //  · 없으면 「인센티브 산정 내역서」(가중 인원 − 기준 인원)
+  // 명단이 없는 달은 **첨부 없이 명세서만** 나간다 — 자동산정을 안 쓰고 금액을 직접 넣는
+  // 달에는 붙일 근거가 없다. 그런 달에 내역서를 붙이려면 관리시트를 올리면 된다.
+  if (pr.employee.payScheme === "INCENTIVE" || pr.employee.payScheme === "RATIO") {
     const roster = await incentiveRosterFor(pr.employeeId, pr.year, pr.month);
     if (roster?.length) {
-      pages.push(
-        incentiveDetailHtml({
-          employee,
-          company,
-          year: pr.year,
-          month: pr.month,
-          students: rosterToStudents(roster),
-          threshold: pr.employee.incThreshold ?? 0,
-          perStudent: pr.employee.incPerStudent ?? 0,
-          monthlyPay: pr.baseP,
-          retention: pr.retentionD,
-        })
-      );
+      const isRatio = pr.employee.payScheme === "RATIO";
+      const detail = rosterDetailHtml({
+        employee,
+        company,
+        year: pr.year,
+        month: pr.month,
+        students: rosterToStudents(roster),
+        kind: isRatio ? "BUSINESS" : "INCENTIVE",
+        // 배분율은 계약이 진실이다 — 명단에 적힌 율은 대조용으로만 넘긴다
+        percent: isRatio ? pr.employee.ratioPercent : pr.employee.incRevenuePercent,
+        sheetPercent: roster.find((r) => r.sharePercent != null)?.sharePercent ?? null,
+        threshold: pr.employee.incThreshold ?? 0,
+        perStudent: pr.employee.incPerStudent ?? 0,
+        // 완전비율제는 기본급이 곧 사업소득이라 '월급여' 로 겹쳐 적지 않는다
+        monthlyPay: isRatio ? null : pr.baseP,
+        retention: pr.retentionD,
+      });
+      if (detail) pages.push(detail);
     }
   }
   // 보강 오버타임이 잡힌 달이면 '보강 오버타임 산정 내역서' 를 첨부

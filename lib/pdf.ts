@@ -357,6 +357,11 @@ table.pay.roster th:nth-child(1),table.pay.roster th:nth-child(2){width:26px;}
 table.pay.roster th:nth-child(5),table.pay.roster th:nth-child(6){width:26px;}
 table.pay.roster th:nth-child(7){width:30px;}
 table.pay.roster th:nth-child(8){width:52px;}
+/* 매출 기준 명단(사업소득·매출비율 인센티브) — 7·8열이 회차가 아니라 금액이라 더 넓다.
+   8열 제목(「② 사업소득」)이 두 줄로 접히지 않을 만큼은 줘야 한다 */
+table.pay.roster.rev th:nth-child(7){width:50px;}
+table.pay.roster.rev th:nth-child(8){width:60px;}
+table.pay.roster.rev th{white-space:nowrap;}
 /* 연결된 조항+서명줄 등이 페이지 경계에서 분리되지 않도록 묶음 처리 */
 .avoid{page-break-inside:avoid;break-inside:avoid;}
 .clause h3{page-break-after:avoid;break-after:avoid;}

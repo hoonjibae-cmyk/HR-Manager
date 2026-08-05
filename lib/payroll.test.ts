@@ -213,6 +213,67 @@ describe("computePayroll — 사업소득 3.3%", () => {
   });
 });
 
+describe("computePayroll — 매출 비율 인센티브", () => {
+  const emp = (over: Partial<EmployeePayInput> = {}): EmployeePayInput => ({
+    incomeType: "EMPLOYEE",
+    payScheme: "INCENTIVE",
+    baseWage: 3_000_000,
+    positionAllow: 0,
+    mealAllow: 0,
+    carAllow: 0,
+    dependents: 1,
+    schedule: instructor,
+    incRevenuePercent: 0.15,
+    ...over,
+  });
+
+  it("담당 학생 매출 × 배분율이 인센티브가 된다", () => {
+    const r = computePayroll(emp(), { classRevenue: 9_433_500 }, DEFAULT_RATES_2025, smallTaxTable);
+    expect(r.incentiveP).toBe(1_415_025); // 9,433,500 × 15%
+    expect(r.gross).toBe(3_000_000 + 1_415_025);
+  });
+
+  it("인원 기준과 매출 기준이 둘 다 있으면 더한다", () => {
+    const r = computePayroll(
+      emp({ incThreshold: 40, incPerStudent: 50_000 }),
+      { studentUnits: 42, classRevenue: 1_000_000 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.incentiveP).toBe(2 * 50_000 + 150_000);
+  });
+
+  it("배분율이 없으면 매출이 있어도 인센티브가 붙지 않는다", () => {
+    const r = computePayroll(
+      emp({ incRevenuePercent: null }),
+      { classRevenue: 9_433_500 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.incentiveP).toBe(0);
+  });
+
+  it("첨부 내역서와 같은 자리에서 반올림한다 (Σ매출 × 율을 한 번)", () => {
+    const r = computePayroll(
+      emp({ incRevenuePercent: 0.333 }),
+      { classRevenue: 99_999 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.incentiveP).toBe(Math.round(99_999 * 0.333));
+  });
+
+  it("월급제에는 붙지 않는다 (인센티브 계약자만)", () => {
+    const r = computePayroll(
+      emp({ payScheme: "MONTHLY" }),
+      { classRevenue: 9_433_500 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.incentiveP).toBe(0);
+  });
+});
+
 describe("computePayroll — 인센티브", () => {
   it("학생수 초과분에 비례해 인센 지급", () => {
     const emp: EmployeePayInput = {

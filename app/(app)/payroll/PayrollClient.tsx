@@ -330,11 +330,7 @@ export default function PayrollClient() {
     setBusy("");
     if (res.ok) {
       setIncResult(j);
-      if (j.year === year && j.month === month) await load();
-      else {
-        setYear(j.year);
-        setMonth(j.month);
-      }
+      await load();
     } else {
       alert("업로드 실패: " + (j.error || ""));
     }
@@ -426,8 +422,11 @@ export default function PayrollClient() {
           {busy === "ts" ? "처리 중…" : "📤 시간기록표 업로드"}
           <input type="file" accept=".xlsx,.xls" className="hidden" onChange={uploadTimesheet} />
         </label>
-        <label className={`btn-outline cursor-pointer ${busy ? "opacity-50 pointer-events-none" : ""}`}>
-          {busy === "inc" ? "처리 중…" : "📤 인센티브 명단 업로드"}
+        <label
+          className={`btn-outline cursor-pointer ${busy ? "opacity-50 pointer-events-none" : ""}`}
+          title="강사별 탭이 있는 관리시트를 그대로 올리면 됩니다. 선택한 연·월의 명단만 반영하고, 명세서 뒤에 산정 내역서가 따라붙습니다."
+        >
+          {busy === "inc" ? "처리 중…" : "📤 학생 명단 업로드"}
           <input type="file" accept=".xlsx,.xls" className="hidden" onChange={uploadIncentive} />
         </label>
         <div className="flex-1" />
@@ -572,46 +571,52 @@ export default function PayrollClient() {
 
       {incResult && (
         <div className="card p-4 mb-5 border-indigo-200 bg-indigo-50/40 max-h-[38vh] overflow-auto">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-2 sticky top-0 bg-indigo-50/95 -mx-4 px-4 py-1">
             <span className="font-bold text-indigo-900 text-sm">
-              ✅ 인센티브 명단 반영 — {incResult.year}년 {incResult.month}월 · {incResult.name} 선생님
+              ✅ 학생 명단 반영 — {incResult.year}년 {incResult.month}월 · 강사 {incResult.okCount}명
+              {incResult.failCount > 0 && (
+                <span className="text-rose-700"> · 반영 못 함 {incResult.failCount}명</span>
+              )}
             </span>
             <button className="text-xs text-slate-400" onClick={() => setIncResult(null)}>닫기 ✕</button>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-2">
-            <Stat k="학생 인원" v={`총 ${incResult.totalCount}명 (만근 ${incResult.fullCount} · 중도 ${incResult.partialCount})`} />
-            <Stat k="가중 인원" v={`${Number(incResult.units).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}명`} />
-            <Stat k="기준 초과" v={`${Number(incResult.over).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}명 (기준 ${incResult.threshold}명)`} />
-            <Stat k="인센티브" v={`${won(incResult.amount)}원`} accent />
-          </div>
           <p className="text-[11px] text-slate-500 mb-2">
-            1인당 기준금액 {won(incResult.perStudent)}원 · 1회당 {won(incResult.perSession)}원 (÷8회 만근 기준)
-            {incResult.monthlyPayInFile && incResult.monthlyPayInFile !== incResult.baseWage && (
-              <span className="text-amber-700 font-semibold">
-                {" "}· ⚠️ 파일의 월급여({won(incResult.monthlyPayInFile)}원)와 직원 카드 기본급({won(incResult.baseWage)}원)이 다릅니다
-              </span>
-            )}
+            명단이 반영된 강사는 급여명세서 뒤에 <b>산정 내역서</b>가 자동으로 따라붙습니다.
+            명단이 없는 달은 명세서만 나갑니다.
           </p>
-          {incResult.partials?.length > 0 && (
-            <div className="text-xs text-slate-600 max-h-40 overflow-y-auto">
-              <table className="w-full">
-                <thead className="text-slate-400">
-                  <tr><th className="text-left py-0.5">학생</th><th className="text-left">상태</th><th className="text-right">회차</th><th className="text-right">계수</th><th className="text-right">인센티브</th></tr>
-                </thead>
-                <tbody>
-                  {incResult.partials.map((p: any, i: number) => (
-                    <tr key={i} className="border-t border-indigo-100">
-                      <td className="py-0.5">{p.name}</td>
-                      <td>{p.status === "WITHDRAWN" ? "퇴원" : p.status === "TRANSFERRED" ? "전출" : "재원"}</td>
-                      <td className="text-right tnum">{p.sessions == null ? "만근" : `${p.sessions}회`}</td>
-                      <td className="text-right tnum">{p.weight}</td>
-                      <td className="text-right tnum font-semibold">{won(p.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <div className="space-y-1.5">
+            {(incResult.results ?? []).map((r: any, i: number) => (
+              <div
+                key={i}
+                className={`rounded border px-2.5 py-1.5 text-xs ${
+                  r.ok ? "border-indigo-100 bg-white" : "border-rose-200 bg-rose-50"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="font-semibold text-slate-800">
+                    {r.name ?? r.teacherName} 선생님
+                    <span className="ml-1.5 font-normal text-[10px] text-slate-400">
+                      {r.kind === "REVENUE" ? "매출 기준" : "인원 기준"} · 학생 {r.totalCount}명
+                    </span>
+                  </span>
+                  {r.ok ? (
+                    <span className="tnum font-bold text-indigo-800">
+                      {r.kind === "REVENUE"
+                        ? `매출 ${won(r.revenue)}원 × ${((r.contractPercent ?? 0) * 100).toFixed(1)}% = ${won(r.amount)}원`
+                        : `초과 ${Number(r.over ?? 0).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}명 × ${won(r.perStudent)}원 = ${won(r.amount)}원`}
+                    </span>
+                  ) : (
+                    <span className="text-rose-700 font-semibold">{r.error}</span>
+                  )}
+                </div>
+                {r.warnings?.map((w: string, k: number) => (
+                  <div key={k} className="text-[11px] text-amber-700 mt-0.5">
+                    ⚠️ {w}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

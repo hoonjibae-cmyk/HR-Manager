@@ -54,6 +54,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         carAllow: gov.carAllow,
         incThreshold: gov.incThreshold,
         incPerStudent: gov.incPerStudent,
+        incRevenuePercent: gov.incRevenuePercent,
         ratioPercent: gov.ratioPercent,
         incomeType: gov.incomeType ?? emp.incomeType,
       }
@@ -65,6 +66,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         carAllow: emp.carAllow,
         incThreshold: emp.incThreshold,
         incPerStudent: emp.incPerStudent,
+        incRevenuePercent: emp.incRevenuePercent,
         ratioPercent: emp.ratioPercent,
         incomeType: emp.incomeType,
       };
@@ -178,8 +180,13 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                   <b>{wonUnit(terms.baseWage + terms.positionAllow)}</b>
                 </Row>
               )}
-              {terms.payScheme === "INCENTIVE" && (
+              {terms.payScheme === "INCENTIVE" && (terms.incThreshold || terms.incPerStudent) && (
                 <Row k="인센티브">학생 {terms.incThreshold}명 초과 시 1명당 {won(terms.incPerStudent)}원</Row>
+              )}
+              {terms.payScheme === "INCENTIVE" && terms.incRevenuePercent != null && (
+                <Row k="인센티브(매출)">
+                  담당 원생 수강료 매출의 <b>{(terms.incRevenuePercent * 100).toFixed(2).replace(/\.?0+$/, "")}%</b>
+                </Row>
               )}
             </dl>
             {upcoming && (
@@ -279,6 +286,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                   carAllow: emp.carAllow,
                   incThreshold: emp.incThreshold,
                   incPerStudent: emp.incPerStudent,
+                  incRevenuePercent: emp.incRevenuePercent,
                   ratioPercent: emp.ratioPercent,
                   ratioMinGuarantee: emp.ratioMinGuarantee,
                   fixedBaseHours: emp.fixedBaseHours,
@@ -354,6 +362,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                         carAllow: c.carAllow,
                         incThreshold: c.incThreshold,
                         incPerStudent: c.incPerStudent,
+                        incRevenuePercent: c.incRevenuePercent,
                         ratioPercent: c.ratioPercent,
                         ratioMinGuarantee: c.ratioMinGuarantee,
                         fixedBaseHours: c.fixedBaseHours,

@@ -143,8 +143,11 @@ model Employee {
   breakPaid Boolean @default(false)
 
   // 인센티브(INCENTIVE) 설정
-  incThreshold  Int? // 학생수 기준 (초과 시 인센 발생)
-  incPerStudent Int? // 초과 1명당 금액
+  incThreshold      Int? // 학생수 기준 (초과 시 인센 발생)
+  incPerStudent     Int? // 초과 1명당 금액
+  /// 매출 비율 인센티브 — 담당 학생 수강료 매출의 %(0.15 = 15%).
+  /// 인원 기준(incThreshold/incPerStudent)과는 다른 갈래이고, 둘 다 있으면 더해진다.
+  incRevenuePercent Float?
 
   // 포괄임금 약정시간 (월급제/인센티브) — 월 급여에 미리 포함된 시간외·야간 시간
   fixedBaseHours  Float? // 기본급 산정시간(월) — 근로계약서 '기본급 (209시간)'. 없으면 스케줄로 환산
@@ -197,6 +200,8 @@ model Contract {
   carAllow          Int     @default(0)
   incThreshold      Int?
   incPerStudent     Int?
+  /// 매출 비율 인센티브 (0.15 = 15%) — 인원 기준과 별개 갈래
+  incRevenuePercent Float?
   ratioPercent      Float?
   ratioMinGuarantee Int? // 위탁 최저보장액(월)
   /// 위탁계약(프리랜서) — 주휴·연차·퇴직금·4대보험 등 근로기준법 항목을 일절 적용하지 않는다.
@@ -445,6 +450,12 @@ model IncentiveStudent {
   fullSessions Float     @default(8)
   // 재원계수 0~1 (= sessions / fullSessions, 상한 1)
   weight       Float     @default(1)
+
+  // --- 매출 기준 명단(완전비율제 사업소득 · 매출비율 인센티브)에만 있는 값 ---
+  /// ① 그 달 이 학생의 수강료 매출(원). null = 인원 기준 명단이라 매출 열이 없음
+  revenue      Int?
+  /// 명단에 적혀 있던 배분율(0.45 = 45%). 계산은 계약 값으로 하고 이 값은 대조용이다
+  sharePercent Float?
 
   createdAt DateTime @default(now())
 

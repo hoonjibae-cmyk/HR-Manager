@@ -21,6 +21,7 @@ interface EmpSnapshot {
   carAllow: number;
   incThreshold: number | null;
   incPerStudent: number | null;
+  incRevenuePercent: number | null; // 0~1
   ratioPercent: number | null; // 0~1
   ratioMinGuarantee?: number | null;
   fixedBaseHours?: number | null;
@@ -50,6 +51,7 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
     carAllow: emp.carAllow,
     incThreshold: emp.incThreshold ?? "",
     incPerStudent: emp.incPerStudent ?? "",
+    incRevenuePercent: emp.incRevenuePercent != null ? emp.incRevenuePercent * 100 : "",
     ratioPercent: emp.ratioPercent != null ? emp.ratioPercent * 100 : "",
     ratioMinGuarantee: emp.ratioMinGuarantee ?? "",
     isContractor: !!(emp as any).isContractor,
@@ -83,6 +85,7 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
         carAllow: f.carAllow,
         incThreshold: f.incThreshold === "" ? null : Number(f.incThreshold),
         incPerStudent: f.incPerStudent === "" ? null : Number(f.incPerStudent),
+        incRevenuePercent: f.incRevenuePercent === "" ? null : Number(f.incRevenuePercent) / 100,
         ratioPercent: f.ratioPercent === "" ? null : Number(f.ratioPercent) / 100,
         ratioMinGuarantee: f.ratioMinGuarantee === "" ? null : Number(f.ratioMinGuarantee),
         isContractor: f.payScheme === "RATIO" ? true : !!f.isContractor,
@@ -192,6 +195,7 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
           <>
             <L label="인센티브 기준 학생수"><input type="number" className="input" value={f.incThreshold} onChange={(e) => set("incThreshold", e.target.value)} /></L>
             <L label="초과 1명당 금액 (원)"><input type="number" className="input" value={f.incPerStudent} onChange={(e) => set("incPerStudent", e.target.value)} /></L>
+            <L label="매출 비율 인센티브 (%)"><input type="number" step="0.1" className="input" placeholder="없으면 비움" value={f.incRevenuePercent} onChange={(e) => set("incRevenuePercent", e.target.value)} /></L>
           </>
         )}
         {f.payScheme === "RATIO" && (

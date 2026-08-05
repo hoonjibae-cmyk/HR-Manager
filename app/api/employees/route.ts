@@ -58,6 +58,10 @@ export async function POST(req: Request) {
     parkingFee: Math.round(Number(body.parkingFee) || 0), // (−) 허용 = 매달 환급
     incThreshold: body.incThreshold != null && body.incThreshold !== "" ? Number(body.incThreshold) : null,
     incPerStudent: body.incPerStudent != null && body.incPerStudent !== "" ? Number(body.incPerStudent) : null,
+    incRevenuePercent:
+      body.incRevenuePercent != null && body.incRevenuePercent !== ""
+        ? Number(body.incRevenuePercent)
+        : null,
     ratioPercent: body.ratioPercent != null && body.ratioPercent !== "" ? Number(body.ratioPercent) : null,
     schedule: typeof body.schedule === "string" ? body.schedule : JSON.stringify(body.schedule || []),
   };
@@ -82,6 +86,7 @@ export async function POST(req: Request) {
           carAllow: emp.carAllow,
           incThreshold: emp.incThreshold,
           incPerStudent: emp.incPerStudent,
+          incRevenuePercent: emp.incRevenuePercent,
           ratioPercent: emp.ratioPercent,
           status: "ACTIVE",
         },

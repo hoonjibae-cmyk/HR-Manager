@@ -52,6 +52,8 @@ export interface DocContract {
   ratioPercent?: number | null;
   incThreshold?: number | null;
   incPerStudent?: number | null;
+  /** 매출 비율 인센티브 (0.15 = 15%) — 인원 기준과 다른 갈래 */
+  incRevenuePercent?: number | null;
   /** 포괄임금 — 기본급 산정시간(월). 없으면 근로시간표에서 환산 */
   fixedBaseHours?: number | null;
   /** 포괄임금 — 약정(고정) 시간외근로시간(월) */
@@ -524,6 +526,9 @@ export function incentiveContractHtml(args: {
   const payday = c.payday ?? 7;
   const threshold = ct.incThreshold ?? null;
   const perStudent = ct.incPerStudent ?? null;
+  // 매출 비율 인센티브 — 인원 기준과 다른 갈래라 정해져 있을 때만 조항을 붙인다
+  const revPct = ct.incRevenuePercent ?? null;
+  const revPctTxt = revPct != null ? `${(revPct * 100).toFixed(2).replace(/\.?0+$/, "")}%` : null;
 
   return `<div class="compact">${companyHead(c)}
   <div class="doc-title">인센티브 산정 계약서</div>
@@ -539,7 +544,13 @@ export function incentiveContractHtml(args: {
   <div class="clause"><h3>제 3조 (인센티브의 산정방법)</h3>
     <p class="sub">① "을"이 담당한 원생 중 "갑"과 "을"의 협의에 따라 정한 기준 인원수를 초과한 경우 초과 원생수 1인당 기준금액을 곱한 금액에서 퇴직금 귀속분을 제외한 나머지 금액을 인센티브로 지급한다.</p>
     <table class="kv"><tr><th>기준 인원수</th><td>${threshold != null ? `${threshold}명` : blank(8)}</td><th>기준 금액</th><td>${perStudent != null ? `${won(perStudent)}원` : blank(10)}</td></tr></table>
-    <p class="sub">② 상기 인센티브 측정 단가는 "갑"과 "을"의 합의에 따라 변경될 수 있으며, 인센티브 변경 시 본 계약서를 갱신 작성하기로 한다.</p></div>
+    ${
+      revPctTxt
+        ? `<p class="sub">② "을"이 담당한 원생의 해당 월 수강료 매출에 아래 배분율을 곱한 금액을 인센티브로 지급한다. 월 중간에 입학·전출·퇴원한 원생의 수강료는 실제 수업 회차에 비례하여 산정한다.</p>
+    <table class="kv"><tr><th>매출 배분율</th><td colspan="3"><b>${esc(revPctTxt)}</b> <span class="muted">(담당 원생 수강료 매출 × ${esc(revPctTxt)})</span></td></tr></table>
+    <p class="sub">③ 상기 인센티브 측정 단가는 "갑"과 "을"의 합의에 따라 변경될 수 있으며, 인센티브 변경 시 본 계약서를 갱신 작성하기로 한다.</p>`
+        : `<p class="sub">② 상기 인센티브 측정 단가는 "갑"과 "을"의 합의에 따라 변경될 수 있으며, 인센티브 변경 시 본 계약서를 갱신 작성하기로 한다.</p>`
+    }</div>
 
   <div class="clause"><h3>제 4조 (인센티브의 지급방법)</h3>
     <p class="sub">① "갑"은 "을"에게 제3조 제1항에 따라 산정된 인센티브를 매월 초일부터 말일까지 기산하여, 익월 ${payday}일에 "을" 명의의 통장으로 지급한다. 단, 해당 지급일이 휴일인 경우 지급일 전일에 지급하기로 한다.</p>

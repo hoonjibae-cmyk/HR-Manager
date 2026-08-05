@@ -5,6 +5,8 @@ import { INCOME_TYPE_LABEL } from "./constants";
 import { logoImg, stampImg, type DocCompany, type DocEmployee } from "./documents";
 import {
   summarizeIncentive,
+  summarizeRevenueShare,
+  isRevenueRoster,
   STUDENT_STATUS_LABEL,
   type RosterStudent,
 } from "./incentive";
@@ -545,6 +547,161 @@ export function incentiveDetailHtml(args: {
     <div class="small">· 본 내역서는 급여명세서의 <b>인센티브</b> 항목 산출 근거로 첨부됩니다.</div>
   </div>
   </div>`;
+}
+
+/* ============ 사업소득·인센티브 산정 내역서 (매출 기준, 명세서 첨부) ============ */
+/**
+ * 완전비율제(사업소득)·매출비율 인센티브의 학생별 산출 근거.
+ *
+ * 인원 기준 내역서(`incentiveDetailHtml`)와 **같은 골격·같은 2단 배치**를 쓴다 —
+ * 자동산정으로 붙는 문서와 엑셀 업로드로 붙는 문서가 서로 다르게 생기면
+ * 받는 사람이 같은 회사 문서로 읽지 못한다. 표의 7·8열만 회차·인센티브 대신
+ * 수강료 매출·배분액으로 바뀐다.
+ *
+ * 월중 입·퇴원 비례는 **매출 금액에 이미 반영**돼 있어(신규 6회 → 380,000 이 아니라 266,000)
+ * 재원계수를 따로 곱하지 않는다. 회차는 근거로만 함께 적는다.
+ */
+export function revenueDetailHtml(args: {
+  employee: DocEmployee;
+  company: DocCompany;
+  year: number;
+  month: number;
+  students: RosterStudent[];
+  /** 배분율 — **계약**의 값(완전비율제 ratioPercent / 인센티브 incRevenuePercent) */
+  percent: number;
+  /** 사업소득(완전비율제) 인지 인센티브(월급+인센티브) 인지 */
+  kind: "BUSINESS" | "INCENTIVE";
+  monthlyPay?: number | null; // 월급여 (인센티브 계약자 교차확인용)
+  retention?: number | null; // 퇴직유보금
+  /** 명단에 적혀 있던 배분율 — 계약과 다르면 경고를 적는다 */
+  sheetPercent?: number | null;
+}): string {
+  const { employee: e, company: c } = args;
+  const s = summarizeRevenueShare(args.students, { percent: args.percent });
+  const isBiz = args.kind === "BUSINESS";
+  const label = isBiz ? "사업소득" : "인센티브";
+
+  const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/0+$/, ""));
+  const md = (d?: Date | null) =>
+    d ? `${new Date(d).getUTCMonth() + 1}/${new Date(d).getUTCDate()}` : "";
+  const pctTxt = (p: number) => `${(p * 100).toFixed(2).replace(/\.?0+$/, "")}%`;
+
+  const half = Math.ceil(s.rows.length / 2);
+  const blocks = [s.rows.slice(0, half), s.rows.slice(half)];
+  // 번호는 명단에 적힌 것을 그대로 쓰고, 없으면 '-' 로 둔다 — 관리시트가 퇴원·휴원 학생을
+  // 번호 없이 '-' 로 적기 때문. 자리 순번을 지어내면 그 학생이 재원 명부의 몇 번째인 것처럼 보인다.
+  const rowHtml = (r: (typeof s.rows)[number]) => {
+    const dim = r.revenue <= 0; // 그 달 수업이 없던 학생 (월초 퇴원 등)
+    return `<tr class="${dim ? "dim" : ""}">
+      <td class="c">${r.seq ?? "-"}</td>
+      <td class="c">${esc(STUDENT_STATUS_LABEL[r.status] ?? "재원")}</td>
+      <td>${esc(r.name)}</td>
+      <td class="sm">${esc(r.className ?? "")}</td>
+      <td class="c sm">${md(r.enrollDate)}</td>
+      <td class="c sm">${md(r.withdrawDate)}</td>
+      <td class="num">${r.revenue ? won(r.revenue) : "-"}</td>
+      <td class="num">${r.amount ? won(r.amount) : "-"}</td>
+    </tr>`;
+  };
+  const tableHtml = (rows: typeof s.rows) =>
+    rows.length
+      ? `<table class="pay roster rev">
+      <thead><tr><th>번호</th><th>상태</th><th>이름</th><th>반</th><th>입학</th><th>퇴원</th><th>① 매출</th><th>② ${esc(label)}</th></tr></thead>
+      <tbody>${rows.map(rowHtml).join("")}</tbody></table>`
+      : "";
+
+  const payable = s.amount - (args.retention ?? 0);
+  const mismatch =
+    args.sheetPercent != null && Math.abs(args.sheetPercent - args.percent) > 0.0001;
+
+  return `<div class="compact">${head(
+    c,
+    `<div class="small">${args.year}년 ${args.month}월분</div>`
+  )}
+  <div class="doc-title" style="letter-spacing:0.2em">${esc(label)} 산정 내역서</div>
+  <p style="text-align:center" class="muted">${args.year}년 ${args.month}월 · ${esc(e.name)} ${esc(e.position ?? "선생님")}</p>
+
+  <table class="kv">
+    <tr><th>학생 인원</th><td>총 ${s.totalCount}명 <span class="muted">(수업 있음 ${s.activeCount}명 · 없음 ${s.zeroCount}명)</span></td><th>배분율</th><td><b>${pctTxt(s.percent)}</b></td></tr>
+    <tr><th>① 수강료 매출 합계</th><td><b>${wonUnit(s.revenue)}</b></td><th>② ${esc(label)}</th><td><b>${wonUnit(s.amount)}</b> <span class="muted">(① × ${pctTxt(s.percent)})</span></td></tr>
+    ${
+      args.retention
+        ? `<tr><th>퇴직유보금</th><td>${wonUnit(args.retention)} <span class="muted">(${esc(label)} × 1/12, 별도통장)</span></td><th>${esc(label)} 지급액</th><td><b>${wonUnit(payable)}</b></td></tr>`
+        : ""
+    }
+    ${args.monthlyPay ? `<tr><th>월급여(기본급)</th><td>${wonUnit(args.monthlyPay)}</td><th>급여 + ${esc(label)}</th><td><b>${wonUnit(args.monthlyPay + s.amount)}</b></td></tr>` : ""}
+  </table>
+
+  <div class="roster-grid">
+    <div>${tableHtml(blocks[0])}</div>
+    <div>${tableHtml(blocks[1])}</div>
+  </div>
+
+  <div class="clause" style="margin-top:8px">
+    <div class="small">· 산정식: <b>${esc(label)} = Σ 수강료 매출 × ${pctTxt(s.percent)}</b></div>
+    <div class="small">· 월 중간에 입학·전출·퇴원한 학생은 <b>실제 수업 회차에 비례한 수강료</b>가 ① 에 잡혀 있습니다 (그 달 수업이 없으면 0원).</div>
+    ${
+      isBiz
+        ? `<div class="small">· 본 내역서는 사업소득 지급명세서의 <b>지급총액</b> 산출 근거로 첨부됩니다. 위탁계약이므로 주휴·연차·퇴직금·4대보험은 적용되지 않습니다.</div>`
+        : `<div class="small">· 본 내역서는 급여명세서의 <b>인센티브</b> 항목 산출 근거로 첨부됩니다.</div>`
+    }
+    ${
+      mismatch
+        ? `<div class="small" style="color:#b91c1c">· ⚠️ 명단에 적힌 배분율(${pctTxt(args.sheetPercent!)})과 계약상 배분율(${pctTxt(s.percent)})이 다릅니다 — <b>계약 기준</b>으로 산정했습니다.</div>`
+        : ""
+    }
+    <div class="small">· 학생별 금액은 원 단위로 반올림하며, 반올림 잔차는 합계가 <b>① × ${pctTxt(s.percent)}</b> 와 정확히 일치하도록 조정됩니다.</div>
+  </div>
+  </div>`;
+}
+
+/**
+ * 명단 모양에 맞는 내역서를 고른다 — 매출 열이 있으면 매출 기준, 없으면 인원 기준.
+ * 첨부하는 쪽(doc-service)은 이 함수만 부르면 된다.
+ */
+export function rosterDetailHtml(args: {
+  employee: DocEmployee;
+  company: DocCompany;
+  year: number;
+  month: number;
+  students: RosterStudent[];
+  kind: "BUSINESS" | "INCENTIVE";
+  /** 매출 기준 — 계약상 배분율 */
+  percent?: number | null;
+  sheetPercent?: number | null;
+  /** 인원 기준 — 계약상 기준 인원·기준금액 */
+  threshold?: number | null;
+  perStudent?: number | null;
+  monthlyPay?: number | null;
+  retention?: number | null;
+}): string | null {
+  if (!args.students.length) return null;
+  if (isRevenueRoster(args.students)) {
+    if (!args.percent) return null; // 배분율이 계약에 없으면 산정할 수 없다
+    return revenueDetailHtml({
+      employee: args.employee,
+      company: args.company,
+      year: args.year,
+      month: args.month,
+      students: args.students,
+      percent: args.percent,
+      kind: args.kind,
+      sheetPercent: args.sheetPercent ?? null,
+      monthlyPay: args.monthlyPay ?? null,
+      retention: args.retention ?? null,
+    });
+  }
+  return incentiveDetailHtml({
+    employee: args.employee,
+    company: args.company,
+    year: args.year,
+    month: args.month,
+    students: args.students,
+    threshold: args.threshold ?? 0,
+    perStudent: args.perStudent ?? 0,
+    monthlyPay: args.monthlyPay ?? null,
+    retention: args.retention ?? null,
+  });
 }
 
 /* ==================== 보강 오버타임 산정 내역서 ==================== */

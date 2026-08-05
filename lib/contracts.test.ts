@@ -131,6 +131,7 @@ describe("mirrorFromContract — 카드에 비출 값", () => {
       carAllow: 0,
       incThreshold: null,
       incPerStudent: null,
+      incRevenuePercent: null,
       ratioPercent: 0.4,
       ratioMinGuarantee: null,
       isContractor: true, // 완전비율제는 성질상 언제나 위탁계약

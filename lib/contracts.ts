@@ -19,6 +19,7 @@ export const CONTRACT_TERM_FIELDS = [
   "ratioMinGuarantee",
   "incThreshold",
   "incPerStudent",
+  "incRevenuePercent",
   "fixedBaseHours",
   "fixedOtHours",
   "fixedNightHours",
@@ -97,6 +98,8 @@ export interface ContractLike {
   carAllow: number;
   incThreshold: number | null;
   incPerStudent: number | null;
+  /** 매출 비율 인센티브 (0.15 = 15%) */
+  incRevenuePercent?: number | null;
   ratioPercent: number | null;
   ratioMinGuarantee?: number | null;
   /** 위탁계약(프리랜서) — 근로기준법 항목 일절 미적용 */
@@ -241,6 +244,7 @@ export function mirrorFromContract(c: ContractLike): Record<string, any> {
     carAllow: c.carAllow,
     incThreshold: c.incThreshold ?? null,
     incPerStudent: c.incPerStudent ?? null,
+    incRevenuePercent: c.incRevenuePercent ?? null,
     ratioPercent: c.ratioPercent ?? null,
     ratioMinGuarantee: c.ratioMinGuarantee ?? null,
     // 위탁계약 여부도 계약이 진실 — 완전비율제는 성질상 언제나 위탁이다
