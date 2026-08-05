@@ -4,7 +4,13 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Empty } from "@/components/ui";
 import CompGrantButton from "@/components/CompGrantButton";
-import { useTableSort, SortTh, FilterSelect, FilterBar } from "@/components/TableTools";
+import {
+  useTableSort,
+  useStoredState,
+  SortTh,
+  FilterSelect,
+  FilterBar,
+} from "@/components/TableTools";
 
 export interface LeaveRow {
   id: number;
@@ -48,6 +54,9 @@ function pick(r: LeaveRow, key: string): any {
   }
 }
 
+/** 브라우저에 기억해 두는 필터 — 다음에 들어와도 이대로 걸려 있다 */
+const DEFAULT_FILTER = { dept: "", eligible: "" };
+
 export default function LeaveTable({
   rows,
   rangeLabel,
@@ -55,9 +64,12 @@ export default function LeaveTable({
   rows: LeaveRow[];
   rangeLabel: React.ReactNode;
 }) {
+  // 이름 검색은 기억하지 않는다 — 그때그때 한 사람 찾는 동작이지 기본값이 아니다
   const [q, setQ] = useState("");
-  const [dept, setDept] = useState("");
-  const [eligible, setEligible] = useState("");
+  const [f, setF, clearFilter] = useStoredState("leave.filter", DEFAULT_FILTER);
+  const { dept, eligible } = f;
+  const set = (k: keyof typeof DEFAULT_FILTER) => (v: string) =>
+    setF((p) => ({ ...p, [k]: v }));
 
   const depts = useMemo(
     () =>
@@ -79,8 +91,9 @@ export default function LeaveTable({
     });
   }, [rows, q, dept, eligible]);
 
-  const { sorted, sort, toggle } = useTableSort(filtered, pick);
-  const dirty = !!(q || dept || eligible);
+  const { sorted, sort, toggle, resetSort } = useTableSort(filtered, pick, "leave.sort");
+  // 정렬도 기억하므로 '되돌릴 게 있는지' 판단에 함께 넣는다
+  const dirty = !!(q || dept || eligible || sort);
 
   return (
     // 남은 화면 높이를 채우고 행만 안에서 스크롤한다 — 조회 기간·필터 줄과 머리글은 늘 보인다
@@ -96,8 +109,8 @@ export default function LeaveTable({
         dirty={dirty}
         onReset={() => {
           setQ("");
-          setDept("");
-          setEligible("");
+          clearFilter();
+          resetSort();
         }}
       >
         <input
@@ -109,7 +122,7 @@ export default function LeaveTable({
         <FilterSelect
           label="연차 대상"
           value={eligible}
-          onChange={setEligible}
+          onChange={set("eligible")}
           options={[
             { value: "yes", label: "적용 대상" },
             { value: "no", label: "미적용" },
@@ -118,7 +131,7 @@ export default function LeaveTable({
         <FilterSelect
           label="부서"
           value={dept}
-          onChange={setDept}
+          onChange={set("dept")}
           options={depts.map((d) => ({ value: d, label: d }))}
         />
       </FilterBar>

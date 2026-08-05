@@ -5,7 +5,13 @@ import Link from "next/link";
 import { Pill, Empty } from "@/components/ui";
 import { INCOME_TYPE_LABEL, PAY_SCHEME_LABEL } from "@/lib/constants";
 import { won } from "@/lib/format";
-import { useTableSort, SortTh, FilterSelect, FilterBar } from "@/components/TableTools";
+import {
+  useTableSort,
+  useStoredState,
+  SortTh,
+  FilterSelect,
+  FilterBar,
+} from "@/components/TableTools";
 
 export interface EmployeeRow {
   id: number;
@@ -46,12 +52,16 @@ function pick(e: EmployeeRow, key: string): any {
   }
 }
 
+/** 브라우저에 기억해 두는 필터 — 다음에 들어와도 이대로 걸려 있다 */
+const DEFAULT_FILTER = { dept: "", scheme: "", income: "", status: "" };
+
 export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
+  // 이름 검색은 기억하지 않는다 — 그때그때 한 사람 찾는 동작이지 기본값이 아니다
   const [q, setQ] = useState("");
-  const [dept, setDept] = useState("");
-  const [scheme, setScheme] = useState("");
-  const [income, setIncome] = useState("");
-  const [status, setStatus] = useState("");
+  const [f, setF, clearFilter] = useStoredState("employees.filter", DEFAULT_FILTER);
+  const { dept, scheme, income, status } = f;
+  const set = (k: keyof typeof DEFAULT_FILTER) => (v: string) =>
+    setF((p) => ({ ...p, [k]: v }));
 
   const depts = useMemo(
     () =>
@@ -80,14 +90,13 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
     });
   }, [rows, q, dept, scheme, income, status]);
 
-  const { sorted, sort, toggle } = useTableSort(filtered, pick);
-  const dirty = !!(q || dept || scheme || income || status);
+  const { sorted, sort, toggle, resetSort } = useTableSort(filtered, pick, "employees.sort");
+  // 정렬도 기억하므로 '되돌릴 게 있는지' 판단에 함께 넣는다
+  const dirty = !!(q || dept || scheme || income || status || sort);
   const reset = () => {
     setQ("");
-    setDept("");
-    setScheme("");
-    setIncome("");
-    setStatus("");
+    clearFilter();
+    resetSort();
   };
 
   return (
@@ -103,7 +112,7 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
         <FilterSelect
           label="부서"
           value={dept}
-          onChange={setDept}
+          onChange={set("dept")}
           options={[
             ...depts.map((d) => ({ value: d, label: d })),
             { value: "__none", label: "(부서 미지정)" },
@@ -112,19 +121,19 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
         <FilterSelect
           label="급여형태"
           value={scheme}
-          onChange={setScheme}
+          onChange={set("scheme")}
           options={Object.entries(PAY_SCHEME_LABEL).map(([v, l]) => ({ value: v, label: l }))}
         />
         <FilterSelect
           label="세무/보험"
           value={income}
-          onChange={setIncome}
+          onChange={set("income")}
           options={Object.entries(INCOME_TYPE_LABEL).map(([v, l]) => ({ value: v, label: l }))}
         />
         <FilterSelect
           label="재직상태"
           value={status}
-          onChange={setStatus}
+          onChange={set("status")}
           options={[
             { value: "active", label: "재직" },
             { value: "resigned", label: "퇴직" },
