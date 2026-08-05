@@ -284,8 +284,19 @@ model PayrollRecord {
   breakdown  String @default("{}") // 상세 계산근거 JSON
 
   status    String    @default("DRAFT") // DRAFT | CONFIRMED | SENT
-  emailedAt DateTime?
+  emailedAt DateTime? // 마지막 발송 시각
   pdfPath   String?
+
+  // --- 정정 발급 이력 ---
+  // 발송(SENT)하면 잠기지만, 뒤늦게 잘못이 드러나면 사유를 남기고 풀 수 있다
+  // (POST /api/payroll/[id]/unlock). 그때 아래 값이 채워지고, 다시 보낸 명세서는
+  // '정정 발급' 으로 표시된다 — 직원이 받은 두 통 중 어느 것이 최종본인지 문서에 드러나야 한다.
+  /// 최초로 발송한 시각. 정정본에 '최초 발급일' 로 찍힌다(emailedAt 은 매번 덮이므로 따로 둔다)
+  firstSentAt  DateTime?
+  /// 잠금을 푼 횟수 = 정정 발급 차수. 0 이면 정정된 적 없는 원본이다
+  reissueCount Int       @default(0)
+  /// 마지막 잠금 해제 사유. **내부 감사용**이라 명세서·메일에는 싣지 않는다
+  unlockReason String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

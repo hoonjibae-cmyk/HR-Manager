@@ -1,6 +1,7 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { prisma } from "./db";
 import { genPayslip } from "./doc-service";
+import { ymd } from "./format";
 
 let _transporter: Transporter | null = null;
 
@@ -74,17 +75,38 @@ export async function sendPayslipsForMonth(year: number, month: number) {
     try {
       const { pdf, filename } = await genPayslip(r.id);
       const isFree = r.incomeType === "FREELANCE";
+      const docName = isFree ? "사업소득 지급명세서" : "급여명세서";
+      // 잠금을 풀고 고쳐 다시 보내는 건이면 앞서 받은 것과 구분되게 알린다 —
+      // 정정본이라고 말해 주지 않으면 직원 메일함에 같은 달 명세서가 두 통 남아
+      // 어느 것이 최종본인지 알 수 없다.
+      const fix = r.reissueCount > 0;
+      const firstSent = r.firstSentAt ?? r.emailedAt;
       await t.sendMail({
         from: mailFrom(),
         to,
-        subject: `[${process.env.COMPANY_NAME || "주식회사 유쌤에듀"}] ${year}년 ${month}월 ${isFree ? "사업소득 지급명세서" : "급여명세서"}`,
-        text: `${r.employee.name}님, ${year}년 ${month}월 ${isFree ? "사업소득 지급" : "급여"}명세서를 첨부드립니다.\n실수령액: ${r.net.toLocaleString()}원\n\n주식회사 유쌤에듀 드림`,
+        subject: `${fix ? "[정정] " : ""}[${process.env.COMPANY_NAME || "주식회사 유쌤에듀"}] ${year}년 ${month}월 ${docName}`,
+        text:
+          (fix
+            ? `${r.employee.name}님, 앞서 보내드린 ${year}년 ${month}월 ${docName}에 정정할 내용이 있어 다시 보내드립니다.\n` +
+              `본 메일에 첨부된 것이 최종본이며, 이전 메일의 명세서는 무효입니다.\n` +
+              (firstSent ? `최초 발급일: ${ymd(firstSent)}\n` : "") +
+              `\n실수령액: ${r.net.toLocaleString()}원\n\n주식회사 유쌤에듀 드림`
+            : `${r.employee.name}님, ${year}년 ${month}월 ${isFree ? "사업소득 지급" : "급여"}명세서를 첨부드립니다.\n` +
+              `실수령액: ${r.net.toLocaleString()}원\n\n주식회사 유쌤에듀 드림`),
         attachments: [{ filename, content: pdf }],
       });
       sent++;
       await prisma.$transaction([
         prisma.emailLog.update({ where: { id: log.id }, data: { status: "SENT", sentAt: new Date() } }),
-        prisma.payrollRecord.update({ where: { id: r.id }, data: { status: "SENT", emailedAt: new Date() } }),
+        prisma.payrollRecord.update({
+          where: { id: r.id },
+          data: {
+            status: "SENT",
+            emailedAt: new Date(),
+            // 최초 발송 시각은 처음 한 번만 새긴다 (정정본에 '최초 발급일' 로 찍힌다)
+            ...(r.firstSentAt ? {} : { firstSentAt: new Date() }),
+          },
+        }),
       ]);
       results.push({ name: r.employee.name, ok: true });
     } catch (e: any) {

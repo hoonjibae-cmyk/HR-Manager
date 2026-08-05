@@ -585,6 +585,39 @@ export interface DeductionPatch {
   otherItems?: OtherDeductItem[];
 }
 
+/**
+ * 발송 잠금 해제 — 이미 보낸 명세서에 잘못이 드러났을 때 되돌린다.
+ *
+ * 발송(SENT)은 되돌리기 어려운 작업이라 잠가 두지만, 실무에서 정정은 생긴다.
+ * 잠근 채로 두면 고칠 길이 아예 없어 DB 를 직접 만지게 되고 그러면 기록이 남지 않는다.
+ * 그래서 **사유를 반드시 받고** 감사기록을 남긴 뒤 DRAFT 로 되돌린다.
+ *
+ * 되돌려도 **직원 메일함의 옛 명세서는 사라지지 않는다** — 그래서 정정 차수
+ * (`reissueCount`)를 올려 두고, 다시 보낸 명세서에 '정정 발급' 과 최초 발급일을 찍는다.
+ * 어느 것이 최종본인지 문서에 드러나야 하기 때문(근로기준법 §48 교부).
+ */
+export async function unlockPayroll(payrollId: number, reason: string) {
+  const rec = await prisma.payrollRecord.findUnique({
+    where: { id: payrollId },
+    include: { employee: true },
+  });
+  if (!rec) throw new Error("급여기록 없음");
+  if (rec.status !== "SENT") throw new Error("발송 완료된 기록만 잠금을 해제할 수 있습니다");
+  const why = reason.trim();
+  if (why.length < 2) throw new Error("잠금 해제 사유를 남겨야 합니다");
+
+  return prisma.payrollRecord.update({
+    where: { id: payrollId },
+    data: {
+      status: "DRAFT",
+      // 최초 발송 시각은 한 번만 새긴다 — emailedAt 은 다시 보낼 때마다 덮인다
+      firstSentAt: rec.firstSentAt ?? rec.emailedAt,
+      reissueCount: rec.reissueCount + 1,
+      unlockReason: why,
+    },
+  });
+}
+
 /** 공제 편집 저장: 모드 전환/수동값/자체공제 반영 후 합계·실수령 재계산 */
 export async function updateDeductions(payrollId: number, patch: DeductionPatch) {
   const rec = await prisma.payrollRecord.findUnique({

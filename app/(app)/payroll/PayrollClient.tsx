@@ -54,6 +54,11 @@ interface Rec {
   otherD: number;
   otherItems: string | null;
   prorationRatio: number;
+  /** 정정 발급 차수 — 0 이면 정정된 적 없는 원본 */
+  reissueCount: number;
+  /** 최초 발송 시각 (정정본에 '최초 발급일' 로 찍힌다) */
+  firstSentAt: string | null;
+  emailedAt: string | null;
   employee: {
     name: string;
     empNo: string;
@@ -128,6 +133,7 @@ export default function PayrollClient() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState("");
   const [openDedId, setOpenDedId] = useState<number | null>(null);
+  const [unlockRec, setUnlockRec] = useState<Rec | null>(null);
   const [tsResult, setTsResult] = useState<any>(null);
   const [incResult, setIncResult] = useState<any>(null);
   // 이름 검색은 기억하지 않는다 — 그때그때 한 사람 찾는 동작이지 기본값이 아니다
@@ -269,7 +275,15 @@ export default function PayrollClient() {
   }
 
   async function sendEmails() {
-    if (!confirm(`${year}년 ${month}월 급여명세서를 이메일로 발송하시겠습니까?\n발송된 기록은 자동으로 잠기며(발송완료), 이후 재계산·공제 수정이 불가합니다.`)) return;
+    if (
+      !confirm(
+        `${year}년 ${month}월 급여명세서를 이메일로 발송하시겠습니까?\n` +
+          `발송된 기록은 자동으로 잠겨(발송완료) 재계산·공제 수정이 되지 않습니다.\n\n` +
+          `뒤늦게 잘못이 드러나면 상태 필터를 '발송완료' 로 좁힌 뒤 '🔓 발송 잠금 해제'로 되돌릴 수 있습니다 (사유 입력 필요).\n` +
+          `다만 직원이 받은 메일은 되돌릴 수 없어 정정본을 다시 보내게 되므로, 보내기 전에 확인하는 편이 낫습니다.`
+      )
+    )
+      return;
     setBusy("email");
     const res = await fetch("/api/email/send", {
       method: "POST",
@@ -849,6 +863,25 @@ export default function PayrollClient() {
                   <td className="td text-right tnum font-bold whitespace-nowrap">{won(r.net)}</td>
                   <td className="td w-px whitespace-nowrap">
                     <Pill kind={r.status}>{PAYROLL_STATUS_LABEL[r.status] ?? r.status}</Pill>
+                    {r.reissueCount > 0 && (
+                      <div
+                        className="text-[10px] text-rose-600 font-semibold"
+                        title="발송 잠금을 풀고 고쳐 다시 발급한 건입니다. 명세서에 '정정 발급' 이 찍힙니다."
+                      >
+                        정정 {r.reissueCount}차
+                      </div>
+                    )}
+                    {/* 발송된 기록은 잠긴다. 되돌리기 어려운 작업이라 평소에는 버튼을 숨기고,
+                        상태 필터를 '발송완료' 로 좁혀 **정정하러 들어왔을 때만** 보여준다. */}
+                    {r.status === "SENT" && filter.status === "SENT" && (
+                      <button
+                        className="mt-0.5 block text-[10px] text-slate-400 hover:text-rose-600 underline decoration-dotted underline-offset-2"
+                        onClick={() => setUnlockRec(r)}
+                        title="사유를 남기고 잠금을 풀면 수정·재발송할 수 있습니다"
+                      >
+                        🔓 발송 잠금 해제
+                      </button>
+                    )}
                   </td>
                   <td className="td w-px">
                     <button
@@ -905,6 +938,13 @@ export default function PayrollClient() {
           <p>
             ※ 변동입력은 각 행의 <b>저장</b> 버튼(해당 직원만 즉시 반영) 또는 상단 <b>급여 일괄 산정</b>(전체 반영)으로 저장·재계산됩니다.
             명세서 <b>이메일 발송이 완료된 기록은 자동으로 잠겨</b>(발송완료) 재계산·공제 수정이 되지 않으며, 재발송 시에도 제외됩니다.
+          </p>
+          <p>
+            · 발송 뒤에 잘못이 드러났다면 <b>상태 필터를 '발송완료' 로 좁힌 뒤</b> 그 행의
+            <b> 🔓 발송 잠금 해제</b>로 되돌릴 수 있습니다. <b>사유를 반드시 남겨야</b> 하고 작업 이력에 기록됩니다.
+            푼 뒤에 고쳐 다시 보내면 메일 제목에 <b>[정정]</b>이, 명세서에 <b>정정 발급</b>과 최초 발급일이 찍혀
+            직원이 받은 두 통 중 어느 것이 최종본인지 드러납니다.
+            세무사무소 제출자료·은행 이체 파일을 이미 넘겼다면 <b>그쪽도 다시 받아 전달</b>해야 합니다.
           </p>
           <p>
             · <b>추가h</b>: 평일 소정근로 외·토요일 근무 중 <b>1일 8h·주 40h 이내</b>(법내연장) → 가산 없음(통상시급×1.0) &nbsp;
@@ -970,6 +1010,116 @@ export default function PayrollClient() {
         </div>
         </details>
       )}
+      {unlockRec && (
+        <UnlockModal
+          rec={unlockRec}
+          onClose={() => setUnlockRec(null)}
+          onDone={async () => {
+            setUnlockRec(null);
+            await load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 발송 잠금 해제 창.
+ *
+ * 되돌리기 어려운 작업이라 confirm 한 줄로 끝내지 않는다 — **사유를 받아야** 하고,
+ * 푼 뒤에 무엇을 더 해야 하는지(재산정 → 재발송, 세무·은행 자료 재전달)를 함께 알려야
+ * '풀어만 놓고 잊는' 상태가 생기지 않는다.
+ */
+function UnlockModal({
+  rec,
+  onClose,
+  onDone,
+}: {
+  rec: Rec;
+  onClose: () => void;
+  onDone: () => Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const ok = reason.trim().length >= 2;
+
+  async function submit() {
+    if (!ok) return;
+    setSaving(true);
+    const res = await fetch(`/api/payroll/${rec.id}/unlock`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: reason.trim() }),
+    });
+    setSaving(false);
+    if (res.ok) await onDone();
+    else alert("잠금 해제 실패: " + ((await res.json().catch(() => ({}))).error || ""));
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="card w-full max-w-lg p-5 bg-white max-h-[85vh] overflow-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="font-bold text-slate-800 mb-1">
+          🔓 발송 잠금 해제 — {rec.employee.name} · {rec.year}년 {rec.month}월
+        </h3>
+        <p className="text-xs text-slate-500 mb-3">
+          발송일 {rec.emailedAt ? new Date(rec.emailedAt).toLocaleDateString("ko-KR") : "-"} · 실수령{" "}
+          {won(rec.net)}원
+          {rec.reissueCount > 0 && (
+            <span className="text-rose-600 font-semibold"> · 이미 {rec.reissueCount}차 정정된 기록입니다</span>
+          )}
+        </p>
+
+        <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 space-y-1 mb-3">
+          <div className="font-semibold">풀기 전에 알아두세요</div>
+          <div>
+            · <b>직원이 받은 메일은 되돌릴 수 없습니다.</b> 고친 뒤 다시 보내면 메일 제목에 <b>[정정]</b>,
+            명세서에 <b>정정 발급</b>과 최초 발급일이 찍혀 어느 것이 최종본인지 드러납니다.
+          </div>
+          <div>
+            · 푼 뒤에는 <b>재산정 → 이메일 재발송</b>까지 마쳐야 끝납니다. 풀어만 두면 그 달이
+            '작성중' 으로 남습니다.
+          </div>
+          <div>
+            · <b>세무사무소 제출자료·은행 이체 파일</b>을 이미 넘겼다면 금액이 바뀌므로
+            <b> 다시 받아 전달</b>해야 합니다.
+          </div>
+          <div>· 누가·언제·왜 풀었는지 작업 이력에 남습니다.</div>
+        </div>
+
+        <label className="block text-xs font-semibold text-slate-600 mb-1">
+          잠금 해제 사유 <span className="text-rose-600">*</span>
+          <span className="font-normal text-slate-400"> — 작업 이력에만 남고 직원에게는 나가지 않습니다</span>
+        </label>
+        <textarea
+          className="input w-full h-20 resize-none"
+          placeholder="예) 7월 보강 오버타임 3시간이 누락되어 재산정 필요"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          autoFocus
+        />
+
+        <div className="flex justify-end gap-2 mt-4">
+          <button className="btn-outline" onClick={onClose} disabled={saving}>
+            취소
+          </button>
+          <button
+            className="btn-primary disabled:opacity-40"
+            onClick={submit}
+            disabled={!ok || saving}
+            title={ok ? "" : "사유를 입력해야 풀 수 있습니다"}
+          >
+            {saving ? "해제 중…" : "잠금 해제"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

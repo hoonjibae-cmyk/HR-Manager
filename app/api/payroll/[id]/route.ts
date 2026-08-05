@@ -40,6 +40,16 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
 
     if (body.status) {
+      // 발송(SENT)은 이 경로로 풀 수 없다 — 사유를 남기고 정정 차수를 새기는
+      // POST /api/payroll/[id]/unlock 만이 잠금을 푼다. 여기서 조용히 DRAFT 로
+      // 되돌릴 수 있으면 정정 이력이 남지 않아 잠금이 있으나 마나가 된다.
+      const cur = await prisma.payrollRecord.findUnique({ where: { id: Number(params.id) } });
+      if (cur?.status === "SENT" && body.status !== "SENT") {
+        return NextResponse.json(
+          { error: "발송 완료된 기록은 '발송 잠금 해제'로만 되돌릴 수 있습니다 (사유 입력 필요)" },
+          { status: 400 }
+        );
+      }
       const rec = await prisma.payrollRecord.update({
         where: { id: Number(params.id) },
         data: { status: body.status },

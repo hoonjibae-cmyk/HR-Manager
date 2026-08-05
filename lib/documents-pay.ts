@@ -54,6 +54,10 @@ export interface DocPayroll {
   prorationRatio?: number;
   weeklyHolidayHours?: number | null; // 시급제 주휴시간(월 합계, 시간기록표 기반)
   breakdown?: string | null; // 산출 근거 JSON {notes, baseApplied, blend}
+  /** 정정 발급 차수 — 0 이면 원본. 1 이상이면 명세서에 '정정 발급' 을 찍는다 */
+  reissueCount?: number | null;
+  /** 최초 발급일 — 정정본에 함께 찍어 앞서 교부된 것과 대조할 수 있게 한다 */
+  firstSentAt?: Date | string | null;
 }
 
 function esc(s: any): string {
@@ -339,9 +343,21 @@ export function payslipHtml(args: {
       </div>`
     : "";
 
+  // 정정 발급 — 이미 보낸 명세서를 고쳐 다시 낸 건이면 그 사실을 문서에 남긴다.
+  // 직원 메일함에는 옛 명세서가 그대로 남아 있으므로, 어느 것이 최종본인지
+  // 종이만 보고도 가려낼 수 있어야 한다(근로기준법 §48 교부).
+  const fix = (p.reissueCount ?? 0) > 0;
+  const fixNote = fix
+    ? `<p style="text-align:center;margin-top:-2px">
+        <span class="badge" style="border-color:#b91c1c;color:#b91c1c">정정 발급 (제${p.reissueCount}차)</span>
+        <span class="small muted">${p.firstSentAt ? ` · 최초 발급일 ${ymd(p.firstSentAt)}` : ""} · 이 명세서가 최종본이며 앞서 교부된 명세서는 무효입니다</span>
+      </p>`
+    : "";
+
   return `${head(c, `<div class="small">지급일: ${ymdKo(payDate)}</div><div class="badge">${esc(INCOME_TYPE_LABEL[p.incomeType] ?? "")}</div>`)}
   <div class="doc-title" style="letter-spacing:0.2em">${esc(title)}</div>
   <p style="text-align:center" class="muted">${p.year}년 ${p.month}월분</p>
+  ${fixNote}
   <table class="kv">
     <tr><th>성명</th><td>${esc(e.name)}</td><th>소속</th><td>${esc(e.department ?? "")}</td></tr>
     <tr><th>직책</th><td>${esc(e.position ?? "")}</td><th>입사일자</th><td>${ymd(e.hireDate)}</td></tr>
