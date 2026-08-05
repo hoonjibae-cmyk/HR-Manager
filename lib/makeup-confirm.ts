@@ -155,3 +155,17 @@ export function mandatoryCapNotice(a: CapNoticeInput): string | null {
 export function underMandatoryCap(category: string): boolean {
   return category === MAKEUP_CATEGORY.MANDATORY;
 }
+
+/**
+ * 수당 대상이 아닌 건에서 확정 자리에 대신 놓는 안내 (목록의 한 줄 밑에 작게).
+ *
+ * 확정 화면은 '적은 시간이 곧 수당' 이라는 전제로 쓰여 있어서, 수당 대상이 아닌 건에
+ * 확정을 열어 두면 직전보강과 똑같이 읽혀 **지급되는 줄 알고 시간을 적게 된다**.
+ * 그래서 닫아 두되, 왜 닫혔는지와 무엇을 하면 되는지를 함께 적는다 —
+ * 버튼만 사라져 있으면 시스템이 고장 난 줄 안다.
+ */
+export const NOT_PAYABLE_HINT =
+  "수당 반영 대상이 아니어서 실근무 확정이 열려 있지 않습니다. 반영이 필요하면 관리자에게 문의해 주세요.";
+
+/** 신청자가 그래도 확정을 시도했을 때 돌려주는 문구 (옛 메시지에 남은 버튼 등) */
+export const NOT_PAYABLE_NOTICE = `이 건은 ${NOT_PAYABLE_HINT}`;

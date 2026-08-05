@@ -23,6 +23,7 @@ import {
   sessionHours,
   workWindow,
   categoryDefault,
+  isPayEligible,
   DEFAULT_OT_POLICY,
   type ExamWindow,
   type OtPolicy,
@@ -33,6 +34,7 @@ import {
   canSelfConfirm,
   mandatoryCapNotice,
   underMandatoryCap,
+  NOT_PAYABLE_NOTICE,
   type ConfirmableSession,
 } from "./makeup-confirm";
 import { computeWeeklyHours, inclusiveWageBreakdown } from "./payroll";
@@ -488,6 +490,11 @@ export async function confirmMakeupActuals(
   if (hours > 24) throw new Error("한 건이 24시간을 넘습니다. 날짜를 확인해 주세요.");
 
   if (input.by === "EMPLOYEE") {
+    // 수당 대상이 아닌 건은 신청자 쪽 확정을 아예 닫는다 — 확정 화면이 '이 시간이 곧 수당'
+    // 이라는 전제로 쓰여 있어서, 열어 두면 지급되는 줄 알고 적게 된다.
+    // 옛 메시지에 남은 버튼을 눌러도 여기서 막힌다(목록이 버튼을 안 그리는 것만으로는 부족하다).
+    if (!isPayEligible(before, await getOvertimePolicy()))
+      throw new Error(NOT_PAYABLE_NOTICE);
     const v = canSelfConfirm(before as unknown as ConfirmableSession, input.now ?? new Date());
     if (!v.ok) throw new Error(v.reason ?? "지금은 확정할 수 없습니다.");
   }
@@ -524,21 +531,22 @@ export async function confirmMakeupActuals(
 /* ───────────── 실근무 확정 요청 알림 ───────────── */
 
 /**
- * 이 건은 확정 요청 알림을 **자동으로** 보내도 되는가.
+ * 이 건이 **수당 대상인가** — 신청자 자체 확정과 확정 요청 알림이 함께 쓰는 판정.
  *
- * 기준은 '수당이 기본으로 반영되는 유형인가' 다 — 직전보강·내신의무보강·주말근무처럼
- * 신청만으로 수당 대상이 되는 건은 실근무 시간만 채우면 그대로 지급되므로 바로 재촉한다.
- * 결시보강처럼 **기본 미반영**인 건은 관리자가 수당 반영 여부부터 정해야 한다 —
- * 반영하지 않기로 한 건에 "시간을 확정해 달라" 고 보내면 지급되는 줄 알게 된다.
- * 그런 건은 관리자가 화면에서 **골라서** 보낸다(`sendConfirmRequest`).
+ * 확정 화면은 '이 시간이 그대로 수당이 된다' 는 전제로 쓰여 있다. 그래서 수당 대상이
+ * 아닌 건에까지 확정을 열어 두면 **지급되는 줄 알고 시간을 적게 된다** — 실제로
+ * 결시보강을 테스트로 올려 보니 직전보강과 똑같은 문구가 나왔다.
+ * 그런 건은 신청자 쪽 확정을 아예 닫고, 수당 반영이 필요하면 관리자에게 문의하도록 안내한다.
+ *
+ * 관리자가 `payEligible = true` 로 정하는 순간 열린다 — 결시보강도 반영하기로 하면
+ * 그때부터 신청자가 직접 확정할 수 있고 확정 요청도 보낼 수 있다.
+ * (판정은 엔진의 `isPayEligible` 하나만 쓴다 — 둘로 두면 화면과 산정이 어긋난다.)
  */
 export function autoNotifiesConfirm(
   s: { category: string; payEligible?: boolean | null },
   policy: OtPolicy
 ): boolean {
-  if (s.payEligible === false) return false;
-  if (s.payEligible === true) return true;
-  return defaultOf(s.category, policy);
+  return isPayEligible(s, policy);
 }
 
 export interface ConfirmRequestResult {
@@ -566,6 +574,12 @@ export async function sendConfirmRequest(
     return { ok: false, reason: `${r.employee.name}님의 슬랙 계정을 알 수 없습니다.` };
   if (r.status === "CANCELED" || r.status === "NOSHOW")
     return { ok: false, reason: "취소·미실시 건에는 보내지 않습니다." };
+  // 수당 대상이 아닌 건에 확정을 재촉하면 지급되는 줄 알게 된다 — 반영 여부를 먼저 정한다
+  if (!isPayEligible(r, await getOvertimePolicy()))
+    return {
+      ok: false,
+      reason: "수당 미반영 건입니다. 먼저 '수당 반영' 을 켠 뒤 다시 보내 주세요.",
+    };
   if (r.confirmNotifiedAt && !opts.force) return { ok: false, reason: "이미 보냈습니다." };
 
   const w = workWindow(r as any);
@@ -670,8 +684,11 @@ export interface MakeupRow {
   confirmedBy: string | null;
   /** 확정 요청 알림을 보낸 시각 (ISO). null 이면 아직 안 보냈다 */
   confirmNotifiedAt: string | null;
-  /** 수당이 기본 반영되는 유형이라 알림이 자동으로 나가는가 (아니면 관리자가 골라 보낸다) */
-  autoNotify: boolean;
+  /**
+   * 수당 대상인가 (`payEligible` 지정값 우선, 없으면 카테고리 기본값).
+   * 여기가 켜져 있어야 신청자 확정이 열리고, 확정 요청 알림도 보낼 수 있다.
+   */
+  payable: boolean;
   /** 슬랙 계정이 없으면 알림을 보낼 수 없다 */
   slackLinked: boolean;
   /** 산정 결과 — 확정된 건만 채워진다 */
@@ -749,7 +766,8 @@ export async function makeupMonth(year: number, month: number) {
       weekend: isWeekendWork(r.category),
       confirmedBy: r.confirmedBy,
       confirmNotifiedAt: r.confirmNotifiedAt?.toISOString() ?? null,
-      autoNotify: autoNotifiesConfirm(r, policy),
+      /** 수당 대상인가 — 신청자 확정이 열리는지, 확정 요청을 보낼 수 있는지가 여기서 갈린다 */
+      payable: isPayEligible(r, policy),
       slackLinked: !!r.slackUserId,
       kind: hit?.kinds.size ? Array.from(hit.kinds).join("+") : null,
       countedHours: Math.round((hit?.counted ?? 0) * 100) / 100,

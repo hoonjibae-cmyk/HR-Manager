@@ -7,8 +7,8 @@ import {
   MAKEUP_CONFIRMED_BY_LABEL,
   makeupKindLabel,
 } from "./constants";
-import { sessionHours, workWindow } from "./overtime";
-import { canSelfConfirm, type ConfirmableSession } from "./makeup-confirm";
+import { sessionHours, workWindow, isPayEligible, DEFAULT_OT_POLICY, type OtPolicy } from "./overtime";
+import { canSelfConfirm, NOT_PAYABLE_HINT, type ConfirmableSession } from "./makeup-confirm";
 import type { MakeupModalValues } from "./slack";
 
 const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
@@ -68,10 +68,24 @@ function lineOf(r: { category: string; status: string; targetClass: string; conf
 }
 
 /**
+ * 지급 조건 — 수당 대상 판정에만 쓴다. 행이 없으면 기본값이 그대로 적용되는 것이 맞다
+ * (`getOvertimePolicy` 는 upsert 라 여기서 부르면 조회가 쓰기가 된다).
+ */
+async function policyForList(): Promise<OtPolicy> {
+  const row = await prisma.overtimePolicy.findUnique({ where: { id: 1 } }).catch(() => null);
+  return (row as any) ?? DEFAULT_OT_POLICY;
+}
+
+/**
  * 직원이 '내 신청 내역' 을 눌렀을 때 보여줄 화면.
  *
  * **지난 건에는 「실근무 확정」 버튼이 붙는다** — 확정은 관리자가 아니라 신청자가 한다.
  * 근무 다음날부터 열리고, 이미 확정한 건도 기간 안이면 다시 고칠 수 있다(`canSelfConfirm`).
+ *
+ * 다만 **수당 대상인 건에만 붙인다**. 확정 화면은 '적은 시간이 곧 수당' 이라는 전제로
+ * 쓰여 있어서, 결시보강처럼 아직 반영이 정해지지 않은 건에까지 버튼을 두면 직전보강과
+ * 똑같이 읽혀 지급되는 줄 알게 된다. 그런 건은 버튼 대신 **왜 안 열렸는지와 무엇을
+ * 하면 되는지**를 그 줄 밑에 작게 적는다.
  */
 export async function makeupListBlocks(
   employeeId: number,
@@ -80,11 +94,14 @@ export async function makeupListBlocks(
 ): Promise<{ text: string; blocks: any[] }> {
   const today = new Date(now.toISOString().slice(0, 10) + "T00:00:00Z");
   const from = new Date(today.getTime() - 60 * 86400000);
-  const rows = await prisma.makeupSession.findMany({
-    where: { employeeId, planStart: { gte: from } },
-    orderBy: { planStart: "asc" },
-    take: 30,
-  });
+  const [rows, policy] = await Promise.all([
+    prisma.makeupSession.findMany({
+      where: { employeeId, planStart: { gte: from } },
+      orderBy: { planStart: "asc" },
+      take: 30,
+    }),
+    policyForList(),
+  ]);
   const title = `*${name}님의 보강 · 주말근무 내역*`;
   if (!rows.length) {
     const text = `${title}\n\n_최근 두 달 안에 등록된 신청이 없습니다._\n\`/보강\` 으로 새로 신청할 수 있습니다.`;
@@ -110,7 +127,9 @@ export async function makeupListBlocks(
         type: "section",
         text: { type: "mrkdwn", text: lineOf(r, label(r)) },
       };
-      if (withButton && canSelfConfirm(r as unknown as ConfirmableSession, now).ok) {
+      const open = withButton && canSelfConfirm(r as unknown as ConfirmableSession, now).ok;
+      const payable = isPayEligible(r, policy);
+      if (open && payable) {
         section.accessory = {
           type: "button",
           style: r.status === "CONFIRMED" ? undefined : "primary",
@@ -125,19 +144,25 @@ export async function makeupListBlocks(
         if (!section.accessory.style) delete section.accessory.style;
       }
       blocks.push(section);
+      // 버튼 자리를 비워 두기만 하면 왜 없는지 알 수 없다 — 그 줄 바로 밑에 작게 적는다
+      if (open && !payable)
+        blocks.push({
+          type: "context",
+          elements: [{ type: "mrkdwn", text: `_${NOT_PAYABLE_HINT}_` }],
+        });
     }
   };
 
   push("예정", upcoming, false);
-  if (past.length) push("지난 근무 — 실근무 시간을 확정해 주세요", past, true);
+  if (past.length) push("지난 근무", past, true);
   blocks.push({
     type: "context",
     elements: [
       {
         type: "mrkdwn",
         text:
-          "확정은 근무가 끝난 *다음날부터* 가능하며, 확정한 시간이 그대로 오버타임 수당으로 산정됩니다. " +
-          "확정 후에도 해당 월 급여가 마감되기 전까지는 고칠 수 있습니다.",
+          "확정은 근무가 끝난 *다음날부터* 가능하며, 확정 후에도 해당 월 급여가 마감되기 전까지는 고칠 수 있습니다. " +
+          "*수당 반영 대상인 건에만* 확정 버튼이 열립니다 — 확정한 시간이 그대로 오버타임 수당으로 산정됩니다.",
       },
     ],
   });

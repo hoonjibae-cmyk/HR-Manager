@@ -488,13 +488,15 @@ function DetailModal({
                   </span>
                   .
                 </>
-              ) : row.autoNotify ? (
+              ) : row.payable ? (
                 <>근무 다음날 신청자에게 확정 요청이 자동으로 나갑니다.</>
               ) : (
                 <>
-                  <b className="text-amber-700">수당 반영 여부를 먼저 정해 주세요.</b> 기본 미반영
-                  종류라 확정 요청이 자동으로 나가지 않습니다 — 반영하기로 했다면 아래 버튼으로
-                  보냅니다.
+                  <b className="text-amber-700">수당 반영 여부를 먼저 정해 주세요.</b> 수당 미반영
+                  상태라 <b>신청자 쪽 확정이 닫혀 있고</b> 확정 요청도 보낼 수 없습니다 —
+                  확정 화면은 &lsquo;적은 시간이 곧 수당&rsquo; 이라는 전제로 쓰여 있어, 반영하지
+                  않을 건에 열어 두면 지급되는 줄 알게 됩니다. 아래에서 <b>수당 반영</b> 을 켜고{" "}
+                  <b>저장만</b> 을 누르면 열립니다.
                 </>
               )}
             </div>
@@ -502,11 +504,13 @@ function DetailModal({
               type="button"
               className="btn-outline shrink-0"
               onClick={() => remind(!!row.confirmNotifiedAt)}
-              disabled={busy || !row.slackLinked}
+              disabled={busy || !row.slackLinked || !row.payable}
               title={
-                row.slackLinked
-                  ? "신청자에게 실근무 확정 요청 DM 을 보냅니다"
-                  : "슬랙 계정이 연결되어 있지 않습니다"
+                !row.payable
+                  ? "수당 미반영 건에는 확정 요청을 보내지 않습니다"
+                  : row.slackLinked
+                    ? "신청자에게 실근무 확정 요청 DM 을 보냅니다"
+                    : "슬랙 계정이 연결되어 있지 않습니다"
               }
             >
               {row.confirmNotifiedAt ? "확정 요청 다시 보내기" : "확정 요청 보내기"}

@@ -242,8 +242,14 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
     고치면 `confirmedBy` 가 ADMIN 으로 덮인다. **신청자가 스스로 확정한 건을 고치면 당사자에게
     알림이 나간다**(`notify` 를 안 켜도) — 본인이 적은 시간과 다른 시간으로 수당이 나가면
     명세서를 받고서야 알게 된다.
-  - **확정 요청 알림은 '수당이 기본 반영되는 유형' 에만 자동으로** 나간다
-    (`autoNotifiesConfirm` = `payEligible` 지정값 우선, 없으면 `categoryDefault`).
+  - **수당 대상이 아닌 건에는 신청자 확정 자체를 열지 않는다**(판정은 엔진의 `isPayEligible`
+    하나만 쓴다). 확정 화면이 '적은 시간이 곧 수당' 이라는 전제로 쓰여 있어, 결시보강처럼
+    반영이 아직 안 정해진 건에 버튼을 두면 직전보강과 똑같이 읽혀 **지급되는 줄 알고 적게 된다**.
+    슬랙 목록은 버튼을 빼고 그 줄 밑에 `NOT_PAYABLE_HINT`(왜 닫혔는지 + 관리자 문의)를 작게 붙이고,
+    **누른 시점에도 다시 막는다** — 옛 DM 에 남은 버튼은 목록을 안 거치고 바로 눌린다.
+    관리자가 *수당 반영* 을 켜서 저장하는 순간 열린다(관리자 화면의 확정 요청 버튼도 그때 켜진다).
+  - **확정 요청 알림은 '수당이 반영되는 건' 에만 자동으로** 나간다
+    (`autoNotifiesConfirm` = `isPayEligible`. `payEligible` 지정값 우선, 없으면 `categoryDefault`).
     직전보강·내신의무보강·주말근무는 근무 다음날 크론(`runMakeupConfirmReminders`)이 DM 을 보내고,
     **결시보강처럼 기본 미반영인 건은 관리자가 골라서 보낸다**(`POST /api/makeup/[id]/remind`,
     화면의 *확정 요청 보내기*) — 반영하지 않기로 한 건에 확정을 재촉하면 지급되는 줄 알게 된다.

@@ -6,6 +6,8 @@ import {
   honestyNotice,
   mandatoryCapNotice,
   underMandatoryCap,
+  NOT_PAYABLE_HINT,
+  NOT_PAYABLE_NOTICE,
   type ConfirmableSession,
 } from "./makeup-confirm";
 
@@ -146,5 +148,21 @@ describe("underMandatoryCap", () => {
     expect(underMandatoryCap("MANDATORY")).toBe(true);
     expect(underMandatoryCap("IMMEDIATE")).toBe(false);
     expect(underMandatoryCap("WEEKEND")).toBe(false);
+  });
+});
+
+describe("수당 미반영 건 안내", () => {
+  it("왜 닫혔는지와 무엇을 하면 되는지를 함께 적는다", () => {
+    // 버튼만 사라져 있으면 시스템이 고장 난 줄 안다
+    expect(NOT_PAYABLE_HINT).toContain("수당 반영 대상이 아니");
+    expect(NOT_PAYABLE_HINT).toContain("관리자에게 문의");
+  });
+
+  it("확정을 시도했을 때 돌려주는 문구도 같은 말을 한다", () => {
+    expect(NOT_PAYABLE_NOTICE).toContain(NOT_PAYABLE_HINT);
+  });
+
+  it("'수당이 산정된다' 는 단정을 담지 않는다", () => {
+    expect(NOT_PAYABLE_HINT).not.toContain("산정됩니다");
   });
 });

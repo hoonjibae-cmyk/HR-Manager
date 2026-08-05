@@ -32,6 +32,7 @@ import {
   createMakeupSession,
   confirmMakeupActuals,
   mandatoryCapContext,
+  getOvertimePolicy,
 } from "@/lib/makeup-service";
 import {
   canSelfConfirm,
@@ -39,8 +40,9 @@ import {
   honestyNotice,
   mandatoryCapNotice,
   underMandatoryCap,
+  NOT_PAYABLE_NOTICE,
 } from "@/lib/makeup-confirm";
-import { sessionHours, workWindow } from "@/lib/overtime";
+import { sessionHours, workWindow, isPayEligible } from "@/lib/overtime";
 import { makeupCalendarConfigured } from "@/lib/gcal";
 import {
   MAKEUP_CATEGORY_LABEL,
@@ -186,6 +188,11 @@ async function openConfirmForm(
   const row = await prisma.makeupSession.findUnique({ where: { id: sessionId } });
   if (!row || row.employeeId !== emp.id) {
     await tellUser(channelId, userId, "본인이 신청한 내역만 확정할 수 있습니다.");
+    return;
+  }
+  // 수당 대상이 아니면 확정을 열지 않는다 — 목록이 버튼을 안 그려도 옛 DM 에 남은 버튼은 눌린다
+  if (!isPayEligible(row, await getOvertimePolicy())) {
+    await tellUser(channelId, userId, NOT_PAYABLE_NOTICE);
     return;
   }
   const v = canSelfConfirm(row as any, new Date());
