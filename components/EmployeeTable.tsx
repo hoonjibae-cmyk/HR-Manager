@@ -91,7 +91,8 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
   };
 
   return (
-    <div className="card overflow-hidden">
+    // 남은 화면 높이를 채우고 행만 안에서 스크롤한다 — 검색·필터 줄과 머리글은 늘 보인다
+    <div className="card overflow-hidden flex flex-col flex-1 min-h-0">
       <FilterBar shown={filtered.length} total={rows.length} dirty={dirty} onReset={reset}>
         <input
           className="input py-1 text-xs w-40"
@@ -134,9 +135,9 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
       {sorted.length === 0 ? (
         <Empty>{rows.length === 0 ? "등록된 직원이 없습니다." : "조건에 맞는 직원이 없습니다."}</Empty>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="flex-1 min-h-0 overflow-auto">
           <table className="w-full">
-            <thead className="bg-slate-50">
+            <thead className="sticky-head">
               <tr>
                 <SortTh label="사번" sortKey="empNo" sort={sort} onSort={toggle} />
                 <SortTh label="성명" sortKey="name" sort={sort} onSort={toggle} />

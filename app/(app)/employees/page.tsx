@@ -38,7 +38,9 @@ export default async function EmployeesPage() {
   });
 
   return (
-    <div>
+    /* 화면 높이에 맞춰 표만 안에서 스크롤한다 — 검색·필터·머리글이 늘 붙어 있게.
+       창이 짧으면 min-h 가 걸려 예전처럼 페이지째 스크롤된다. */
+    <div className="flex flex-col h-[calc(100dvh-6.5rem)] lg:h-[calc(100dvh-7.5rem)] min-h-[28rem]">
       <PageHeader
         title="직원 관리"
         desc={`전체 ${emps.length}명 · 재직 ${emps.filter((e) => e.active).length}명`}

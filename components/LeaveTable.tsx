@@ -83,7 +83,8 @@ export default function LeaveTable({
   const dirty = !!(q || dept || eligible);
 
   return (
-    <div className="card">
+    // 남은 화면 높이를 채우고 행만 안에서 스크롤한다 — 조회 기간·필터 줄과 머리글은 늘 보인다
+    <div className="card flex flex-col flex-1 min-h-0">
       <div className="px-5 py-3 border-b border-slate-100 flex flex-wrap items-center gap-3">
         <span className="font-bold text-slate-800">직원별 연차 현황</span>
         {rangeLabel}
@@ -127,9 +128,9 @@ export default function LeaveTable({
           {rows.length === 0 ? "연차 대상 직원이 없습니다." : "조건에 맞는 직원이 없습니다."}
         </Empty>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="flex-1 min-h-0 overflow-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50">
+            <thead className="sticky-head">
               <tr>
                 <SortTh label="직원" sortKey="name" sort={sort} onSort={toggle} rowSpan={2} />
                 <SortTh label="근속" sortKey="service" sort={sort} onSort={toggle} rowSpan={2} />

@@ -76,12 +76,17 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   `lib/email.ts`, `lib/scheduler.ts`, `lib/slack.ts`.
 - **API**: `app/api/**` — 모두 `isAuthed()` 가드(슬랙/크론 제외, 자체 서명검증).
 - **화면**: `app/(app)/**` — 서버컴포넌트가 데이터 로드, `components/*Client.tsx` 가 상호작용.
-  **급여 화면(`/payroll`)만 화면 높이에 맞춰 두 층으로 나눈다** — 연·월 선택·버튼·합계 카드·표 머리글은
-  고정이고 **직원 행만 표 안에서 스크롤**한다. 47명을 넘어가면 아래로 내려갈수록 어느 입력칸인지
-  분간이 안 돼 잘못 적기 쉬웠다. 표 카드가 `flex-1 min-h-0 overflow-auto` 로 남은 높이를 먹고,
-  머리글은 `thead` 가 아니라 **`th` 마다** sticky 를 건다(thead 만으로는 안 붙는 브라우저가 있다).
-  머리글 아래 경계선은 border 가 아니라 inset shadow 로 그린다 — sticky 셀의 border 는 스크롤할 때
-  같이 밀려 사라진다. 계산 규칙 설명은 접어 둔다(400px 짜리가 늘 펼쳐져 있으면 볼 행이 두 줄 남는다).
+  **긴 명단 화면(`/payroll`·`/employees`·`/leave`)은 화면 높이에 맞춰 두 층으로 나눈다** —
+  연·월 선택·검색·필터·합계·표 머리글은 고정이고 **행만 표 안에서 스크롤**한다.
+  수십 명이 넘어가면 아래로 내려갈수록 어느 열·입력칸인지 분간이 안 돼 잘못 적기 쉬웠다.
+  페이지 뿌리를 `flex flex-col h-[calc(100dvh-…)] min-h-[28rem]` 로 잡고(창이 짧으면 예전처럼
+  페이지째 스크롤된다) 표 카드가 `flex-1 min-h-0 overflow-auto` 로 남은 높이를 먹는다.
+  머리글은 `.sticky-head`(globals.css) — **`thead` 와 `th` 에 둘 다** 건다. thead 째로 붙여야
+  연차 표처럼 **두 줄짜리(rowSpan) 머리글**이 겹치지 않고, thead sticky 를 모르는 옛 브라우저에서는
+  th 쪽이 첫 줄만이라도 붙여 준다. 머리글 아래 경계선은 border 가 아니라 inset shadow 로 그린다 —
+  sticky 셀의 border 는 스크롤할 때 같이 밀려 사라진다.
+  긴 설명 문단(급여 계산 규칙·연차 규칙)은 `<details>` 로 접어 둔다 — 400px 짜리가 늘 펼쳐져
+  있으면 정작 볼 행이 두어 줄만 남는다. 연차의 *승인 대기* 칸도 `max-h` 로 묶어 표를 밀어내지 않게 한다.
   보강 화면(`/makeup`)만 표가 아니라 **월 달력**(`components/MakeupCalendar.tsx`) — 누가 언제 보강하는지가
   날짜 축으로 보여야 하고, 구글 보강캘린더와 같은 그림을 보게 하기 위함.
 - **명단 화면의 필터·정렬**: `components/TableTools.tsx`(`useTableSort` / `SortTh` / `FilterSelect` / `FilterBar`).

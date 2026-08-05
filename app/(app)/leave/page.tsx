@@ -111,7 +111,8 @@ export default async function LeavePage({
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
 
   return (
-    <div>
+    /* 화면 높이에 맞춰 표만 안에서 스크롤한다 — 조회 기간·필터·머리글이 늘 붙어 있게 */
+    <div className="flex flex-col h-[calc(100dvh-6.5rem)] lg:h-[calc(100dvh-7.5rem)] min-h-[28rem]">
       <PageHeader
         title="연차 관리"
         desc="본래 연차(근로기준법 자동 산정) + 대휴보상연차(운영자 수동 부여) · 슬랙 신청 → 승인 → 반영"
@@ -131,11 +132,12 @@ export default async function LeavePage({
         }
       />
 
-      <div className="card mb-6">
+      <div className="card mb-4 shrink-0">
         <div className="px-5 py-3 border-b border-slate-100 font-bold text-slate-800">
           승인 대기 {serializedReqs.length > 0 && <span className="text-amber-600">({serializedReqs.length})</span>}
         </div>
-        <div className="overflow-x-auto">
+        {/* 신청이 몰린 날 이 칸이 화면을 다 먹지 않게 높이를 묶는다 */}
+        <div className="overflow-auto max-h-[32vh]">
           <LeaveApprovals requests={serializedReqs} />
         </div>
       </div>
@@ -153,7 +155,11 @@ export default async function LeavePage({
         }
       />
 
-      <p className="text-xs text-slate-400 mt-3 leading-relaxed">
+      <details className="shrink-0 mt-3">
+        <summary className="cursor-pointer text-xs font-semibold text-slate-500 hover:text-slate-700 select-none">
+          표 보는 법 · 연차 규칙
+        </summary>
+        <p className="text-xs text-slate-400 mt-2 leading-relaxed max-h-[40vh] overflow-auto">
         · <b>본래 연차</b>: 근로기준법 §60 자동 산정 — <b>이번 연차기간(입사일 기준 1년)</b> 의 발생·사용·잔여.
         지난 기간 미사용분은 기간 종료일에 소멸되어 넘어오지 않는다 &nbsp;
         · <b>대휴보상연차</b>: 지정 휴일 근무 보상 등 — <b>&quot;+대휴&quot;</b> 버튼으로 운영자가 직접 부여/차감 &nbsp;
@@ -161,7 +167,8 @@ export default async function LeavePage({
         · <b>연차 미적용</b>: 1주 소정근로시간이 15시간 미만인 초단시간근로자는 연차·주휴가 발생하지 않는다
         (근로기준법 §18③). 직원 카드의 <b>연차 적용</b> 항목으로 계약에 맞춰 바꿀 수 있다 &nbsp;
         · 열 머리글을 누르면 오름차순 → 내림차순 → 원래 순서로 정렬된다.
-      </p>
+        </p>
+      </details>
     </div>
   );
 }
