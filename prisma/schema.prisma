@@ -245,10 +245,47 @@ model Contract {
   pdfPath String?
   note    String?
 
+  /// 계약 종료 예고 알림을 보낸 시각 (경영지원 슬랙 알림).
+  /// **한 계약에 한 번만** 보내려고 새긴다 — 매일 같은 알림이 오면 아무도 안 읽는다.
+  /// 예고 조건을 '오늘이 딱 N일 전인가' 가 아니라 '창 안에 들었는데 아직 안 알렸는가' 로
+  /// 두었기에 필요한 자리다(lib/hr-notify.ts).
+  expiryNotifiedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([employeeId])
+}
+
+/// 경영지원 알림 설정 — 계약 종료 예고 · 생일 (단일 행, id=1)
+///
+/// 발송 시기·시각을 **코드가 아니라 설정으로** 둔 이유: 실무가 바뀌면 배포 없이 고쳐야 하고,
+/// 지금 무엇이 언제 나가게 되어 있는지가 화면에 남아야 한다.
+model HrNotifySetting {
+  id Int @id @default(1)
+
+  /// 알림을 받을 부서 — 재계약·경조사 실무를 맡는 곳
+  targetDepartment String  @default("경영지원")
+  /// 채널로 보낼지 (비면 부서 소속 직원에게 각각 DM)
+  channel          String?
+
+  // 계약 종료 예고
+  contractEnabled   Boolean   @default(true)
+  /// 며칠 전에 알릴지 (60일 ≈ 2개월)
+  contractLeadDays  Int       @default(60)
+  contractHour      Int       @default(12)
+  contractMinute    Int       @default(0)
+  contractLastRunAt DateTime?
+
+  // 생일
+  birthdayEnabled   Boolean   @default(true)
+  /// 0 = 당일. 미리 챙길 것이 있으면 앞당길 수 있다
+  birthdayLeadDays  Int       @default(0)
+  birthdayHour      Int       @default(12)
+  birthdayMinute    Int       @default(0)
+  birthdayLastRunAt DateTime?
+
+  updatedAt DateTime @updatedAt
 }
 
 /// 월별 급여/사업소득 명세 기록

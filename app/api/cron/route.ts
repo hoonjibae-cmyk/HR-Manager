@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { runDueSchedules } from "@/lib/scheduler";
 import { runMakeupConfirmReminders } from "@/lib/makeup-service";
 import { holidayStatus, holidayApiConfigured, syncHolidays } from "@/lib/holiday-service";
+import { runHrNotices } from "@/lib/hr-notify-service";
 
 export const dynamic = "force-dynamic";
 // Vercel Pro: 함수 최대 실행시간 300초 (인원이 많아도 한 번에 발송 가능)
@@ -61,7 +62,15 @@ async function handle(req: Request) {
     })().catch((e) => ({ error: String(e?.message ?? e) }));
   }
 
-  return NextResponse.json({ ...result, makeupReminders, holidaySync });
+  // 경영지원 알림 — 계약 종료 예고 · 생일. 설정한 시각(기본 12:00 KST)을 지나야 나가고,
+  // 같은 날 두 번 나가지 않게 `*LastRunAt` 로 막는다. `loose` 와 무관하게 자체 시각을 본다 —
+  // 급여 발송과 시각이 다르기 때문이다.
+  let hrNotices: any = null;
+  if (!dryRun) {
+    hrNotices = await runHrNotices(new Date()).catch((e) => ({ error: String(e?.message ?? e) }));
+  }
+
+  return NextResponse.json({ ...result, makeupReminders, holidaySync, hrNotices });
 }
 
 export async function GET(req: Request) {

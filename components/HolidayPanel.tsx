@@ -109,14 +109,14 @@ export default function HolidayPanel({
 
   return (
     <div className="card p-4">
-      <div className="flex items-center justify-between gap-2">
-        <div>
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <div className="min-w-0">
           <div className="font-bold text-sm">공휴일</div>
           <div className="text-[11px] text-slate-400 mt-0.5">
             휴일근로 가산 · 보강 자동 반영 · 주휴 개근 · 연차 기록에 함께 쓰인다
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0">
           {apiConfigured ? (
             <button className="btn btn-primary text-xs" onClick={sync} disabled={busy}>
               {busy ? "받는 중…" : "공휴일 받아오기"}
