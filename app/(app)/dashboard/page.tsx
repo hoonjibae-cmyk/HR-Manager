@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { PageHeader, StatCard, Pill } from "@/components/ui";
+import PayrollTrendChart from "@/components/PayrollTrendChart";
+import type { TrendRecord } from "@/lib/payroll-trend";
 import { INCOME_TYPE_LABEL, PAY_SCHEME_LABEL, LEAVE_STATUS_LABEL } from "@/lib/constants";
 import { ymd } from "@/lib/format";
 
@@ -26,6 +28,37 @@ export default async function Dashboard() {
       }),
       prisma.company.findFirst(),
     ]);
+
+  // 월별 급여 추이 — **급여가 산정된 달만** 나온다(빈 달을 0으로 채우면 '0원이었던 달' 로 읽힌다).
+  // 부서는 급여 레코드에 없어 직원 카드에서 가져온다 — 지금 부서 기준이라는 뜻이다.
+  const payrolls = await prisma.payrollRecord.findMany({
+    orderBy: [{ year: "asc" }, { month: "asc" }],
+    include: { employee: { select: { department: true } } },
+  });
+  const trendRecords: TrendRecord[] = payrolls.map((p) => ({
+    year: p.year,
+    month: p.month,
+    department: p.employee?.department ?? null,
+    payScheme: p.payScheme,
+    baseP: p.baseP,
+    weeklyHolidayP: p.weeklyHolidayP,
+    positionP: p.positionP,
+    mealP: p.mealP,
+    carP: p.carP,
+    incentiveP: p.incentiveP,
+    bonusP: p.bonusP,
+    unusedLeaveP: p.unusedLeaveP,
+    extraP: p.extraP,
+    overtimeP: p.overtimeP,
+    nightP: p.nightP,
+    holidayP: p.holidayP,
+    extraHours: p.extraHours,
+    overtimeHours: p.overtimeHours,
+    nightHours: p.nightHours,
+    holidayHours: p.holidayHours,
+    holidayOverHours: p.holidayOverHours,
+    hourlyWage: p.hourlyWage,
+  }));
 
   // 60일 내 계약 만료 예정
   const soon = recentContracts.filter((c) => {
@@ -58,6 +91,10 @@ export default async function Dashboard() {
           value={`${soon.length}건`}
           accent={soon.length ? "text-red-600" : ""}
         />
+      </div>
+
+      <div className="mb-6">
+        <PayrollTrendChart records={trendRecords} />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
