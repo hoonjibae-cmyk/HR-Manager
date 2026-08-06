@@ -8,6 +8,10 @@ import { won } from "@/lib/format";
 import {
   useTableSort,
   useStoredState,
+  normalizeFilterSet,
+  matchesFilter,
+  anyFilterActive,
+  type FilterValues,
   SortTh,
   FilterSelect,
   FilterBar,
@@ -53,7 +57,13 @@ function pick(e: EmployeeRow, key: string): any {
 }
 
 /** 브라우저에 기억해 두는 필터 — 다음에 들어와도 이대로 걸려 있다 */
-const DEFAULT_FILTER = { dept: "", scheme: "", income: "", status: "" };
+const FILTER_KEYS = ["dept", "scheme", "income", "status"] as const;
+const DEFAULT_FILTER: Record<(typeof FILTER_KEYS)[number], FilterValues> = {
+  dept: [],
+  scheme: [],
+  income: [],
+  status: [],
+};
 
 /** 정렬키 → 열 이름 — 여러 단계로 정렬했을 때 순서를 풀어 보여주기 위함 */
 const SORT_LABELS: Record<string, string> = {
@@ -71,9 +81,12 @@ const SORT_LABELS: Record<string, string> = {
 export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
   // 이름 검색은 기억하지 않는다 — 그때그때 한 사람 찾는 동작이지 기본값이 아니다
   const [q, setQ] = useState("");
-  const [f, setF, clearFilter] = useStoredState("employees.filter", DEFAULT_FILTER);
+  // 옛 단일 선택 저장값({dept:"교수부"})을 배열 형식으로 받아 준다
+  const [f, setF, clearFilter] = useStoredState("employees.filter", DEFAULT_FILTER, (v) =>
+    normalizeFilterSet(FILTER_KEYS, v)
+  );
   const { dept, scheme, income, status } = f;
-  const set = (k: keyof typeof DEFAULT_FILTER) => (v: string) =>
+  const set = (k: keyof typeof DEFAULT_FILTER) => (v: FilterValues) =>
     setF((p) => ({ ...p, [k]: v }));
 
   const depts = useMemo(
@@ -87,11 +100,14 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return rows.filter((e) => {
-      if (dept === "__none" ? !!e.department : dept && e.department !== dept) return false;
-      if (scheme && e.payScheme !== scheme) return false;
-      if (income && e.incomeType !== income) return false;
-      if (status === "active" && !e.active) return false;
-      if (status === "resigned" && e.active) return false;
+      // '__none'(부서 미입력)은 값이 아니라 '비어 있음' 을 고른 것이라 따로 본다
+      if (dept.length) {
+        const hit = dept.some((d) => (d === "__none" ? !e.department : e.department === d));
+        if (!hit) return false;
+      }
+      if (!matchesFilter(scheme, e.payScheme)) return false;
+      if (!matchesFilter(income, e.incomeType)) return false;
+      if (status.length && !status.includes(e.active ? "active" : "resigned")) return false;
       if (
         needle &&
         ![e.name, e.empNo, e.position, e.department]
@@ -105,7 +121,7 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
 
   const { sorted, sort, toggle, resetSort, hasSort } = useTableSort(filtered, pick, "employees.sort");
   // 정렬도 기억하므로 '되돌릴 게 있는지' 판단에 함께 넣는다
-  const dirty = !!(q || dept || scheme || income || status) || hasSort;
+  const dirty = !!q || anyFilterActive(f) || hasSort;
   const reset = () => {
     setQ("");
     clearFilter();

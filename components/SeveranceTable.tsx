@@ -7,6 +7,10 @@ import { won } from "@/lib/format";
 import {
   useTableSort,
   useStoredState,
+  normalizeFilter,
+  matchesFilter,
+  anyFilterActive,
+  type FilterValues,
   SortTh,
   FilterSelect,
   FilterBar,
@@ -72,8 +76,17 @@ export default function SeveranceTable({
   warnings: string[];
 }) {
   const [q, setQ] = useState("");
-  const [dept, setDept, resetDept] = useStoredState("yoossam.table.severance.dept", "");
-  const [status, setStatus, resetStatus] = useStoredState("yoossam.table.severance.status", "");
+  // 옛 단일 선택 저장값을 배열 형식으로 받아 준다
+  const [dept, setDept, resetDept] = useStoredState<FilterValues>(
+    "yoossam.table.severance.dept",
+    [],
+    normalizeFilter
+  );
+  const [status, setStatus, resetStatus] = useStoredState<FilterValues>(
+    "yoossam.table.severance.status",
+    [],
+    normalizeFilter
+  );
   const [open, setOpen] = useState<SeveranceRow | null>(null);
 
   const depts = useMemo(
@@ -85,8 +98,8 @@ export default function SeveranceTable({
     () =>
       rows.filter(
         (r) =>
-          (!dept || r.department === dept) &&
-          (!status || r.status === status) &&
+          matchesFilter(dept, r.department) &&
+          matchesFilter(status, r.status) &&
           (!q || r.name.includes(q) || r.empNo.includes(q))
       ),
     [rows, dept, status, q]
@@ -103,7 +116,7 @@ export default function SeveranceTable({
     "yoossam.table.severance.sort"
   );
 
-  const dirty = !!(dept || status) || hasSort;
+  const dirty = anyFilterActive({ dept, status }) || hasSort;
   const reset = () => {
     resetDept();
     resetStatus();

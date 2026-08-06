@@ -89,7 +89,7 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   있으면 정작 볼 행이 두어 줄만 남는다. 연차의 *승인 대기* 칸도 `max-h` 로 묶어 표를 밀어내지 않게 한다.
   보강 화면(`/makeup`)만 표가 아니라 **월 달력**(`components/MakeupCalendar.tsx`) — 누가 언제 보강하는지가
   날짜 축으로 보여야 하고, 구글 보강캘린더와 같은 그림을 보게 하기 위함.
-- **명단 화면의 필터·정렬**: 계산부는 `lib/table-sort.ts`(순수 함수, 테스트 있음),
+- **명단 화면의 필터·정렬**: 계산부는 `lib/table-sort.ts`·`lib/table-filter.ts`(순수 함수, 테스트 있음),
   화면 껍데기는 `components/TableTools.tsx`(`useTableSort` / `SortTh` / `FilterSelect` / `FilterBar`).
   수십 건 규모라 서버를 다시 부르지 않고 브라우저에서 거른다 — 서버컴포넌트가 행을 평평한
   값으로 직렬화해 내려주고(`EmployeeRow` / `LeaveRow`) 표 컴포넌트가 걸러 정렬한다.
@@ -105,9 +105,19 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
     가려낸다. `compare()` 결과에 −1 을 곱하면 빈칸이 맨 위로 올라와 볼 것 없는 행이 첫 줄을
     차지한다(옛 단일 정렬이 실제로 그랬다). 둘 다 비면 그 조건은 '같다' 로 보고 다음 조건으로 넘어간다.
   - **`!!sort` 로 '정렬 중인가' 를 판정하지 않는다** — 빈 배열도 참이다. 훅이 돌려주는
-    `hasSort` 를 쓴다(`dirty` 계산).
-  - 저장 형식이 배열로 바뀌었으므로 **옛 단일 `{key,dir}` 저장값을 받아 준다**
-    (`normalizeSort`, `useStoredState` 의 `normalize` 인자). 안 그러면 브라우저에 남은 옛 값으로 화면이 깨진다.
+    `hasSort` 를 쓴다(`dirty` 계산). 필터도 같은 이유로 `anyFilterActive(f)` 를 쓴다.
+  - **필터도 여러 개를 함께 고른다**(`FilterValues` = `string[]`. 부서 = 교수부 + 조교팀).
+    **빈 배열이 '전체'** 다 — '아무것도 안 보임' 으로 읽으면 화면이 통째로 빈다.
+    판정은 `matchesFilter(고른값, 행의값)` 하나로 하고, 값이 아니라 '비어 있음' 을 고르는
+    `__none`(부서 미지정)만 호출부가 따로 본다.
+    네이티브 `<select multiple>` 을 쓰지 않는다 — 목록이 펼쳐진 채 자리를 차지하고,
+    여러 개를 고르려면 Ctrl/⌘ 를 눌러야 한다는 걸 아무도 모른다. **체크박스 목록**을 띄우고
+    맨 위 *전체* 는 고르는 값이 아니라 **모두 지우기**다. 버튼에는 `교수부 외 2` 로 줄여 적는다
+    (다 늘어놓으면 필터 줄이 두 층이 된다).
+  - 저장 형식이 배열로 바뀌었으므로 **옛 저장값을 받아 준다** — 정렬은 단일 `{key,dir}`,
+    필터는 단일 문자열(`""` = 전체)이었다. `normalizeSort` / `normalizeFilter`(묶음은
+    `normalizeFilterSet`)를 `useStoredState` 의 `normalize` 인자로 넘긴다.
+    안 그러면 브라우저에 남은 옛 값으로 화면이 깨진다.
   **고른 필터와 정렬은 브라우저에 기억한다**(`useStoredState`, localStorage `yoossam.table.*`).
   서버가 아니라 브라우저에 두는 이유: 관리자 로그인이 **비밀번호 공유** 방식이라 서버에 저장하면
   모두가 같은 값을 쓰게 된다 — 계정 모델이 생기면 그때 서버로 옮긴다.

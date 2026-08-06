@@ -12,6 +12,10 @@ import { Pill } from "@/components/ui";
 import {
   useTableSort,
   useStoredState,
+  normalizeFilterSet,
+  matchesFilter,
+  anyFilterActive,
+  type FilterValues,
   SortTh,
   FilterSelect,
   FilterBar,
@@ -72,7 +76,12 @@ interface Rec {
 const now = new Date();
 
 /** 브라우저에 기억해 두는 필터 — 다음에 들어와도 이대로 걸려 있다 */
-const DEFAULT_FILTER = { scheme: "", income: "", status: "" };
+const FILTER_KEYS = ["scheme", "income", "status"] as const;
+const DEFAULT_FILTER: Record<(typeof FILTER_KEYS)[number], FilterValues> = {
+  scheme: [],
+  income: [],
+  status: [],
+};
 
 /** 정렬 키 → 비교할 값 */
 function pickRec(r: Rec, key: string): any {
@@ -148,7 +157,10 @@ export default function PayrollClient() {
   const [incResult, setIncResult] = useState<any>(null);
   // 이름 검색은 기억하지 않는다 — 그때그때 한 사람 찾는 동작이지 기본값이 아니다
   const [q, setQ] = useState("");
-  const [filter, setFilter, clearFilter] = useStoredState("payroll.filter", DEFAULT_FILTER);
+  // 옛 단일 선택 저장값을 배열 형식으로 받아 준다
+  const [filter, setFilter, clearFilter] = useStoredState("payroll.filter", DEFAULT_FILTER, (v) =>
+    normalizeFilterSet(FILTER_KEYS, v)
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -383,9 +395,9 @@ export default function PayrollClient() {
   const filtered = React.useMemo(() => {
     const needle = q.trim().toLowerCase();
     return recs.filter((r) => {
-      if (filter.scheme && r.payScheme !== filter.scheme) return false;
-      if (filter.income && r.incomeType !== filter.income) return false;
-      if (filter.status && r.status !== filter.status) return false;
+      if (!matchesFilter(filter.scheme, r.payScheme)) return false;
+      if (!matchesFilter(filter.income, r.incomeType)) return false;
+      if (!matchesFilter(filter.status, r.status)) return false;
       if (
         needle &&
         ![r.employee.name, r.employee.department, r.employee.position]
@@ -417,13 +429,13 @@ export default function PayrollClient() {
     [sorted]
   );
   // 정렬도 기억하므로 '되돌릴 게 있는지' 판단에 함께 넣는다
-  const dirty = !!(q || filter.scheme || filter.income || filter.status) || hasSort;
+  const dirty = !!q || anyFilterActive(filter) || hasSort;
   const resetView = () => {
     setQ("");
     clearFilter();
     resetSort();
   };
-  const setF = (k: keyof typeof DEFAULT_FILTER) => (v: string) =>
+  const setF = (k: keyof typeof DEFAULT_FILTER) => (v: FilterValues) =>
     setFilter((p) => ({ ...p, [k]: v }));
 
   return (
@@ -890,7 +902,7 @@ export default function PayrollClient() {
                     )}
                     {/* 발송된 기록은 잠긴다. 되돌리기 어려운 작업이라 평소에는 버튼을 숨기고,
                         상태 필터를 '발송완료' 로 좁혀 **정정하러 들어왔을 때만** 보여준다. */}
-                    {r.status === "SENT" && filter.status === "SENT" && (
+                    {r.status === "SENT" && filter.status.includes("SENT") && (
                       <button
                         className="mt-0.5 block text-[10px] text-slate-400 hover:text-rose-600 underline decoration-dotted underline-offset-2"
                         onClick={() => setUnlockRec(r)}

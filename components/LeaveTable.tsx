@@ -7,6 +7,10 @@ import CompGrantButton from "@/components/CompGrantButton";
 import {
   useTableSort,
   useStoredState,
+  normalizeFilterSet,
+  matchesFilter,
+  anyFilterActive,
+  type FilterValues,
   SortTh,
   FilterSelect,
   FilterBar,
@@ -55,7 +59,8 @@ function pick(r: LeaveRow, key: string): any {
 }
 
 /** 브라우저에 기억해 두는 필터 — 다음에 들어와도 이대로 걸려 있다 */
-const DEFAULT_FILTER = { dept: "", eligible: "" };
+const FILTER_KEYS = ["dept", "eligible"] as const;
+const DEFAULT_FILTER: Record<(typeof FILTER_KEYS)[number], FilterValues> = { dept: [], eligible: [] };
 
 /** 정렬키 → 열 이름 — 여러 단계로 정렬했을 때 순서를 풀어 보여주기 위함 */
 const SORT_LABELS: Record<string, string> = {
@@ -81,9 +86,12 @@ export default function LeaveTable({
 }) {
   // 이름 검색은 기억하지 않는다 — 그때그때 한 사람 찾는 동작이지 기본값이 아니다
   const [q, setQ] = useState("");
-  const [f, setF, clearFilter] = useStoredState("leave.filter", DEFAULT_FILTER);
+  // 옛 단일 선택 저장값을 배열 형식으로 받아 준다
+  const [f, setF, clearFilter] = useStoredState("leave.filter", DEFAULT_FILTER, (v) =>
+    normalizeFilterSet(FILTER_KEYS, v)
+  );
   const { dept, eligible } = f;
-  const set = (k: keyof typeof DEFAULT_FILTER) => (v: string) =>
+  const set = (k: keyof typeof DEFAULT_FILTER) => (v: FilterValues) =>
     setF((p) => ({ ...p, [k]: v }));
 
   const depts = useMemo(
@@ -97,9 +105,8 @@ export default function LeaveTable({
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return rows.filter((r) => {
-      if (eligible === "yes" && !r.eligible) return false;
-      if (eligible === "no" && r.eligible) return false;
-      if (dept && r.department !== dept) return false;
+      if (eligible.length && !eligible.includes(r.eligible ? "yes" : "no")) return false;
+      if (!matchesFilter(dept, r.department)) return false;
       if (needle && !`${r.name}${r.department ?? ""}${r.position ?? ""}`.toLowerCase().includes(needle))
         return false;
       return true;
@@ -108,7 +115,7 @@ export default function LeaveTable({
 
   const { sorted, sort, toggle, resetSort, hasSort } = useTableSort(filtered, pick, "leave.sort");
   // 정렬도 기억하므로 '되돌릴 게 있는지' 판단에 함께 넣는다
-  const dirty = !!(q || dept || eligible) || hasSort;
+  const dirty = !!q || anyFilterActive(f) || hasSort;
 
   return (
     // 남은 화면 높이를 채우고 행만 안에서 스크롤한다 — 조회 기간·필터 줄과 머리글은 늘 보인다

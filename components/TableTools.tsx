@@ -12,9 +12,21 @@ import {
   type SortState,
 } from "@/lib/table-sort";
 
-// 정렬 계산은 lib/table-sort.ts 에 있다(순수 함수, 테스트 있음). 여기서는 화면만 맡는다.
+import {
+  normalizeFilter,
+  normalizeFilterSet,
+  matchesFilter,
+  toggleFilter,
+  anyFilterActive,
+  filterSummary,
+  type FilterValues,
+} from "@/lib/table-filter";
+
+// 정렬·필터 계산은 lib/ 에 있다(순수 함수, 테스트 있음). 여기서는 화면만 맡는다.
 export { normalizeSort, nextSort, sortRows, sortOrderLabel };
 export type { SortClickOpts, SortDir, SortKeys, SortState };
+export { normalizeFilter, normalizeFilterSet, matchesFilter, toggleFilter, anyFilterActive };
+export type { FilterValues };
 
 /* 목록 화면 공용 — 열 머리글 클릭 정렬 + 필터 셀렉트.
    명단이 수십 건 규모라 서버를 다시 부르지 않고 브라우저에서 바로 처리한다. */
@@ -192,34 +204,119 @@ export function SortTh({
   );
 }
 
-/** 필터 셀렉트 한 칸 */
+/**
+ * 필터 한 칸 — **여러 개를 함께 고를 수 있다**(부서 = 교수부 + 조교팀).
+ *
+ * 네이티브 `<select multiple>` 을 쓰지 않는다: 목록이 펼쳐진 채 자리를 차지하고,
+ * 여러 개를 고르려면 Ctrl/⌘ 를 눌러야 한다는 걸 아무도 모른다. 대신 **체크박스 목록**을
+ * 띄운다 — 무엇이 켜져 있는지 한눈에 보이고 누르는 대로 켜고 꺼진다.
+ *
+ * 아무것도 안 고르면 '전체' 다(`matchesFilter` 가 전부 통과시킨다).
+ */
 export function FilterSelect({
   label,
   value,
   onChange,
   options,
+  allLabel = "전체",
 }: {
   label: string;
-  value: string;
-  onChange: (v: string) => void;
+  /** 고른 값들 — 비어 있으면 전체 */
+  value: FilterValues;
+  onChange: (v: FilterValues) => void;
   options: Array<{ value: string; label: string }>;
+  allLabel?: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const labelOf = (v: string) => options.find((o) => o.value === v)?.label ?? v;
+  const active = value.length > 0;
+
+  // 바깥을 누르거나 Esc 면 닫는다 — 열어 둔 채 다른 걸 만지면 화면이 가려진다
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   return (
-    <label className="flex items-center gap-1.5 text-xs">
+    <div className="flex items-center gap-1.5 text-xs" ref={box}>
       <span className="text-slate-400 whitespace-nowrap">{label}</span>
-      <select
-        className={`input py-1 text-xs w-auto ${value ? "border-brand-300 text-brand-700" : ""}`}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">전체</option>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
+      <div className="relative">
+        <button
+          type="button"
+          className={`input py-1 text-xs w-auto min-w-[6.5rem] text-left flex items-center gap-1.5 ${
+            active ? "border-brand-300 text-brand-700" : ""
+          }`}
+          onClick={() => setOpen((v) => !v)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          title={
+            active
+              ? `${value.map(labelOf).join(", ")}\n(눌러서 바꾸기 — 여러 개 고를 수 있습니다)`
+              : "눌러서 고르기 — 여러 개 고를 수 있습니다"
+          }
+        >
+          <span className="truncate flex-1">{filterSummary(value, labelOf, allLabel)}</span>
+          {value.length > 1 && (
+            <span className="shrink-0 text-[9px] leading-none font-bold text-brand-600 bg-brand-50 rounded px-1 py-0.5">
+              {value.length}
+            </span>
+          )}
+          <span className="shrink-0 text-slate-400">▾</span>
+        </button>
+
+        {open && (
+          <div
+            className="absolute z-30 mt-1 min-w-full w-max max-w-[16rem] max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg py-1"
+            role="listbox"
+            aria-multiselectable
+          >
+            {/* '전체' 는 고르는 값이 아니라 **모두 지우기** 다 */}
+            <button
+              type="button"
+              className={`w-full text-left px-3 py-1.5 hover:bg-slate-50 flex items-center gap-2 ${
+                active ? "text-slate-500" : "text-brand-700 font-semibold"
+              }`}
+              onClick={() => onChange([])}
+            >
+              <span className="w-3.5 shrink-0">{active ? "" : "✓"}</span>
+              {allLabel}
+            </button>
+            <div className="border-t border-slate-100 my-1" />
+            {options.map((o) => {
+              const on = value.includes(o.value);
+              return (
+                <label
+                  key={o.value}
+                  className="px-3 py-1.5 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    className="w-3.5 h-3.5 shrink-0"
+                    checked={on}
+                    onChange={() => onChange(toggleFilter(value, o.value))}
+                  />
+                  <span className={on ? "text-brand-700 font-medium" : "text-slate-600"}>
+                    {o.label}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
