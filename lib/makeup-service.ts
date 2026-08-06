@@ -24,6 +24,7 @@ import {
   workWindow,
   categoryDefault,
   isPayEligible,
+  needsDecision,
   DEFAULT_OT_POLICY,
   type ExamWindow,
   type OtPolicy,
@@ -177,7 +178,7 @@ export async function overtimeForMonth(
       nightHours: 0,
       pendingDecision: sessions.filter((s) => {
         const d = ymdUtc(workWindow(s).start);
-        return inMonth(d) && s.payEligible == null && !defaultOf(s.category, policy);
+        return inMonth(d) && needsDecision(s, policy, holidays);
       }).length,
     };
     const sum = (f: (l: (typeof result.lines)[number]) => boolean) =>
@@ -221,6 +222,16 @@ export async function overtimeForMonth(
 
 /** 카테고리별 '수당 반영' 기본값 — 판정은 엔진 것 하나만 쓴다(둘로 두면 어긋난다) */
 const defaultOf = categoryDefault;
+
+/**
+ * 공휴일 목록(YYYY-MM-DD) — 수당 반영 기본값이 **근무일이 토·일·공휴일인지**에 걸려 있어
+ * 판정하는 자리마다 필요하다. 표가 비어 있으면 공휴일 보강이 평일로 읽혀
+ * 자동 반영이 아니라 관리자 판단으로 떨어진다(조용히 더 주는 쪽으로 기울지 않는다).
+ */
+export async function holidayYmds(): Promise<string[]> {
+  const rows = await prisma.holiday.findMany({ select: { date: true } });
+  return rows.map((h) => ymdUtc(h.date));
+}
 
 /**
  * 통상시급 — **명세서에 찍히는 값과 같아야** 하므로 급여 엔진을 그대로 통과시킨다.
@@ -493,8 +504,8 @@ export async function confirmMakeupActuals(
     // 수당 대상이 아닌 건은 신청자 쪽 확정을 아예 닫는다 — 확정 화면이 '이 시간이 곧 수당'
     // 이라는 전제로 쓰여 있어서, 열어 두면 지급되는 줄 알고 적게 된다.
     // 옛 메시지에 남은 버튼을 눌러도 여기서 막힌다(목록이 버튼을 안 그리는 것만으로는 부족하다).
-    if (!isPayEligible(before, await getOvertimePolicy()))
-      throw new Error(NOT_PAYABLE_NOTICE);
+    const [pol, hol] = await Promise.all([getOvertimePolicy(), holidayYmds()]);
+    if (!isPayEligible(before, pol, hol)) throw new Error(NOT_PAYABLE_NOTICE);
     const v = canSelfConfirm(before as unknown as ConfirmableSession, input.now ?? new Date());
     if (!v.ok) throw new Error(v.reason ?? "지금은 확정할 수 없습니다.");
   }
@@ -543,10 +554,11 @@ export async function confirmMakeupActuals(
  * (판정은 엔진의 `isPayEligible` 하나만 쓴다 — 둘로 두면 화면과 산정이 어긋난다.)
  */
 export function autoNotifiesConfirm(
-  s: { category: string; payEligible?: boolean | null },
-  policy: OtPolicy
+  s: Parameters<typeof isPayEligible>[0],
+  policy: OtPolicy,
+  holidays: string[] = []
 ): boolean {
-  return isPayEligible(s, policy);
+  return isPayEligible(s, policy, holidays);
 }
 
 export interface ConfirmRequestResult {
@@ -576,7 +588,8 @@ export async function sendConfirmRequest(
   if (r.status === "CANCELED" || r.status === "NOSHOW")
     return { ok: false, reason: "취소·미실시 건에는 보내지 않습니다." };
   // 수당 대상이 아닌 건에 확정을 재촉하면 지급되는 줄 알게 된다 — 반영 여부를 먼저 정한다
-  if (!isPayEligible(r, await getOvertimePolicy()))
+  const [pol, hol] = await Promise.all([getOvertimePolicy(), holidayYmds()]);
+  if (!isPayEligible(r, pol, hol))
     return {
       ok: false,
       reason: "수당 미반영 건입니다. 먼저 '수당 반영' 을 켠 뒤 다시 보내 주세요.",
@@ -611,7 +624,7 @@ export async function sendConfirmRequest(
  * `confirmNotifiedAt` 는 실제로 보낸 뒤에만 찍힌다).
  */
 export async function runMakeupConfirmReminders(now: Date = new Date()) {
-  const policy = await getOvertimePolicy();
+  const [policy, holidays] = await Promise.all([getOvertimePolicy(), holidayYmds()]);
   // '근무가 끝난 날의 다음날' 부터 확정할 수 있다(lib/makeup-confirm.ts) — 그 시점에 재촉한다.
   //
   // 저장된 시각은 KST 벽시계를 UTC 필드에 담은 것이고 `now` 는 진짜 UTC 다. 그래서 이 경계는
@@ -635,7 +648,7 @@ export async function runMakeupConfirmReminders(now: Date = new Date()) {
   let sent = 0;
   const skipped: number[] = [];
   for (const r of rows) {
-    if (!autoNotifiesConfirm(r, policy)) {
+    if (!autoNotifiesConfirm(r, policy, holidays)) {
       skipped.push(r.id);
       continue;
     }
@@ -707,7 +720,7 @@ const hhmm = (d: Date) =>
 /** 달력에 뿌릴 한 달 신청 목록 + 산정 결과를 붙여 돌려준다 */
 export async function makeupMonth(year: number, month: number) {
   const { from, to } = monthRange(year, month);
-  const [rows, otRows, policy, exams, holidayRows] = await Promise.all([
+  const [rows, otRows, policy, exams, holidayRows, holidayYmdList] = await Promise.all([
     prisma.makeupSession.findMany({
       where: { planStart: { gte: from, lte: to } },
       include: { employee: true },
@@ -717,6 +730,8 @@ export async function makeupMonth(year: number, month: number) {
     getOvertimePolicy(),
     getExamPeriods(),
     prisma.holiday.findMany({ where: { date: { gte: from, lte: to } } }),
+    // 판정용은 **그 달로 자르지 않은 전체** 가 필요하다 — 달 경계를 넘긴 근무도 본다
+    holidayYmds(),
   ]);
 
   // 신청 → 산정 줄 묶기 (한 신청이 여러 줄로 쪼개질 수 있다: 야간/주간, 8시간 경계)
@@ -741,7 +756,7 @@ export async function makeupMonth(year: number, month: number) {
   const list: MakeupRow[] = rows.map((r) => {
     const w = workWindow(r as any);
     const hit = bySession.get(r.id);
-    const needs = r.payEligible == null && !defaultOf(r.category, policy);
+    const needs = needsDecision(r as any, policy, holidayYmdList);
     return {
       id: r.id,
       employeeId: r.employeeId,
@@ -769,7 +784,7 @@ export async function makeupMonth(year: number, month: number) {
       confirmedBy: r.confirmedBy,
       confirmNotifiedAt: r.confirmNotifiedAt?.toISOString() ?? null,
       /** 수당 대상인가 — 신청자 확정이 열리는지, 확정 요청을 보낼 수 있는지가 여기서 갈린다 */
-      payable: isPayEligible(r, policy),
+      payable: isPayEligible(r as any, policy, holidayYmdList),
       slackLinked: !!r.slackUserId,
       kind: hit?.kinds.size ? Array.from(hit.kinds).join("+") : null,
       countedHours: Math.round((hit?.counted ?? 0) * 100) / 100,

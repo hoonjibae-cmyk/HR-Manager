@@ -23,6 +23,13 @@ const WEEKDAY: ScheduleDay[] = ["mon", "tue", "wed", "thu", "fri"].map((day) => 
 }));
 
 let seq = 0;
+/**
+ * 기본값이 **payEligible: true** 인 이유 — 대부분의 테스트는 '시간대를 어떻게 나누는가' 를
+ * 보는 것이지 '수당 대상인가' 를 보는 것이 아니다. 반영 여부 판정은 근무일이 평일인지
+ * 토·일·공휴일인지에 따라 갈리므로(아래 describe), 분류 테스트가 그 판정에 휩쓸리면
+ * 평일 사례를 하나 고칠 때마다 무관한 테스트가 줄줄이 깨진다.
+ * 판정 자체를 보는 테스트는 `payEligible: null` 을 **명시**한다.
+ */
 function s(p: Partial<OtSession> & { date: string; from: string; to: string }): OtSession {
   return {
     id: ++seq,
@@ -32,7 +39,7 @@ function s(p: Partial<OtSession> & { date: string; from: string; to: string }): 
     planEnd: at(p.date, p.to),
     actualStart: p.actualStart ?? null,
     actualEnd: p.actualEnd ?? null,
-    payEligible: p.payEligible ?? null,
+    payEligible: p.payEligible === undefined ? true : p.payEligible,
   };
 }
 
@@ -147,11 +154,16 @@ describe("실근무 확인", () => {
 });
 
 describe("보강 종류별 수당 반영", () => {
-  it("직전보강은 대상, 결시보강은 관리자가 켜야 반영된다", () => {
-    const immediate = run([s({ date: "2026-08-15", from: "09:00", to: "12:00", category: "IMMEDIATE" })]);
+  // 2026-08-15 = 토요일(가산일), 2026-08-13 = 목요일(평일)
+  it("토요일 직전보강은 대상, 결시보강은 관리자가 켜야 반영된다", () => {
+    const immediate = run([
+      s({ date: "2026-08-15", from: "09:00", to: "12:00", category: "IMMEDIATE", payEligible: null }),
+    ]);
     expect(immediate.extraHours).toBe(3);
 
-    const absence = run([s({ date: "2026-08-15", from: "09:00", to: "12:00", category: "ABSENCE" })]);
+    const absence = run([
+      s({ date: "2026-08-15", from: "09:00", to: "12:00", category: "ABSENCE", payEligible: null }),
+    ]);
     expect(absence.extraHours).toBe(0);
     expect(absence.pendingDecision).toBe(1);
     expect(absence.excluded[0].reason).toContain("수당 대상 아닌 보강 종류");
@@ -172,10 +184,69 @@ describe("보강 종류별 수당 반영", () => {
   });
 
   it("판단 대기 여부는 카테고리 기본값과 관리자 지정으로 갈린다", () => {
-    expect(needsDecision({ category: "ABSENCE", payEligible: null })).toBe(true);
-    expect(needsDecision({ category: "ABSENCE", payEligible: false })).toBe(false);
-    expect(needsDecision({ category: "IMMEDIATE", payEligible: null })).toBe(false);
-    expect(isPayEligible({ category: "MANDATORY", payEligible: null })).toBe(true);
+    const sat = (over: any) => s({ date: "2026-08-15", from: "09:00", to: "12:00", ...over });
+    expect(needsDecision(sat({ category: "ABSENCE", payEligible: null }))).toBe(true);
+    expect(needsDecision(sat({ category: "ABSENCE", payEligible: false }))).toBe(false);
+    expect(needsDecision(sat({ category: "IMMEDIATE", payEligible: null }))).toBe(false);
+    expect(isPayEligible(sat({ category: "MANDATORY", payEligible: null }))).toBe(true);
+  });
+});
+
+/* ───────────── 평일 직전·내신보강 — 자동 반영하지 않는다 ───────────── */
+
+describe("직전·내신보강도 평일이면 관리자 판단으로 넘긴다", () => {
+  const wed = (over: any = {}) =>
+    // 2026-08-19 은 수요일. 소정근로(14~22시) 밖이라 시간대로는 연장근로에 해당한다
+    s({ date: "2026-08-19", from: "22:00", to: "24:00", payEligible: null, ...over });
+  const sat = (over: any = {}) =>
+    s({ date: "2026-08-15", from: "09:00", to: "11:00", payEligible: null, ...over });
+
+  it("평일 직전보강은 시간대로는 연장이지만 기본 미반영이다", () => {
+    const r = run([wed({ category: "IMMEDIATE" })]);
+    expect(r.extraHours).toBe(0);
+    expect(r.pendingDecision).toBe(1);
+  });
+
+  it("평일 내신의무보강도 같다", () => {
+    expect(run([wed({ category: "MANDATORY" })]).pendingDecision).toBe(1);
+  });
+
+  it("토·일이면 예전처럼 자동 반영된다", () => {
+    for (const cat of ["IMMEDIATE", "MANDATORY"]) {
+      expect(isPayEligible(sat({ category: cat }))).toBe(true);
+      // 2026-08-16 = 일요일
+      expect(isPayEligible(s({ date: "2026-08-16", from: "09:00", to: "11:00", category: cat, payEligible: null })))
+        .toBe(true);
+    }
+  });
+
+  it("공휴일은 표를 넘겨야 알 수 있다 — 넘기면 자동 반영, 안 넘기면 평일 취급", () => {
+    // 2026-08-17 은 월요일이지만 광복절 대체공휴일이라고 하자
+    const one = s({ date: "2026-08-17", from: "09:00", to: "11:00", category: "IMMEDIATE", payEligible: null });
+    expect(isPayEligible(one, DEFAULT_OT_POLICY, ["2026-08-17"])).toBe(true);
+    expect(isPayEligible(one)).toBe(false); // 표가 없으면 사람이 보게 되는 쪽으로 기운다
+    expect(run([one], { holidays: ["2026-08-17"] }).holidayHours).toBe(2);
+  });
+
+  it("관리자가 켜면 평일이라도 반영된다 (지정이 기본값을 이긴다)", () => {
+    const r = run([wed({ category: "IMMEDIATE", payEligible: true })]);
+    expect(r.extraHours).toBe(2);
+    expect(r.pendingDecision).toBe(0);
+  });
+
+  it("결시보강·기타는 원래 기본 미반영이라 요일과 무관하다", () => {
+    expect(isPayEligible(sat({ category: "ABSENCE" }))).toBe(false);
+    expect(isPayEligible(wed({ category: "ABSENCE" }))).toBe(false);
+  });
+
+  it("주말근무는 평일 규칙에 걸리지 않는다 (요일이 아니라 종류가 그 뜻이다)", () => {
+    expect(isPayEligible(wed({ category: "WEEKEND" }))).toBe(true);
+  });
+
+  it("자정을 넘긴 근무는 '시작한 날' 로 판정한다", () => {
+    // 토요일 22시 시작 → 일요일 새벽 종료. 시업일(토)이 가산일이므로 자동 반영
+    const one = s({ date: "2026-08-15", from: "22:00", to: "24:00", category: "IMMEDIATE", payEligible: null });
+    expect(isPayEligible(one)).toBe(true);
   });
 });
 
@@ -372,13 +443,16 @@ describe("정책 조정", () => {
 /* ───────────── 주말근무 (교수부가 아닌 직원) ───────────── */
 
 describe("주말근무 — 보강과 같은 원장, 기본 반영", () => {
+  const wk = (over: any = {}) =>
+    s({ date: "2026-08-16", from: "09:00", to: "14:00", category: "WEEKEND", ...over });
+
   it("카테고리 기본값은 '반영' 이다 (실제로 나와 일한 것이다)", () => {
     expect(categoryDefault("WEEKEND", DEFAULT_OT_POLICY)).toBe(true);
-    expect(isPayEligible({ category: "WEEKEND", payEligible: null })).toBe(true);
+    expect(isPayEligible(wk({ payEligible: null }))).toBe(true);
   });
 
   it("관리자가 끄면 기본값을 이긴다", () => {
-    expect(isPayEligible({ category: "WEEKEND", payEligible: false })).toBe(false);
+    expect(isPayEligible(wk({ payEligible: false }))).toBe(false);
   });
 
   it("모르는 카테고리는 '기타' 기본값(꺼짐)으로 떨어진다", () => {

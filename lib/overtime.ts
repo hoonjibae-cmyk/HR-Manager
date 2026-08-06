@@ -9,11 +9,13 @@
 //  2. 일요일·공휴일 근무분 → **휴일근로** (8시간 이내 ×1.5, 초과분 ×2.0)
 //  3. 소정근로시간 안에서 이뤄진 보강은 수당 대상이 아니다 (이미 월급에 들어 있다)
 //  4. 완전비율제(위탁)는 근로기준법 적용 대상이 아니므로 제외 — 호출부에서 걸러 낸다
-//  5. 보강 종류
-//     - 직전보강: 대상
-//     - 내신의무보강: 내신기간당 상한(기본 10시간)까지만. **수당이 큰 쪽부터** 채운다
-//       (예: 토 7h·일 7h → 일요일 7h 전부 + 토요일 3h)
+//  5. 보강 종류 — 기본 반영 여부는 **종류 + 근무일이 토·일·공휴일인지**로 갈린다
+//     - 직전보강: 토·일·공휴일이면 대상. **평일이면 관리자 판단**(아래)
+//     - 내신의무보강: 위와 같고, 내신기간당 상한(기본 10시간)까지만.
+//       **수당이 큰 쪽부터** 채운다 (예: 토 7h·일 7h → 일요일 7h 전부 + 토요일 3h)
 //     - 결시보강: 기본 미반영. 관리자가 payEligible 로 건건이 켠다
+//     평일 보강을 자동 반영하지 않는 이유: 평일은 소정근로시간을 조금 넘긴 것일 뿐인 경우가
+//     많고(그 안이면 애초에 대상이 아니다) 종류만으로 일률 판단하면 실제와 어긋난다.
 //  야간(22~06) 가산(+0.5)은 **기본 꺼짐** — 필요하면 정책의 countNight 를 켠다.
 //
 // 시각 표기: 이 엔진이 받는 Date 는 **KST 벽시계 값이 UTC 필드에 담긴 것**이다
@@ -202,41 +204,90 @@ function roundHours(h: number, minutes: number): number {
 /* ───────────── 산정 ───────────── */
 
 /**
+ * **가산이 붙는 날인가** — 토요일·일요일·공휴일.
+ *
+ * 평일 근무는 소정근로시간 밖이어도 법내연장(×1.0)이라 '더 일한 만큼' 이지
+ * 휴일을 반납한 것이 아니다. 그래서 자동 수당 반영을 이 날들로 한정한다.
+ *
+ * ⚠ `holidays` 를 안 넘기면 **공휴일을 모르는 채로 판정**한다 — 토·일은 요일로 알 수 있지만
+ * 공휴일은 표가 있어야 한다. 모르면 평일로 보므로 자동 반영이 아니라 관리자 판단으로 떨어진다
+ * (조용히 더 주는 쪽이 아니라 사람이 보게 되는 쪽으로 기운다).
+ */
+export function isPremiumDay(dateYmd: string, holidays: string[] = []): boolean {
+  const d = new Date(`${dateYmd}T00:00:00Z`);
+  const dow = d.getUTCDay();
+  return dow === 0 || dow === 6 || holidays.includes(dateYmd);
+}
+
+/**
  * 카테고리별 '수당 반영' 기본값.
  *
  * 여기가 **확정 요청 알림을 자동으로 보낼지**도 가른다 — 기본 반영되는 유형은
  * 근무 다음날 신청자에게 알림이 나가고, 기본 미반영(결시보강 등)은 관리자가
  * 반영 여부를 정한 뒤 직접 보낸다(`lib/makeup-service.ts`).
+ *
+ * **직전보강·내신의무보강은 토·일·공휴일에만 자동 반영된다.** 평일 보강은 결시보강과
+ * 마찬가지로 관리자가 건건이 판단한다 — 평일 근무는 소정근로시간을 조금 넘긴 것일 뿐인
+ * 경우가 많아 일률적으로 수당을 붙이면 실제와 어긋난다.
  */
-export function categoryDefault(category: string, p: OtPolicy = DEFAULT_OT_POLICY): boolean {
-  switch (category) {
-    case "IMMEDIATE":
-      return p.immediateDefault;
-    case "MANDATORY":
-      return p.mandatoryDefault;
-    case "ABSENCE":
-      return p.absenceDefault;
-    case "WEEKEND":
-      return p.weekendDefault;
-    default:
-      return p.otherDefault;
-  }
+export function categoryDefault(
+  category: string,
+  p: OtPolicy = DEFAULT_OT_POLICY,
+  opts: { premiumDay?: boolean } = {}
+): boolean {
+  const base = (() => {
+    switch (category) {
+      case "IMMEDIATE":
+        return p.immediateDefault;
+      case "MANDATORY":
+        return p.mandatoryDefault;
+      case "ABSENCE":
+        return p.absenceDefault;
+      case "WEEKEND":
+        return p.weekendDefault;
+      default:
+        return p.otherDefault;
+    }
+  })();
+  // 평일에 한 직전·내신보강은 자동 반영하지 않는다 (관리자 판단으로 넘긴다)
+  if (opts.premiumDay === false && (category === "IMMEDIATE" || category === "MANDATORY"))
+    return false;
+  return base;
 }
 
-/** 이 신청이 수당 대상인지 — 관리자 지정이 카테고리 기본값을 이긴다 */
+/** 판정에 필요한 최소 필드 — 근무일을 알아야 토·일·공휴일인지 가린다 */
+type PayJudgeSession = Pick<
+  OtSession,
+  "category" | "payEligible" | "planStart" | "planEnd" | "actualStart" | "actualEnd"
+>;
+
+/** 이 건의 근무일(시업일) — 자정을 넘겨도 시작한 날로 묶는다 */
+function workDateOf(s: PayJudgeSession): string {
+  return workWindow(s as OtSession).start.toISOString().slice(0, 10);
+}
+
+/**
+ * 이 신청이 수당 대상인지 — 관리자 지정이 기본값을 이긴다.
+ * 기본값은 카테고리 + **근무일이 토·일·공휴일인지**로 정해진다.
+ */
 export function isPayEligible(
-  s: Pick<OtSession, "category" | "payEligible">,
-  policy: OtPolicy = DEFAULT_OT_POLICY
+  s: PayJudgeSession,
+  policy: OtPolicy = DEFAULT_OT_POLICY,
+  holidays: string[] = []
 ): boolean {
-  return s.payEligible ?? categoryDefault(s.category, policy);
+  return (
+    s.payEligible ??
+    categoryDefault(s.category, policy, { premiumDay: isPremiumDay(workDateOf(s), holidays) })
+  );
 }
 
-/** 관리자 판단을 기다리는 상태인가 (결시보강처럼 기본값이 '미반영' 인데 지정도 없는 경우) */
+/** 관리자 판단을 기다리는 상태인가 (기본값이 '미반영' 인데 지정도 없는 경우) */
 export function needsDecision(
-  s: Pick<OtSession, "category" | "payEligible">,
-  policy: OtPolicy = DEFAULT_OT_POLICY
+  s: PayJudgeSession,
+  policy: OtPolicy = DEFAULT_OT_POLICY,
+  holidays: string[] = []
 ): boolean {
-  return s.payEligible == null && !categoryDefault(s.category, policy);
+  return s.payEligible == null && !isPayEligible(s, policy, holidays);
 }
 
 /** 실제로 산정에 쓸 근무 시각 (관리자가 고쳤으면 그 값) */
@@ -440,9 +491,9 @@ export function computeOvertime(input: OtInput): OtResult {
   for (const s of input.sessions) {
     if (s.status === "CANCELED" || s.status === "NOSHOW") continue;
     // 아직 확인되지 않았어도 판단이 필요한 건은 세어 둔다 (화면 배지용)
-    if (needsDecision(s, p)) pendingDecision++;
+    if (needsDecision(s, p, input.holidays)) pendingDecision++;
     if (s.status !== "CONFIRMED") continue;
-    if (!isPayEligible(s, p)) {
+    if (!isPayEligible(s, p, input.holidays)) {
       const { start } = workWindow(s);
       excluded.push({
         sessionId: s.id,

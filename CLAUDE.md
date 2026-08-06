@@ -352,10 +352,19 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
     슬랙 목록은 버튼을 빼고 그 줄 밑에 `NOT_PAYABLE_HINT`(왜 닫혔는지 + 관리자 문의)를 작게 붙이고,
     **누른 시점에도 다시 막는다** — 옛 DM 에 남은 버튼은 목록을 안 거치고 바로 눌린다.
     관리자가 *수당 반영* 을 켜서 저장하는 순간 열린다(관리자 화면의 확정 요청 버튼도 그때 켜진다).
+  - **직전보강·내신의무보강은 토·일·공휴일에 한 것만 자동 반영**한다(`isPremiumDay`,
+    lib/overtime.ts). 평일 보강은 결시보강과 마찬가지로 `payEligible` 로 관리자가 건건이 정한다 —
+    평일 근무는 소정근로시간을 조금 넘긴 것일 뿐인 경우가 많고(그 안이면 애초에 대상이 아니다)
+    종류만으로 일률 판단하면 실제와 어긋난다. 주말근무(WEEKEND)는 종류 자체가 이미 그 뜻이라
+    이 규칙에 걸리지 않는다.
+    **판정에 공휴일 표를 반드시 함께 넘긴다**(`isPayEligible(s, policy, holidays)`,
+    표는 `holidayYmds()`) — 안 넘기면 공휴일 보강이 평일로 잡혀 **화면(관리자)과 슬랙(직원)이
+    다른 답**을 낸다. 모를 때는 평일로 보므로 자동 반영이 아니라 사람이 보게 되는 쪽으로 기운다.
+    자정을 넘긴 근무는 **시작한 날**로 판정한다.
   - **확정 요청 알림은 '수당이 반영되는 건' 에만 자동으로** 나간다
     (`autoNotifiesConfirm` = `isPayEligible`. `payEligible` 지정값 우선, 없으면 `categoryDefault`).
-    직전보강·내신의무보강·주말근무는 근무 다음날 크론(`runMakeupConfirmReminders`)이 DM 을 보내고,
-    **결시보강처럼 기본 미반영인 건은 관리자가 골라서 보낸다**(`POST /api/makeup/[id]/remind`,
+    주말근무와 토·일·공휴일 직전·내신보강은 근무 다음날 크론(`runMakeupConfirmReminders`)이 DM 을 보내고,
+    **기본 미반영인 건(결시보강·평일 직전·내신보강)은 관리자가 골라서 보낸다**(`POST /api/makeup/[id]/remind`,
     화면의 *확정 요청 보내기*) — 반영하지 않기로 한 건에 확정을 재촉하면 지급되는 줄 알게 된다.
     같은 건에 두 번 보내지 않게 `confirmNotifiedAt` 를 새긴다(관리자가 `force` 로 다시 보낼 수 있다).
     경계는 **다음날 09:00 KST** 에 넘어간다(저장은 KST 벽시계, `now` 는 진짜 UTC) — 의도한 것이다.

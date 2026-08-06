@@ -163,8 +163,8 @@ export default function MakeupPolicyPanel({
           {check("야간(22~06시) 가산을 산정한다", "countNight", "기본 꺼짐 — 켜면 22~06시 근무에 +0.5 가 더 붙습니다")}
           <div className="text-xs font-bold text-slate-500 pt-2">종류별 수당 반영 기본값</div>
           <div className="grid sm:grid-cols-2 gap-2">
-            {check("직전보강", "immediateDefault")}
-            {check("내신의무보강 (상한 적용)", "mandatoryDefault")}
+            {check("직전보강", "immediateDefault", "토·일·공휴일 근무만 자동 반영")}
+            {check("내신의무보강 (상한 적용)", "mandatoryDefault", "토·일·공휴일 근무만 자동 반영")}
             {check("결시보강", "absenceDefault", "끄면 관리자가 건건이 판단합니다 (권장)")}
             {check("주말근무", "weekendDefault", "교수부가 아닌 직원의 주말 근무 신청")}
             {check("기타", "otherDefault")}
@@ -173,6 +173,10 @@ export default function MakeupPolicyPanel({
             여기서 켜 둔 종류는 근무 다음날 <b>신청자에게 실근무 확정 요청이 자동으로</b> 나갑니다.
             꺼 둔 종류(결시보강 등)는 수당 반영 여부를 먼저 정해야 하므로 달력에서{" "}
             <b>골라서</b> 보냅니다.
+            <br />
+            직전보강·내신의무보강은 켜 두어도 <b>토·일·공휴일 근무에만</b> 자동 반영됩니다 — 평일
+            보강은 소정근로시간을 조금 넘긴 것일 뿐인 경우가 많아 관리자가 건건이 판단합니다
+            (⚠ 표시). 공휴일 판정은 <b>설정 → 공휴일</b> 표를 따릅니다.
           </p>
         </div>
 

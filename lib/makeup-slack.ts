@@ -77,6 +77,16 @@ async function policyForList(): Promise<OtPolicy> {
 }
 
 /**
+ * 공휴일 표 — 직전·내신보강의 기본 반영 여부가 **근무일이 토·일·공휴일인지**로 갈리므로
+ * 판정하는 자리마다 함께 읽어야 한다. 빠뜨리면 공휴일 보강이 평일로 잡혀 화면(관리자)과
+ * 슬랙(직원)이 서로 다른 답을 낸다.
+ */
+async function holidaysForList(): Promise<string[]> {
+  const rows = await prisma.holiday.findMany({ select: { date: true } }).catch(() => []);
+  return rows.map((h: { date: Date }) => h.date.toISOString().slice(0, 10));
+}
+
+/**
  * 직원이 '내 신청 내역' 을 눌렀을 때 보여줄 화면.
  *
  * **지난 건에는 「실근무 확정」 버튼이 붙는다** — 확정은 관리자가 아니라 신청자가 한다.
@@ -94,13 +104,14 @@ export async function makeupListBlocks(
 ): Promise<{ text: string; blocks: any[] }> {
   const today = new Date(now.toISOString().slice(0, 10) + "T00:00:00Z");
   const from = new Date(today.getTime() - 60 * 86400000);
-  const [rows, policy] = await Promise.all([
+  const [rows, policy, holidays] = await Promise.all([
     prisma.makeupSession.findMany({
       where: { employeeId, planStart: { gte: from } },
       orderBy: { planStart: "asc" },
       take: 30,
     }),
     policyForList(),
+    holidaysForList(),
   ]);
   const title = `*${name}님의 보강 · 주말근무 내역*`;
   if (!rows.length) {
@@ -128,7 +139,7 @@ export async function makeupListBlocks(
         text: { type: "mrkdwn", text: lineOf(r, label(r)) },
       };
       const open = withButton && canSelfConfirm(r as unknown as ConfirmableSession, now).ok;
-      const payable = isPayEligible(r, policy);
+      const payable = isPayEligible(r, policy, holidays);
       if (open && payable) {
         section.accessory = {
           type: "button",

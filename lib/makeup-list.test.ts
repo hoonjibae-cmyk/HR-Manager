@@ -8,11 +8,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const rows: any[] = [];
 const policy: any = { immediateDefault: true, mandatoryDefault: true, absenceDefault: false, otherDefault: false, weekendDefault: true };
+/** 공휴일 표 — 직전·내신보강의 기본 반영 여부가 근무일로 갈리므로 목록도 이걸 읽는다 */
+const holidays: any[] = [];
 
 vi.mock("./db", () => ({
   prisma: {
     makeupSession: { findMany: async () => rows },
     overtimePolicy: { findUnique: async () => policy },
+    holiday: { findMany: async () => holidays },
   },
 }));
 
@@ -25,7 +28,8 @@ const session = (over: any = {}) => ({
   id: 1,
   category: "IMMEDIATE",
   status: "PLANNED",
-  // 확정 가능 기간 안(근무 다음날~다음 달 1일)에 들어오는 지난 근무
+  // 확정 가능 기간 안(근무 다음날~다음 달 1일)에 들어오는 지난 근무.
+  // 2026-08-15 는 **토요일** — 직전·내신보강이 자동 반영되는 날이다
   planStart: t("2026-08-15T09:00:00"),
   planEnd: t("2026-08-15T16:00:00"),
   targetClass: "은가람중3",
@@ -42,6 +46,7 @@ const flat = (blocks: any[]) => JSON.stringify(blocks);
 
 beforeEach(() => {
   rows.length = 0;
+  holidays.length = 0;
 });
 
 describe("수당 대상인 건 — 확정 버튼이 붙는다", () => {
@@ -95,6 +100,30 @@ describe("수당 대상이 아닌 건 — 확정을 닫고 사유를 적는다",
     );
     const { blocks } = await makeupListBlocks(1, "김지연", NOW);
     expect(flat(blocks)).not.toContain("관리자에게 문의");
+  });
+});
+
+describe("평일 직전보강 — 화면(관리자)과 같은 판정을 쓴다", () => {
+  // 2026-08-17 은 월요일. 소정근로(14~22시) 밖이라 시간대로는 연장근로에 해당한다
+  const wed = (over: any = {}) =>
+    session({ planStart: t("2026-08-17T22:00:00"), planEnd: t("2026-08-17T23:30:00"), ...over });
+
+  it("평일이면 직전보강이어도 확정이 열리지 않는다", async () => {
+    rows.push(wed());
+    const { blocks } = await makeupListBlocks(1, "김지연", NOW);
+    expect(confirmButtons(blocks)).toHaveLength(0);
+    expect(flat(blocks)).toContain("관리자에게 문의");
+  });
+
+  it("공휴일이면 열린다 — 표를 읽지 않으면 평일로 잡혀 버튼이 사라진다", async () => {
+    rows.push(wed());
+    holidays.push({ date: t("2026-08-17T00:00:00") });
+    expect(confirmButtons((await makeupListBlocks(1, "김지연", NOW)).blocks)).toHaveLength(1);
+  });
+
+  it("관리자가 반영으로 정하면 평일이라도 열린다", async () => {
+    rows.push(wed({ payEligible: true }));
+    expect(confirmButtons((await makeupListBlocks(1, "김지연", NOW)).blocks)).toHaveLength(1);
   });
 });
 

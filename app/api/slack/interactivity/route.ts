@@ -33,6 +33,7 @@ import {
   confirmMakeupActuals,
   mandatoryCapContext,
   getOvertimePolicy,
+  holidayYmds,
 } from "@/lib/makeup-service";
 import {
   canSelfConfirm,
@@ -192,7 +193,8 @@ async function openConfirmForm(
     return;
   }
   // 수당 대상이 아니면 확정을 열지 않는다 — 목록이 버튼을 안 그려도 옛 DM 에 남은 버튼은 눌린다
-  if (!isPayEligible(row, await getOvertimePolicy())) {
+  const [otPolicy, otHolidays] = await Promise.all([getOvertimePolicy(), holidayYmds()]);
+  if (!isPayEligible(row, otPolicy, otHolidays)) {
     await tellUser(channelId, userId, NOT_PAYABLE_NOTICE);
     return;
   }
