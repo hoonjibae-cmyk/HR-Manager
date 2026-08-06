@@ -38,6 +38,8 @@ export const ACTION_LABEL: Record<string, string> = {
   MAKEUP_UPDATE: "보강 실근무 확인",
   MAKEUP_DELETE: "보강 신청 삭제",
   SETTINGS_UPDATE: "설정 변경",
+  HOLIDAY_SYNC: "공휴일 동기화",
+  HOLIDAY_EDIT: "공휴일 직접 수정",
 };
 
 /** 되돌리기 어렵거나 돈·개인정보가 오가는 작업 (이력 화면 기본 필터) */

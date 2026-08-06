@@ -1,6 +1,6 @@
 {
   "name": "yoossam-hr",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "private": true,
   "description": "유쌤에듀 HR 관리 프로그램 - 급여 산정, 연차 관리, 계약서/증명서 발급, 급여명세서 자동발송",
   "scripts": {
@@ -20,7 +20,8 @@
     "postinstall": "prisma generate",
     "db:rls": "node scripts/db-rls.mjs",
     "db:encrypt-pii": "tsx scripts/encrypt-pii.ts",
-    "db:severance-migrate": "tsx scripts/severance-migrate.ts"
+    "db:severance-migrate": "tsx scripts/severance-migrate.ts",
+    "db:holidays-sync": "tsx scripts/holidays-sync.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

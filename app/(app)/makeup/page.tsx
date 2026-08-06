@@ -3,6 +3,8 @@ import { makeupMonth } from "@/lib/makeup-service";
 import { makeupCalendarConfigured } from "@/lib/gcal";
 import MakeupCalendar from "@/components/MakeupCalendar";
 import MakeupPolicyPanel from "@/components/MakeupPolicyPanel";
+import { holidayStatus } from "@/lib/holiday-service";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +17,10 @@ export default async function MakeupPage({
   const year = Number(searchParams.year) || now.getFullYear();
   const month = Number(searchParams.month) || now.getMonth() + 1;
 
-  const { rows, totals, policy, examPeriods, holidays } = await makeupMonth(year, month);
+  const [{ rows, totals, policy, examPeriods, holidays }, coverage] = await Promise.all([
+    makeupMonth(year, month),
+    holidayStatus(),
+  ]);
 
   return (
     <div>
@@ -24,6 +29,17 @@ export default async function MakeupPage({
         desc="슬랙 사전신청(보강·주말근무) → 근무 다음날 신청자가 실근무 시간 확정 → 오버타임 수당 자동 산출 → 급여명세서 반영"
         action={<MakeupPolicyPanel policy={policy as any} examPeriods={examPeriods} />}
       />
+
+      {/* 공휴일 표가 얇으면 휴일근로 가산과 보강 자동 반영이 조용히 빠진다 — 여기서 알린다 */}
+      {coverage.warning && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 mb-3 leading-relaxed">
+          ⚠ {coverage.warning}{" "}
+          <Link href="/settings" className="underline font-bold">
+            설정 → 공휴일
+          </Link>{" "}
+          에서 채워 주세요.
+        </div>
+      )}
 
       <MakeupCalendar
         year={year}

@@ -42,14 +42,27 @@ import { computeWeeklyHours, inclusiveWageBreakdown } from "./payroll";
 import { empToPayInput } from "./repo";
 import { wageSegmentsFor, applyMidMonthBlend, type MonthContractTerms } from "./payroll-service";
 
-/** 오버타임 정책 (없으면 만들어 준다 — 설정 화면에서 수정) */
+/**
+ * 오버타임 정책 (없으면 만들어 준다 — 설정 화면에서 수정)
+ *
+ * **동시에 두 번 불려도 터지지 않아야 한다** — 한 화면이 이 함수를 여러 갈래에서 병렬로 부르는데
+ * (`makeupMonth` 의 Promise.all 안에서 직접 한 번, `overtimeForMonth` 안에서 또 한 번),
+ * 행이 아직 없으면 두 upsert 가 같이 insert 로 가서 유일키 충돌(P2002)이 난다.
+ * 실제로 새 DB 에 처음 들어간 /makeup 이 500 으로 떨어졌다. 충돌은 '누가 먼저 만들었다' 는
+ * 뜻이므로 다시 읽어 오면 된다.
+ */
 export async function getOvertimePolicy(): Promise<OtPolicy & { id: number }> {
-  const row = await prisma.overtimePolicy.upsert({
-    where: { id: 1 },
-    update: {},
-    create: { id: 1 },
-  });
-  return row as any;
+  try {
+    return (await prisma.overtimePolicy.upsert({
+      where: { id: 1 },
+      update: {},
+      create: { id: 1 },
+    })) as any;
+  } catch {
+    const row = await prisma.overtimePolicy.findUnique({ where: { id: 1 } });
+    if (row) return row as any;
+    throw new Error("오버타임 지급 조건을 읽지 못했습니다.");
+  }
 }
 
 export async function getExamPeriods(): Promise<ExamWindow[]> {

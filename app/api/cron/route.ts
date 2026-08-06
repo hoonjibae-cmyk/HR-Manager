@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { runDueSchedules } from "@/lib/scheduler";
 import { runMakeupConfirmReminders } from "@/lib/makeup-service";
+import { holidayStatus, holidayApiConfigured, syncHolidays } from "@/lib/holiday-service";
 
 export const dynamic = "force-dynamic";
 // Vercel Pro: 함수 최대 실행시간 300초 (인원이 많아도 한 번에 발송 가능)
@@ -47,7 +48,20 @@ async function handle(req: Request) {
   if (!dryRun) {
     makeupReminders = await runMakeupConfirmReminders().catch((e) => ({ error: String(e?.message ?? e) }));
   }
-  return NextResponse.json({ ...result, makeupReminders });
+  // 공휴일 표가 얇으면 채운다. **모자랄 때만** 부르므로 매시 호출돼도 API 를 두드리지 않는다 —
+  // 한 번 채워지면 경고가 사라져 다음 호출부터는 조회 한 번으로 끝난다.
+  // 해가 바뀌거나 하반기에 들어서면 다음 해가 모자란 것으로 잡혀 저절로 다시 받는다.
+  let holidaySync: any = null;
+  if (!dryRun && holidayApiConfigured()) {
+    holidaySync = await (async () => {
+      const before = await holidayStatus();
+      if (!before.warning) return null;
+      const out = await syncHolidays();
+      return { added: out.added, renamed: out.renamed, warning: out.coverage.warning };
+    })().catch((e) => ({ error: String(e?.message ?? e) }));
+  }
+
+  return NextResponse.json({ ...result, makeupReminders, holidaySync });
 }
 
 export async function GET(req: Request) {
