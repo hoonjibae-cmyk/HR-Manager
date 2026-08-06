@@ -119,6 +119,16 @@ function cleanRowInput(v: any) {
   };
 }
 
+/** 정렬키 → 열 이름 — 여러 단계로 정렬했을 때 순서를 풀어 보여주기 위함 */
+const SORT_LABELS: Record<string, string> = {
+  name: "직원",
+  scheme: "형태",
+  gross: "지급액",
+  totalDeduct: "공제액",
+  net: "실수령",
+  status: "상태",
+};
+
 export default function PayrollClient() {
   // 마지막으로 보던 연·월을 기억한다 — 급여 작업은 한 달을 며칠에 걸쳐 여러 번 드나들며 한다
   const [period, setPeriod] = useStoredState("payroll.period", {
@@ -387,7 +397,7 @@ export default function PayrollClient() {
     });
   }, [recs, q, filter]);
 
-  const { sorted, sort, toggle, resetSort } = useTableSort(filtered, pickRec, "payroll.sort");
+  const { sorted, sort, toggle, resetSort, hasSort } = useTableSort(filtered, pickRec, "payroll.sort");
 
   /**
    * 지금 보이는 행의 소계 — 표 맨 아래에 붙여 둔다.
@@ -407,7 +417,7 @@ export default function PayrollClient() {
     [sorted]
   );
   // 정렬도 기억하므로 '되돌릴 게 있는지' 판단에 함께 넣는다
-  const dirty = !!(q || filter.scheme || filter.income || filter.status || sort);
+  const dirty = !!(q || filter.scheme || filter.income || filter.status) || hasSort;
   const resetView = () => {
     setQ("");
     clearFilter();
@@ -658,7 +668,14 @@ export default function PayrollClient() {
       {/* 표 — 남은 높이를 채우고 여기 안에서만 스크롤한다(필터 줄과 머리글은 붙어 있다) */}
       <div className="card flex flex-col flex-1 min-h-0">
         {recs.length > 0 && (
-          <FilterBar shown={sorted.length} total={recs.length} dirty={dirty} onReset={resetView}>
+          <FilterBar
+            shown={sorted.length}
+            total={recs.length}
+            dirty={dirty}
+            onReset={resetView}
+            sort={sort}
+            sortLabels={SORT_LABELS}
+          >
             <input
               className="input py-1 text-xs w-40"
               placeholder="이름·부서·직책 검색"

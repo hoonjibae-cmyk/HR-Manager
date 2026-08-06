@@ -57,6 +57,21 @@ function pick(r: LeaveRow, key: string): any {
 /** 브라우저에 기억해 두는 필터 — 다음에 들어와도 이대로 걸려 있다 */
 const DEFAULT_FILTER = { dept: "", eligible: "" };
 
+/** 정렬키 → 열 이름 — 여러 단계로 정렬했을 때 순서를 풀어 보여주기 위함 */
+const SORT_LABELS: Record<string, string> = {
+  name: "직원",
+  service: "근속",
+  period: "이번 연차기간",
+  granted: "연차 발생",
+  used: "연차 사용",
+  remaining: "연차 잔여",
+  compGranted: "대휴 발생",
+  compUsed: "대휴 사용",
+  compRemaining: "대휴 잔여",
+  rangeStatutory: "기간내 연차",
+  rangeComp: "기간내 대휴",
+};
+
 export default function LeaveTable({
   rows,
   rangeLabel,
@@ -91,9 +106,9 @@ export default function LeaveTable({
     });
   }, [rows, q, dept, eligible]);
 
-  const { sorted, sort, toggle, resetSort } = useTableSort(filtered, pick, "leave.sort");
+  const { sorted, sort, toggle, resetSort, hasSort } = useTableSort(filtered, pick, "leave.sort");
   // 정렬도 기억하므로 '되돌릴 게 있는지' 판단에 함께 넣는다
-  const dirty = !!(q || dept || eligible || sort);
+  const dirty = !!(q || dept || eligible) || hasSort;
 
   return (
     // 남은 화면 높이를 채우고 행만 안에서 스크롤한다 — 조회 기간·필터 줄과 머리글은 늘 보인다
@@ -104,6 +119,8 @@ export default function LeaveTable({
       </div>
 
       <FilterBar
+        sort={sort}
+        sortLabels={SORT_LABELS}
         shown={filtered.length}
         total={rows.length}
         dirty={dirty}

@@ -43,6 +43,21 @@ const SOURCE_BADGE: Record<string, { label: string; tone: string; title: string 
   NONE: { label: "", tone: "", title: "" },
 };
 
+/** 정렬키 → 열 이름 — 여러 단계로 정렬했을 때 순서를 풀어 보여주기 위함 */
+const SORT_LABELS: Record<string, string> = {
+  name: "성명",
+  department: "부서",
+  payScheme: "급여형태",
+  hireDate: "입사일",
+  service: "근속",
+  hours: "주 소정",
+  status: "구분",
+  base: "산정기준 임금",
+  amount: "이번 달 적립",
+  retention: "인센티브 유보금",
+  cumulative: "누계",
+};
+
 export default function SeveranceTable({
   year,
   month,
@@ -77,7 +92,7 @@ export default function SeveranceTable({
     [rows, dept, status, q]
   );
 
-  const { sorted, sort, toggle, resetSort } = useTableSort(
+  const { sorted, sort, toggle, resetSort, hasSort } = useTableSort(
     filtered,
     (r, k) =>
       k === "service"
@@ -88,7 +103,7 @@ export default function SeveranceTable({
     "yoossam.table.severance.sort"
   );
 
-  const dirty = !!(dept || status || sort);
+  const dirty = !!(dept || status) || hasSort;
   const reset = () => {
     resetDept();
     resetStatus();
@@ -160,7 +175,14 @@ export default function SeveranceTable({
       )}
 
       <div className="card flex-1 min-h-0 flex flex-col overflow-hidden">
-        <FilterBar shown={sorted.length} total={rows.length} onReset={reset} dirty={dirty}>
+        <FilterBar
+          shown={sorted.length}
+          total={rows.length}
+          onReset={reset}
+          dirty={dirty}
+          sort={sort}
+          sortLabels={SORT_LABELS}
+        >
           <input
             className="input py-1 text-xs w-40"
             placeholder="이름·사번 검색"

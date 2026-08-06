@@ -55,6 +55,19 @@ function pick(e: EmployeeRow, key: string): any {
 /** 브라우저에 기억해 두는 필터 — 다음에 들어와도 이대로 걸려 있다 */
 const DEFAULT_FILTER = { dept: "", scheme: "", income: "", status: "" };
 
+/** 정렬키 → 열 이름 — 여러 단계로 정렬했을 때 순서를 풀어 보여주기 위함 */
+const SORT_LABELS: Record<string, string> = {
+  empNo: "사번",
+  name: "성명",
+  department: "부서 / 직책",
+  incomeType: "구분",
+  payScheme: "급여형태",
+  amount: "기준액",
+  hireDate: "입사일",
+  slack: "슬랙",
+  active: "상태",
+};
+
 export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
   // 이름 검색은 기억하지 않는다 — 그때그때 한 사람 찾는 동작이지 기본값이 아니다
   const [q, setQ] = useState("");
@@ -90,9 +103,9 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
     });
   }, [rows, q, dept, scheme, income, status]);
 
-  const { sorted, sort, toggle, resetSort } = useTableSort(filtered, pick, "employees.sort");
+  const { sorted, sort, toggle, resetSort, hasSort } = useTableSort(filtered, pick, "employees.sort");
   // 정렬도 기억하므로 '되돌릴 게 있는지' 판단에 함께 넣는다
-  const dirty = !!(q || dept || scheme || income || status || sort);
+  const dirty = !!(q || dept || scheme || income || status) || hasSort;
   const reset = () => {
     setQ("");
     clearFilter();
@@ -102,7 +115,14 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
   return (
     // 남은 화면 높이를 채우고 행만 안에서 스크롤한다 — 검색·필터 줄과 머리글은 늘 보인다
     <div className="card overflow-hidden flex flex-col flex-1 min-h-0">
-      <FilterBar shown={filtered.length} total={rows.length} dirty={dirty} onReset={reset}>
+      <FilterBar
+        shown={filtered.length}
+        total={rows.length}
+        dirty={dirty}
+        onReset={reset}
+        sort={sort}
+        sortLabels={SORT_LABELS}
+      >
         <input
           className="input py-1 text-xs w-40"
           placeholder="이름·사번·직책 검색"

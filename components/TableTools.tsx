@@ -1,6 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  normalizeSort,
+  nextSort,
+  sortRows,
+  sortOrderLabel,
+  type SortClickOpts,
+  type SortDir,
+  type SortKeys,
+  type SortState,
+} from "@/lib/table-sort";
+
+// 정렬 계산은 lib/table-sort.ts 에 있다(순수 함수, 테스트 있음). 여기서는 화면만 맡는다.
+export { normalizeSort, nextSort, sortRows, sortOrderLabel };
+export type { SortClickOpts, SortDir, SortKeys, SortState };
 
 /* 목록 화면 공용 — 열 머리글 클릭 정렬 + 필터 셀렉트.
    명단이 수십 건 규모라 서버를 다시 부르지 않고 브라우저에서 바로 처리한다. */
@@ -26,8 +40,11 @@ function merged<T>(initial: T, saved: unknown): T {
  * 화면이 붙은 뒤에 저장값을 얹으므로 아주 잠깐 기본 상태가 보였다가 바뀐다.
  *
  * `key` 가 없으면 그냥 useState 처럼 동작한다(기억하지 않는다).
+ *
+ * `normalize` 를 주면 **저장값을 그대로 믿지 않고** 한 번 걸러서 쓴다 —
+ * 저장 형식이 바뀐 뒤에도 옛 값이 브라우저에 남아 있어 화면을 깨뜨릴 수 있다.
  */
-export function useStoredState<T>(key: string | null, initial: T) {
+export function useStoredState<T>(key: string | null, initial: T, normalize?: (v: unknown) => T) {
   const [value, setValue] = useState<T>(initial);
   const [loaded, setLoaded] = useState(false);
   // 기본값은 첫 렌더 것으로 고정한다 — 객체 리터럴이면 매 렌더 새로 만들어지기 때문
@@ -41,9 +58,12 @@ export function useStoredState<T>(key: string | null, initial: T) {
     }
     try {
       const raw = window.localStorage.getItem(STORE_PREFIX + key);
-      // { v: ... } 로 감싼다 — 정렬은 null(원래 순서)도 저장할 값이라
+      // { v: ... } 로 감싼다 — 정렬은 빈 값(원래 순서)도 저장할 값이라
       // '저장한 적 없음' 과 구분해야 한다
-      if (raw) setValue(merged(initial, JSON.parse(raw).v));
+      if (raw) {
+        const saved = JSON.parse(raw).v;
+        setValue(normalize ? normalize(saved) : merged(initial, saved));
+      }
     } catch {}
     setLoaded(true);
     // initial 은 매 렌더 새 객체일 수 있어 의존성에서 뺀다 (첫 렌더 값을 쓴다)
@@ -75,28 +95,16 @@ export function useStoredState<T>(key: string | null, initial: T) {
   return [value, setValue, clear] as const;
 }
 
-export type SortDir = "asc" | "desc";
-export interface SortState {
-  key: string;
-  dir: SortDir;
-}
-
-/** 값 비교 — 빈 값은 방향과 무관하게 항상 뒤로 보낸다 */
-function compare(a: any, b: any): number {
-  const emptyA = a == null || a === "";
-  const emptyB = b == null || b === "";
-  if (emptyA && emptyB) return 0;
-  if (emptyA) return 1;
-  if (emptyB) return -1;
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  if (typeof a === "boolean" && typeof b === "boolean") return (a ? 1 : 0) - (b ? 1 : 0);
-  // 날짜는 YYYY-MM-DD 문자열로 넘어오므로 사전순 = 시간순
-  return String(a).localeCompare(String(b), "ko");
-}
-
 /**
- * 정렬 상태와 정렬된 목록.
- * 같은 열을 누를 때마다 오름차순 → 내림차순 → 원래 순서로 돈다.
+ * 정렬 상태와 정렬된 목록. **정렬 조건을 여러 개 쌓을 수 있다.**
+ *
+ *  · 그냥 클릭 — 이 열 **하나로만** 정렬한다. 같은 열을 다시 누르면
+ *    오름차순 → 내림차순 → 원래 순서로 돈다.
+ *  · **Shift(또는 Ctrl/⌘) + 클릭** — 조건을 **뒤에 덧붙인다**. 이미 들어 있는 열이면
+ *    오름차순 → 내림차순 → 그 조건만 빼기로 돈다.
+ *    (예: 부서 오름차순 → Shift+입사일 내림차순 = 부서별로 묶고 그 안에서 최근 입사 순)
+ *
+ * 앞선 조건이 같을 때만 다음 조건을 본다 — 흔한 표 정렬 규칙 그대로다.
  * `storageKey` 를 주면 마지막 정렬을 브라우저에 기억해 다음에 올 때 그대로 되살린다.
  */
 export function useTableSort<T>(
@@ -104,24 +112,28 @@ export function useTableSort<T>(
   pick: (row: T, key: string) => any,
   storageKey?: string
 ) {
-  const [sort, setSort, resetSort] = useStoredState<SortState | null>(storageKey ?? null, null);
+  const [sort, setSort, resetSort] = useStoredState<SortKeys>(
+    storageKey ?? null,
+    [],
+    normalizeSort
+  );
 
-  const sorted = useMemo(() => {
-    if (!sort) return rows;
-    const dir = sort.dir === "asc" ? 1 : -1;
-    return [...rows].sort((x, y) => compare(pick(x, sort.key), pick(y, sort.key)) * dir);
+  const sorted = useMemo(
+    () => sortRows(rows, pick, sort),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, sort]);
+    [rows, sort]
+  );
 
-  const toggle = (key: string) =>
-    setSort((s) =>
-      s?.key !== key ? { key, dir: "asc" } : s.dir === "asc" ? { key, dir: "desc" } : null
-    );
+  const toggle = (key: string, opts: SortClickOpts = {}) =>
+    setSort((prev) => nextSort(prev, key, opts));
 
-  return { sorted, sort, toggle, resetSort };
+  return { sorted, sort, toggle, resetSort, hasSort: sort.length > 0 };
 }
 
-/** 정렬 가능한 열 머리글 */
+/**
+ * 정렬 가능한 열 머리글.
+ * 조건이 둘 이상이면 **순번 배지**를 달아 어느 것이 먼저인지 보이게 한다.
+ */
 export function SortTh({
   label,
   sortKey,
@@ -135,23 +147,27 @@ export function SortTh({
 }: {
   label: React.ReactNode;
   sortKey: string;
-  sort: SortState | null;
-  onSort: (key: string) => void;
+  sort: SortKeys;
+  onSort: (key: string, opts?: SortClickOpts) => void;
   className?: string;
   align?: "left" | "right" | "center";
   rowSpan?: number;
   colSpan?: number;
   title?: string;
 }) {
-  const active = sort?.key === sortKey;
+  const at = sort.findIndex((s) => s.key === sortKey);
+  const active = at >= 0;
+  const dir = active ? sort[at].dir : null;
+  const hint = "클릭: 이 열로 정렬 · Shift(⌘/Ctrl)+클릭: 정렬 조건 추가";
   return (
     <th
       className={`th cursor-pointer select-none hover:bg-slate-100 text-${align} ${className}`}
-      onClick={() => onSort(sortKey)}
+      // 수식키를 누른 채 클릭하면 조건을 덧붙인다 (표 정렬의 흔한 관습)
+      onClick={(e) => onSort(sortKey, { append: e.shiftKey || e.metaKey || e.ctrlKey })}
       rowSpan={rowSpan}
       colSpan={colSpan}
-      title={title ?? "클릭해서 정렬"}
-      aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : "none"}
+      title={title ? `${title}\n${hint}` : hint}
+      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
     >
       <span
         className={`inline-flex items-center gap-1 ${
@@ -160,8 +176,17 @@ export function SortTh({
       >
         {label}
         <span className={active ? "text-brand-600" : "text-slate-300"}>
-          {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
+          {active ? (dir === "asc" ? "▲" : "▼") : "↕"}
         </span>
+        {/* 조건이 하나뿐이면 순번은 군더더기다 */}
+        {active && sort.length > 1 && (
+          <span
+            className="text-[9px] leading-none font-bold text-brand-600 bg-brand-50 rounded px-1 py-0.5"
+            title={`정렬 ${at + 1}순위`}
+          >
+            {at + 1}
+          </span>
+        )}
       </span>
     </th>
   );
@@ -212,6 +237,8 @@ export function FilterBar({
   onReset,
   dirty,
   unit = "명",
+  sort,
+  sortLabels,
 }: {
   children: React.ReactNode;
   shown: number;
@@ -219,13 +246,28 @@ export function FilterBar({
   onReset: () => void;
   dirty: boolean;
   unit?: string;
+  /** 정렬 조건 — 둘 이상이면 몇 단계인지 배지로 알린다 */
+  sort?: SortKeys;
+  /** 정렬키 → 사람이 읽는 열 이름. 배지 툴팁에 순서를 풀어 쓴다 */
+  sortLabels?: Record<string, string>;
 }) {
+  // 조건이 하나뿐이면 머리글 화살표만으로 충분하다 — 배지는 여러 단계일 때만 뜻이 있다
+  const multi = (sort?.length ?? 0) > 1;
+  const order = multi ? sortOrderLabel(sort!, sortLabels) : "";
   return (
     <div className="px-5 py-3 border-b border-slate-100 flex flex-wrap items-center gap-x-4 gap-y-2">
       {children}
       <span className="text-xs text-slate-400 ml-auto whitespace-nowrap">
         {shown === total ? `${total}${unit}` : `${shown} / ${total}${unit}`}
       </span>
+      {multi && (
+        <span
+          className="pill bg-brand-50 text-brand-600 whitespace-nowrap"
+          title={`정렬 순서\n${order}\n\n열 머리글을 Shift(⌘/Ctrl)+클릭하면 조건을 더할 수 있습니다.`}
+        >
+          정렬 {sort!.length}단계
+        </span>
+      )}
       {dirty && (
         <span className="flex items-center gap-2 whitespace-nowrap">
           <span
