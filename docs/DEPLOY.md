@@ -105,6 +105,72 @@ Vercel 환경변수에 `SKIP_DB_PUSH=1` 을 넣고 다시 배포하면 됩니다
 
 ---
 
+## 3-1단계. 우리 도메인 붙이기 (가비아 → Vercel)
+
+`hr-manager-xxxx.vercel.app` 대신 **`hr.yussam.com`** 같은 주소를 쓰려면 두 군데를 맞춥니다.
+**Vercel 에 먼저 등록**하고, 거기서 알려 주는 값을 가비아에 넣는 순서입니다 —
+Vercel 이 프로젝트마다 다른 CNAME 값을 주기 때문에 반대로 하면 값을 알 수가 없습니다.
+
+### ① Vercel — 도메인 등록
+
+1. 프로젝트 → **Settings → Domains → Add**
+2. `hr.yussam.com` 입력 → **Add**
+3. `Invalid Configuration` 과 함께 **넣어야 할 DNS 값**이 나옵니다. 이 값을 복사해 둡니다.
+   - 서브도메인이므로 **CNAME 한 줄**이면 됩니다.
+   - 값은 프로젝트마다 다릅니다 (`cname.vercel-dns.com` 일 수도, `xxxxxxxx.vercel-dns-017.com`
+     처럼 프로젝트 고유값일 수도 있습니다). **화면에 뜬 값을 그대로** 쓰세요.
+   - 어느 브랜치를 이 주소로 띄울지는 옆의 **Git Branch** 에서 정합니다
+     (비워 두면 Production 브랜치 = `claude/hr-management-system-bbgor3`).
+
+### ② 가비아 — CNAME 레코드 추가
+
+1. [My가비아](https://my.gabia.com) 로그인 → **DNS 관리툴** (또는 <https://dns.gabia.com> 바로 접속)
+2. `yussam.com` 줄의 **[설정]** → **[DNS 레코드 설정]** → **[레코드 수정]**
+3. **[레코드 추가]** 를 누르고 이렇게 채웁니다:
+
+   | 타입 | 호스트 | 값/위치 | TTL |
+   |---|---|---|---|
+   | `CNAME` | `hr` | *(Vercel 이 준 값)* | `3600` |
+
+4. **[확인] → [저장]** 까지 눌러야 반영됩니다. (가비아는 저장을 따로 눌러야 합니다)
+
+**자주 틀리는 곳 넷**
+
+- **호스트에는 `hr` 만** 적습니다. `hr.yussam.com` 을 적으면 `hr.yussam.com.yussam.com` 이 됩니다.
+- **값 끝의 점(`.`)** — Vercel 이 준 값에 점이 붙어 있으면 그대로 넣고, 가비아가 자동으로
+  붙여 주면 **두 번 붙이지 마세요**. 저장 후 목록에 찍힌 값이 점 하나로 끝나면 정상입니다.
+- **네임서버가 가비아여야** DNS 관리툴이 먹습니다(`ns.gabia.co.kr` 등). 클라우드플레어 같은
+  다른 곳으로 옮겨 두었다면 거기서 넣어야 합니다.
+- **원 도메인(`yussam.com`)은 건드리지 않습니다.** 서브도메인만 추가하는 것이라 기존 홈페이지가
+  있어도 그대로입니다.
+
+### ③ 반영 확인
+
+가비아 DNS 는 보통 **10분~1시간**이면 퍼집니다(최대 하루). Vercel 의 Domains 화면이
+**Valid Configuration** 으로 바뀌고 인증서(HTTPS)가 자동 발급되면 끝입니다.
+
+```bash
+# 어디서든 확인
+dig hr.yussam.com CNAME +short
+nslookup hr.yussam.com
+```
+
+### ④ 주소를 바꾼 뒤 함께 고칠 것 — **이걸 빠뜨리면 조용히 어긋납니다**
+
+| 어디 | 무엇을 | 왜 |
+|---|---|---|
+| Vercel 환경변수 | `APP_URL` = `https://hr.yussam.com` | 계약 종료 예고 슬랙의 **«직원 카드» 버튼**이 이 값으로 링크를 만듭니다. 옛 주소면 버튼이 엉뚱한 데로 갑니다 |
+| 슬랙 앱 | Slash Commands → Request URL | `https://hr.yussam.com/api/slack/command` |
+| 슬랙 앱 | Interactivity & Shortcuts → Request URL | `https://hr.yussam.com/api/slack/interactivity` |
+| 외부 크론(쓴다면) | 호출 주소 | `https://hr.yussam.com/api/cron?secret=…` |
+
+환경변수를 바꿨으면 **재배포해야 반영**됩니다(Vercel 은 빌드 시점에 환경변수를 굳힙니다).
+
+> 옛 `*.vercel.app` 주소도 계속 살아 있습니다. 그쪽으로 들어와도 같은 앱이 뜨므로,
+> 굳이 막을 필요는 없지만 직원 안내에는 새 주소만 알리는 편이 낫습니다.
+
+---
+
 ## 4단계. 급여명세서 자동발송 (Vercel Cron)
 
 - 저장소의 **`vercel.json`** 에 이미 예약 실행이 설정되어 있습니다:
