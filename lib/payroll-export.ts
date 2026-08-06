@@ -20,6 +20,7 @@
 // **합계가 어긋나지 않게** 한다(조용히 빼면 입금액이 안 맞는다).
 
 import * as XLSX from "xlsx";
+import { variableOvertimeOf } from "./payroll";
 
 export interface ExportPayrollRecord {
   incomeType: string;
@@ -100,27 +101,11 @@ export function statutoryDeductionOf(r: ExportPayrollRecord): number {
 
 /**
  * 세무 시트의 '오버타임수당' — **그 달에 실제로 생긴 초과근로분만** 담는다.
- *
- * 급여 레코드의 `overtimeP`·`nightP` 에는 **포괄임금 약정분(고정 시간외·야간)이 섞여 있다**.
- * 그건 계약서에 이미 들어 있는 월 급여의 일부라 매달 같은 금액이고, 초과근로로 새로 생긴 돈이
- * 아니다. 그대로 이 열에 넣으면 세무사가 매달 오버타임이 발생한 것으로 보게 된다.
- *
- * 그래서 금액을 그대로 쓰지 않고 **입력·확정된 시간에서 다시 세운다** — 관리자가 급여 화면에
- * 손으로 넣었거나 보강·오버타임 메뉴에서 실근무 확정한 시간만 여기 남는다.
- * 배수와 반올림은 엔진(lib/payroll.ts)과 같은 식이라 값이 어긋나지 않는다.
+ * 판정은 엔진(`lib/payroll.ts`)에 두고 여기서는 그대로 쓴다 — **퇴직급여 산정도 같은 함수를
+ * 쓰므로**(포괄임금 약정분을 산입기준에 넣기 위해) 둘로 두면 두 문서가 어긋난다.
  * 빠진 포괄임금 약정분은 '세전급여' 로 들어가므로 세전총계는 그대로다.
  */
-export function variableOvertimeOf(r: ExportPayrollRecord): number {
-  const hw = r.hourlyWage || 0;
-  const round0 = (x: number) => Math.round(x);
-  return (
-    round0((r.extraHours || 0) * hw) + // 법내연장 — 가산 없음(×1.0)
-    round0((r.overtimeHours || 0) * hw * 1.5) +
-    round0((r.nightHours || 0) * hw * 0.5) + // 야간은 가산분만
-    round0((r.holidayHours || 0) * hw * 1.5) +
-    round0((r.holidayOverHours || 0) * hw * 2) // 휴일 8시간 초과분
-  );
-}
+export { variableOvertimeOf };
 
 export function buildExportRow(r: ExportPayrollRecord, payDate: string): ExportRow {
   const overtimePay = variableOvertimeOf(r);

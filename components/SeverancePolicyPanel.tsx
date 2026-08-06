@@ -9,6 +9,7 @@ export interface SeverancePolicyRow {
   minWeeklyHours: number;
   includeBonus: boolean;
   includeIncentive: boolean;
+  includeFixedOvertime: boolean;
   includeOvertime: boolean;
   includeUnusedLeave: boolean;
   includeMealCar: boolean;
@@ -111,15 +112,37 @@ export default function SeverancePolicyPanel({ policy }: { policy: SeverancePoli
           <div className="grid sm:grid-cols-2 gap-2">
             {check("식대 · 차량유지비", "includeMealCar", "비과세지만 정기·일률 지급이면 임금")}
             {check("연차미사용수당", "includeUnusedLeave")}
+            {check(
+              "포괄임금 약정 시간외 · 야간",
+              "includeFixedOvertime",
+              "계약서 제4조의 고정분 — 켜면 계약 월 급여총액과 맞는다"
+            )}
             {check("인센티브", "includeIncentive", "끄면: 퇴직유보금으로 별도 적립 중")}
             {check("상여", "includeBonus", "비정기 특별상여")}
-            {check("연장 · 야간 · 휴일수당", "includeOvertime", "⚠ 끄면 법정 하한 미달 소지")}
+            {check(
+              "그 달 발생한 연장 · 야간 · 휴일수당",
+              "includeOvertime",
+              "보강 확정분·수기 입력분. ⚠ 끄면 법정 하한 미달 소지"
+            )}
           </div>
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            오버타임은 <b>두 갈래</b>입니다 — 계약서에 이미 들어 있는 <b>약정분</b>(매달 같은
+            금액)과 그 달 새로 생긴 <b>변동분</b>. 급여 레코드에는 섞여 있어, 그 달 입력·확정된
+            시간에서 변동분을 다시 세워 가릅니다(세무사무소 제출자료와 같은 방식).
+          </p>
         </div>
+
+        {!p.includeFixedOvertime && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 mb-3 leading-relaxed">
+            ⚠ <b>포괄임금 약정 시간외·야간</b>을 빼고 있습니다. 계약서에 합의된 월 급여의 일부라
+            매달 일률적으로 지급되는 임금이므로, 산정기준이 <b>계약 월 급여총액보다 적어집니다</b>.
+            법정 하한(연간 임금총액의 1/12)에 미달할 소지가 큽니다.
+          </div>
+        )}
 
         {!p.includeOvertime && (
           <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 mb-3 leading-relaxed">
-            ⚠ 연장·야간·휴일수당을 빼고 있습니다. 근로자퇴직급여보장법 §20① 의 하한은{" "}
+            ⚠ 그 달 발생한 연장·야간·휴일수당을 빼고 있습니다. 근로자퇴직급여보장법 §20① 의 하한은{" "}
             <b>연간 임금총액의 1/12</b> 이고 이들 수당도 근로의 대가인 임금이라, 이 기준으로는
             하한에 미달할 수 있습니다. 노무 자문으로 확인해 주세요.
           </div>

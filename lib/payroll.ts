@@ -317,6 +317,55 @@ export function inclusiveWageBreakdown(t: InclusiveWageTerms): InclusiveWageBrea
   };
 }
 
+/* ───────────── 포괄임금 약정분 ↔ 그 달 변동분 가르기 ───────────── */
+
+/** 시간 기반 오버타임을 다시 세우는 데 필요한 값 */
+export interface VariableOvertimeInput {
+  extraHours?: number;
+  overtimeHours?: number;
+  nightHours?: number;
+  holidayHours?: number;
+  holidayOverHours?: number;
+  hourlyWage?: number;
+}
+
+/**
+ * **그 달에 새로 생긴 초과근로분만** 금액으로 다시 센다.
+ *
+ * 급여 레코드의 `overtimeP`·`nightP` 에는 **포괄임금 약정분(계약서 제4조의 고정 시간외·야간)이
+ * 섞여 있다.** 그건 계약된 월 급여의 일부라 매달 같은 금액이고, 초과근로로 새로 생긴 돈이 아니다.
+ * 그래서 금액을 그대로 쓰지 않고 **그 달 입력·확정된 시간에서 배수대로 다시 세운다** —
+ * 관리자가 급여 화면에 손으로 넣었거나 보강·오버타임에서 실근무 확정한 시간만 여기 남는다.
+ *
+ * 반대로 **약정분 = 오버타임 지급액 합계 − 이 값** 이다(`fixedOvertimeOf`).
+ * 세무 시트('오버타임수당' 열)와 퇴직급여 산정이 **같은 판정을 써야** 두 문서가 어긋나지 않는다.
+ */
+export function variableOvertimeOf(r: VariableOvertimeInput): number {
+  const hw = r.hourlyWage || 0;
+  const round0 = (x: number) => Math.round(x);
+  return (
+    round0((r.extraHours || 0) * hw) + // 법내연장 — 가산 없음(×1.0)
+    round0((r.overtimeHours || 0) * hw * 1.5) +
+    round0((r.nightHours || 0) * hw * 0.5) + // 야간은 가산분만
+    round0((r.holidayHours || 0) * hw * 1.5) +
+    round0((r.holidayOverHours || 0) * hw * 2) // 휴일 8시간 초과분
+  );
+}
+
+/**
+ * 포괄임금 약정분 — **계약서에 합의된 월 급여에 이미 들어 있는** 고정 시간외·야간 금액.
+ *
+ * 지급된 오버타임 총액에서 그 달 변동분을 뺀 나머지다. 포괄임금 계약이 아니면
+ * 총액과 변동분이 같아져 0이 된다(약정한 시간이 없으니 당연하다).
+ * 반올림 잔차로 음수가 나오지 않게 0에서 자른다.
+ */
+export function fixedOvertimeOf(
+  r: VariableOvertimeInput & { extraP?: number; overtimeP?: number; nightP?: number; holidayP?: number }
+): number {
+  const paid = (r.extraP || 0) + (r.overtimeP || 0) + (r.nightP || 0) + (r.holidayP || 0);
+  return Math.max(paid - variableOvertimeOf(r), 0);
+}
+
 /** 간이세액표 조회 */
 export function lookupIncomeTax(
   taxableMonthly: number,

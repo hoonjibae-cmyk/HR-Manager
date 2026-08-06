@@ -637,11 +637,16 @@ model SeverancePolicy {
   minWeeklyHours Float @default(15)
 
   // 산입 범위 — 기본값은 '상여·인센티브·오버타임 제외'
-  includeBonus       Boolean @default(false) // 비정기 특별상여
-  includeIncentive   Boolean @default(false) // 이미 퇴직유보금으로 1/12 을 떼고 있다
-  includeOvertime    Boolean @default(false) // ⚠ 끄면 법정 하한에 미달할 수 있다
-  includeUnusedLeave Boolean @default(true)
-  includeMealCar     Boolean @default(true) // 비과세지만 정기·일률 지급이면 임금이다
+  includeBonus         Boolean @default(false) // 비정기 특별상여
+  includeIncentive     Boolean @default(false) // 이미 퇴직유보금으로 1/12 을 떼고 있다
+  /// 포괄임금 약정 시간외·야간 — 계약서 제4조에 이미 들어 있는 고정분.
+  /// 켜면 산정기준 임금이 **계약서에 합의된 월 급여총액**과 맞는다(기본 켜짐).
+  includeFixedOvertime Boolean @default(true)
+  /// 그 달 실제 발생한 연장·야간·휴일수당(보강 확정분·수기 입력분).
+  /// ⚠ 끄면 법정 하한에 미달할 수 있다
+  includeOvertime      Boolean @default(false)
+  includeUnusedLeave   Boolean @default(true)
+  includeMealCar       Boolean @default(true) // 비과세지만 정기·일률 지급이면 임금이다
 
   updatedAt DateTime @updatedAt
 }

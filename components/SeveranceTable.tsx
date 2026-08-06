@@ -271,7 +271,7 @@ function SortHead({ sort, onSort }: { sort: any; onSort: (k: string) => void }) 
         sort={sort}
         onSort={onSort}
         align="right"
-        title="상여·인센티브·오버타임을 뺀 이 달 임금 (설정에 따라 다름)"
+        title="계약서에 합의된 월 급여총액 — 포괄임금 약정 시간외·야간은 포함, 상여·인센티브·그 달 발생한 오버타임은 제외 (설정에 따라 다름)"
       />
       <SortTh label="이번 달 적립" sortKey="amount" sort={sort} onSort={onSort} align="right" />
       <SortTh

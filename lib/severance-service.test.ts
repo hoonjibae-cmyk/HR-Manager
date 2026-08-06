@@ -63,6 +63,12 @@ const rec = (year: number, month: number, over: any = {}) => ({
   overtimeP: 0,
   nightP: 0,
   holidayP: 0,
+  extraHours: 0,
+  overtimeHours: 0,
+  nightHours: 0,
+  holidayHours: 0,
+  holidayOverHours: 0,
+  hourlyWage: 0,
   retentionD: 0,
   status: "DRAFT",
   ...over,
@@ -78,6 +84,7 @@ beforeEach(() => {
     minWeeklyHours: 15,
     includeBonus: false,
     includeIncentive: false,
+    includeFixedOvertime: true,
     includeOvertime: false,
     includeUnusedLeave: true,
     includeMealCar: true,
@@ -173,17 +180,42 @@ describe("누계 — DC 전환 시 소급 납입할 몫", () => {
 });
 
 describe("산입 범위", () => {
-  it("상여·인센티브·오버타임은 기본으로 빠진다", async () => {
+  it("상여·인센티브는 기본으로 빠진다", async () => {
     employees.push(emp());
-    payrolls.push(rec(2026, 6, { bonusP: 2_000_000, incentiveP: 600_000, overtimeP: 300_000 }));
+    payrolls.push(rec(2026, 6, { bonusP: 2_000_000, incentiveP: 600_000 }));
     const r = (await severanceMonth(2026, 6)).rows[0];
     expect(r.base).toBe(3_400_000);
     expect(r.amount).toBe(283_333);
   });
 
-  it("오버타임이 발생한 달은 법정 하한 경고가 붙는다", async () => {
+  it("포괄임금 약정분은 들어가고 그 달 발생분만 빠진다", async () => {
+    // 계약 월 급여 = 기본 300만 + 식대 20만 + 직책 20만 + 약정 시간외 30만 = 370만.
+    // 이 달은 보강 연장 4시간(=120,000)이 그 위에 더 붙었다.
     employees.push(emp());
-    payrolls.push(rec(2026, 6, { overtimeP: 300_000 }));
+    payrolls.push(
+      rec(2026, 6, { overtimeP: 420_000, overtimeHours: 4, hourlyWage: 20_000 })
+    );
+    const r = (await severanceMonth(2026, 6)).rows[0];
+    expect(r.base).toBe(3_700_000);
+    expect(r.amount).toBe(308_333); // 3,700,000 / 12
+    expect(r.included.map(([k]) => k)).toContain("포괄임금 약정 시간외·야간");
+    expect(Object.fromEntries(r.excluded.map(([k, v]) => [k, v]))).toEqual({
+      "오버타임 수당(그 달 발생분)": 120_000,
+    });
+  });
+
+  it("약정분만 있는 달은 경고하지 않는다 — 계약 월 급여와 산정기준이 같다", async () => {
+    employees.push(emp());
+    payrolls.push(rec(2026, 6, { overtimeP: 300_000, hourlyWage: 20_000 }));
+    const { rows, warnings } = await severanceMonth(2026, 6);
+    expect(rows[0].base).toBe(3_700_000);
+    expect(rows[0].warning).toBeNull();
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("그 달 발생분이 있는 달은 법정 하한 경고가 붙는다", async () => {
+    employees.push(emp());
+    payrolls.push(rec(2026, 6, { overtimeP: 420_000, overtimeHours: 4, hourlyWage: 20_000 }));
     const { rows, warnings } = await severanceMonth(2026, 6);
     expect(rows[0].warning).toContain("§20①");
     expect(warnings[0]).toContain("김직원");
@@ -193,9 +225,11 @@ describe("산입 범위", () => {
     policyRow.includeOvertime = true;
     policyRow.includeIncentive = true;
     employees.push(emp());
-    payrolls.push(rec(2026, 6, { incentiveP: 600_000, overtimeP: 300_000 }));
+    payrolls.push(
+      rec(2026, 6, { incentiveP: 600_000, overtimeP: 420_000, overtimeHours: 4, hourlyWage: 20_000 })
+    );
     const r = (await severanceMonth(2026, 6)).rows[0];
-    expect(r.base).toBe(3_400_000 + 600_000 + 300_000);
+    expect(r.base).toBe(3_400_000 + 600_000 + 420_000);
     expect(r.warning).toBeNull();
   });
 

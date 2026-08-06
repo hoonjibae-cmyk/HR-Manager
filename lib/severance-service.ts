@@ -43,6 +43,13 @@ const payItemsOf = (r: any): SeverancePayItems => ({
   overtimeP: r.overtimeP ?? 0,
   nightP: r.nightP ?? 0,
   holidayP: r.holidayP ?? 0,
+  // 포괄임금 약정분과 그 달 변동분을 가르는 재료 — 금액만으로는 갈리지 않는다
+  extraHours: r.extraHours ?? 0,
+  overtimeHours: r.overtimeHours ?? 0,
+  nightHours: r.nightHours ?? 0,
+  holidayHours: r.holidayHours ?? 0,
+  holidayOverHours: r.holidayOverHours ?? 0,
+  hourlyWage: r.hourlyWage ?? 0,
 });
 
 /** 그 달 마지막 날 (KST 벽시계를 UTC 필드에 담는 앱 규칙 그대로) */

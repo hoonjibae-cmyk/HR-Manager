@@ -19,6 +19,7 @@
 // **엔진은 정책(SeverancePolicy)이 시키는 대로 계산하고, 무엇을 뺐는지 근거로 남긴다.**
 
 import { addMonths, isBefore } from "date-fns";
+import { fixedOvertimeOf, variableOvertimeOf } from "./payroll";
 
 /* ───────────── 정책 ───────────── */
 
@@ -35,7 +36,16 @@ export interface SeverancePolicy {
   includeBonus: boolean;
   /** 인센티브 — **이미 '퇴직유보금' 으로 따로 1/12 을 떼고 있다**(확인서 제6조). 겹쳐 쌓지 않는다 */
   includeIncentive: boolean;
-  /** 연장·야간·휴일수당 — 끄면 법정 하한에 미달할 수 있다(위 ⚠️) */
+  /**
+   * **포괄임금 약정 시간외·야간** — 계약서 제4조에 이미 들어 있는 고정분.
+   * 켜면 산정기준 임금이 **계약서에 합의된 월 급여총액**과 맞는다(기본 켜짐).
+   * 이건 매달 같은 금액으로 정기·일률 지급되는 임금이라 빼면 계약 총액보다 적게 쌓인다.
+   */
+  includeFixedOvertime: boolean;
+  /**
+   * **그 달 실제로 발생한** 연장·야간·휴일수당(보강 확정분·수기 입력분).
+   * 약정분과 달리 달마다 다르다. 끄면 법정 하한에 미달할 수 있다(위 ⚠️).
+   */
   includeOvertime: boolean;
   /** 연차미사용수당 */
   includeUnusedLeave: boolean;
@@ -49,6 +59,8 @@ export const DEFAULT_SEVERANCE_POLICY: SeverancePolicy = {
   minWeeklyHours: 15,
   includeBonus: false,
   includeIncentive: false,
+  // 계약서에 합의된 월 급여를 그대로 산정기준으로 삼는다
+  includeFixedOvertime: true,
   includeOvertime: false,
   includeUnusedLeave: true,
   includeMealCar: true,
@@ -139,7 +151,13 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /* ───────────── 산정기준 임금 ───────────── */
 
-/** 급여 레코드에서 이 엔진이 보는 지급 항목만 추린 것 */
+/**
+ * 급여 레코드에서 이 엔진이 보는 값.
+ *
+ * **시간과 통상시급이 함께 필요하다** — `overtimeP`·`nightP` 에는 포괄임금 약정분(계약서에
+ * 이미 들어 있는 고정 시간외·야간)과 그 달 실제 발생분이 섞여 있어, 금액만으로는 가를 수 없다.
+ * 그 달 입력·확정된 시간에서 변동분을 다시 세우고 나머지를 약정분으로 본다(`fixedOvertimeOf`).
+ */
 export interface SeverancePayItems {
   baseP: number; // 기본급
   weeklyHolidayP: number; // 주휴수당(시급제)
@@ -153,6 +171,14 @@ export interface SeverancePayItems {
   overtimeP: number; // 연장
   nightP: number; // 야간
   holidayP: number; // 휴일
+
+  // --- 약정분 ↔ 변동분을 가르는 재료 ---
+  extraHours: number;
+  overtimeHours: number;
+  nightHours: number;
+  holidayHours: number;
+  holidayOverHours: number;
+  hourlyWage: number;
 }
 
 export interface SeveranceBase {
@@ -205,17 +231,24 @@ export function severanceBase(
   if (policy.includeBonus) take("상여", p.bonusP);
   else drop("상여", p.bonusP, "비정기 특별상여");
 
-  const ot = p.extraP + p.overtimeP + p.nightP + p.holidayP;
-  if (policy.includeOvertime) {
-    take("법내연장수당", p.extraP);
-    take("연장근로수당", p.overtimeP);
-    take("야간근로수당", p.nightP);
-    take("휴일근로수당", p.holidayP);
-  } else if (ot) {
-    excluded.push(["오버타임 수당", ot, "산입 제외 설정"]);
-  }
+  // 오버타임은 **두 갈래**다 — 계약서에 이미 들어 있는 약정분과, 그 달 새로 생긴 변동분.
+  // 약정분은 매달 같은 금액으로 정기·일률 지급되는 계약 월 급여의 일부라 기본으로 산입한다
+  // (켜 두면 산정기준 임금 = 계약서에 합의된 월 급여총액).
+  const fixed = fixedOvertimeOf(p);
+  const variable = variableOvertimeOf(p);
+
+  if (policy.includeFixedOvertime) take("포괄임금 약정 시간외·야간", fixed);
+  else drop("포괄임금 약정 시간외·야간", fixed, "산입 제외 설정");
+
+  if (policy.includeOvertime) take("오버타임 수당(그 달 발생분)", variable);
+  else drop("오버타임 수당(그 달 발생분)", variable, "산입 제외 설정");
 
   return { base: included.reduce((a, [, v]) => a + v, 0), included, excluded };
+}
+
+/** 이 달 오버타임 지급액을 약정분·변동분으로 가른 값 (화면 설명용) */
+export function overtimeSplit(p: SeverancePayItems) {
+  return { fixed: fixedOvertimeOf(p), variable: variableOvertimeOf(p) };
 }
 
 /**
@@ -256,16 +289,31 @@ export function accrualNote(
  * 상여는 비정기라 평균임금에서 빠지는 경우가 많지만, **연장·야간·휴일수당은 근로의 대가**라
  * 원칙적으로 임금총액에 들어간다. 실제로 그 수당이 발생한 달에만 경고한다 —
  * 발생하지도 않은 항목으로 매달 경고하면 경고가 무뎌진다.
+ *
+ * **포괄임금 약정분은 별도로 본다** — 약정분을 빼면 산정기준이 계약서에 합의된 월 급여보다
+ * 적어지므로, 그쪽이 더 무겁게 어긋난다(매달 일어난다).
  */
 export function underMinimumWarning(
   b: SeveranceBase,
   policy: SeverancePolicy = DEFAULT_SEVERANCE_POLICY
 ): string | null {
+  const off = (label: string) => b.excluded.find(([l]) => l === label);
+
+  if (!policy.includeFixedOvertime) {
+    const fixed = off("포괄임금 약정 시간외·야간");
+    if (fixed)
+      return (
+        `포괄임금 약정 시간외·야간 ${won(fixed[1])} 을 뺐습니다 — 계약서에 합의된 월 급여의 ` +
+        `일부라 매달 일률적으로 지급되는 임금입니다. 산정기준이 계약 월 급여총액보다 적어지므로 ` +
+        `법정 하한(연간 임금총액의 1/12, 근로자퇴직급여보장법 §20①)에 미달할 소지가 큽니다.`
+      );
+  }
+
   if (policy.includeOvertime) return null;
-  const ot = b.excluded.find(([label]) => label === "오버타임 수당");
+  const ot = off("오버타임 수당(그 달 발생분)");
   if (!ot) return null;
   return (
-    `연장·야간·휴일수당 ${won(ot[1])} 을 산정기준에서 뺐습니다. ` +
+    `그 달 발생한 연장·야간·휴일수당 ${won(ot[1])} 을 산정기준에서 뺐습니다. ` +
     `근로자퇴직급여보장법 §20① 의 하한은 '연간 임금총액의 1/12' 이고 이들 수당도 임금에 들어가므로, ` +
     `이 기준으로는 하한에 미달할 수 있습니다 — 노무 자문으로 확인해 주세요.`
   );

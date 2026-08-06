@@ -10,6 +10,7 @@ const NUM = ["dcAfterMonths", "divisor", "minWeeklyHours"] as const;
 const BOOL = [
   "includeBonus",
   "includeIncentive",
+  "includeFixedOvertime",
   "includeOvertime",
   "includeUnusedLeave",
   "includeMealCar",
@@ -45,9 +46,13 @@ export async function PATCH(req: Request) {
     warn.push(
       `연간 임금총액을 ${row.divisor} 로 나누면 법정 하한(1/12)에 미달합니다 — 근로자퇴직급여보장법 §20①.`
     );
+  if (!row.includeFixedOvertime)
+    warn.push(
+      "포괄임금 약정 시간외·야간을 산입하지 않습니다 — 계약서에 합의된 월 급여의 일부라 매달 일률적으로 지급되는 임금입니다. 산정기준이 계약 월 급여총액보다 적어져 법정 하한에 미달할 소지가 큽니다."
+    );
   if (!row.includeOvertime)
     warn.push(
-      "연장·야간·휴일수당을 산입하지 않습니다. 이들 수당도 임금이라 법정 하한(연간 임금총액의 1/12)에 미달할 수 있습니다."
+      "그 달 발생한 연장·야간·휴일수당을 산입하지 않습니다. 이들 수당도 임금이라 법정 하한(연간 임금총액의 1/12)에 미달할 수 있습니다."
     );
   if (row.minWeeklyHours > 15)
     warn.push(

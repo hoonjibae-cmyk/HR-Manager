@@ -7,6 +7,7 @@ import {
   monthlyAccrual,
   accrualNote,
   underMinimumWarning,
+  overtimeSplit,
   type SeverancePayItems,
   type SeveranceSubject,
 } from "./severance";
@@ -34,6 +35,12 @@ const pay = (over: Partial<SeverancePayItems> = {}): SeverancePayItems => ({
   overtimeP: 0,
   nightP: 0,
   holidayP: 0,
+  extraHours: 0,
+  overtimeHours: 0,
+  nightHours: 0,
+  holidayHours: 0,
+  holidayOverHours: 0,
+  hourlyWage: 0,
   ...over,
 });
 
@@ -104,13 +111,11 @@ describe("severanceBase — 산정기준 임금", () => {
     expect(b.included.map(([k]) => k)).toEqual(["기본급", "직책수당", "식대"]);
   });
 
-  it("상여·인센티브·오버타임은 기본으로 빠진다", () => {
-    const b = severanceBase(
-      pay({ bonusP: 1_000_000, incentiveP: 600_000, overtimeP: 150_000, holidayP: 50_000 })
-    );
+  it("상여·인센티브는 기본으로 빠진다", () => {
+    const b = severanceBase(pay({ bonusP: 1_000_000, incentiveP: 600_000 }));
     expect(b.base).toBe(3_400_000);
     const off = Object.fromEntries(b.excluded.map(([k, v]) => [k, v]));
-    expect(off).toEqual({ 인센티브: 600_000, 상여: 1_000_000, "오버타임 수당": 200_000 });
+    expect(off).toEqual({ 인센티브: 600_000, 상여: 1_000_000 });
   });
 
   it("인센티브를 뺀 사유는 '퇴직유보금으로 별도 적립 중' 이다", () => {
@@ -119,15 +124,10 @@ describe("severanceBase — 산정기준 임금", () => {
     expect(b.excluded.find(([k]) => k === "인센티브")![2]).toContain("퇴직유보금");
   });
 
-  it("설정을 켜면 상여·인센티브·오버타임이 들어간다", () => {
-    const p = {
-      ...DEFAULT_SEVERANCE_POLICY,
-      includeBonus: true,
-      includeIncentive: true,
-      includeOvertime: true,
-    };
-    const b = severanceBase(pay({ bonusP: 1_000_000, incentiveP: 600_000, overtimeP: 150_000 }), p);
-    expect(b.base).toBe(3_400_000 + 1_000_000 + 600_000 + 150_000);
+  it("설정을 켜면 상여·인센티브도 들어간다", () => {
+    const p = { ...DEFAULT_SEVERANCE_POLICY, includeBonus: true, includeIncentive: true };
+    const b = severanceBase(pay({ bonusP: 1_000_000, incentiveP: 600_000 }), p);
+    expect(b.base).toBe(3_400_000 + 1_000_000 + 600_000);
     expect(b.excluded).toHaveLength(0);
   });
 
@@ -149,6 +149,71 @@ describe("severanceBase — 산정기준 임금", () => {
     const b = severanceBase(pay({ carP: 0, bonusP: 0 }));
     expect(b.included.some(([, v]) => v === 0)).toBe(false);
     expect(b.excluded.some(([, v]) => v === 0)).toBe(false);
+  });
+});
+
+/**
+ * 포괄임금 계약자 — 통상시급 20,000원.
+ * 계약서 제4조: 기본급 300만 + 약정 시간외 30만 + 식대 20만 = 월 350만.
+ * 이 달은 그 위에 보강 연장 4시간이 확정돼 변동분 120,000원이 더 붙었다
+ * (레코드의 overtimeP = 약정 300,000 + 변동 120,000 = 420,000).
+ */
+const inclusive = (over: Partial<SeverancePayItems> = {}) =>
+  pay({
+    baseP: 3_000_000,
+    positionP: 0,
+    mealP: 200_000,
+    overtimeP: 300_000,
+    hourlyWage: 20_000,
+    ...over,
+  });
+
+describe("포괄임금 약정분 ↔ 그 달 변동분", () => {
+  it("약정분은 계약 월 급여의 일부라 기본으로 들어간다", () => {
+    const b = severanceBase(inclusive());
+    // 300만 + 식대 20만 + 약정 시간외 30만 = 계약서에 합의된 월 급여총액
+    expect(b.base).toBe(3_500_000);
+    expect(b.included.map(([k]) => k)).toContain("포괄임금 약정 시간외·야간");
+    expect(b.excluded).toHaveLength(0);
+  });
+
+  it("금액이 아니라 시간에서 변동분을 다시 세워 가른다", () => {
+    const b = severanceBase(inclusive({ overtimeP: 420_000, overtimeHours: 4 }));
+    expect(overtimeSplit(inclusive({ overtimeP: 420_000, overtimeHours: 4 }))).toEqual({
+      fixed: 300_000, // 420,000 − 120,000
+      variable: 120_000, // 4h × 20,000 × 1.5
+    });
+    // 약정분만 들어가고 그 달 발생분은 빠진다 → 여전히 계약 월 급여와 같다
+    expect(b.base).toBe(3_500_000);
+    expect(Object.fromEntries(b.excluded.map(([k, v]) => [k, v]))).toEqual({
+      "오버타임 수당(그 달 발생분)": 120_000,
+    });
+  });
+
+  it("포괄임금 계약이 아니면 약정분이 0이라 붙을 게 없다", () => {
+    // 지급된 오버타임 전부가 그 달 발생분이다 (같은 시간에서 나온 금액이므로)
+    const p = pay({ overtimeP: 120_000, overtimeHours: 4, hourlyWage: 20_000 });
+    expect(overtimeSplit(p)).toEqual({ fixed: 0, variable: 120_000 });
+    expect(severanceBase(p).base).toBe(3_400_000);
+  });
+
+  it("야간은 가산분(×0.5)만 변동분으로 센다", () => {
+    const p = inclusive({ nightP: 100_000 + 30_000, nightHours: 3 });
+    // 3h × 20,000 × 0.5 = 30,000 이 변동분, 나머지 100,000 이 약정 야간
+    expect(overtimeSplit(p)).toEqual({ fixed: 400_000, variable: 30_000 });
+  });
+
+  it("약정분을 끄면 계약 월 급여보다 적어진다", () => {
+    const p = { ...DEFAULT_SEVERANCE_POLICY, includeFixedOvertime: false };
+    const b = severanceBase(inclusive(), p);
+    expect(b.base).toBe(3_200_000);
+    expect(b.excluded.map(([k]) => k)).toContain("포괄임금 약정 시간외·야간");
+  });
+
+  it("반올림 잔차로 약정분이 음수가 되지 않는다", () => {
+    // 수기 입력 등으로 변동분이 지급액보다 커도 0에서 자른다
+    const p = pay({ overtimeP: 100_000, overtimeHours: 10, hourlyWage: 20_000 });
+    expect(overtimeSplit(p).fixed).toBe(0);
   });
 });
 
@@ -185,10 +250,14 @@ describe("accrualNote — 산정 근거", () => {
 });
 
 describe("underMinimumWarning — 법정 하한 미달 소지", () => {
-  it("오버타임 수당이 실제로 발생한 달에만 경고한다", () => {
-    expect(underMinimumWarning(severanceBase(pay()))).toBeNull();
-    const w = underMinimumWarning(severanceBase(pay({ overtimeP: 150_000 })));
-    expect(w).toContain("150,000원");
+  /** 그 달 실제로 4시간 연장이 발생한 포괄임금 계약자 */
+  const withVariable = () => inclusive({ overtimeP: 420_000, overtimeHours: 4 });
+
+  it("그 달 발생분이 실제로 있을 때만 경고한다", () => {
+    // 약정분만 있는 달은 계약 월 급여와 산정기준이 같으니 경고할 것이 없다
+    expect(underMinimumWarning(severanceBase(inclusive()))).toBeNull();
+    const w = underMinimumWarning(severanceBase(withVariable()))!;
+    expect(w).toContain("120,000원");
     expect(w).toContain("§20①");
   });
 
@@ -196,8 +265,16 @@ describe("underMinimumWarning — 법정 하한 미달 소지", () => {
     expect(underMinimumWarning(severanceBase(pay({ bonusP: 2_000_000 })))).toBeNull();
   });
 
-  it("오버타임을 산입하도록 켜면 경고가 사라진다", () => {
+  it("그 달 발생분을 산입하도록 켜면 경고가 사라진다", () => {
     const p = { ...DEFAULT_SEVERANCE_POLICY, includeOvertime: true };
-    expect(underMinimumWarning(severanceBase(pay({ overtimeP: 150_000 }), p), p)).toBeNull();
+    expect(underMinimumWarning(severanceBase(withVariable(), p), p)).toBeNull();
+  });
+
+  it("약정분을 뺀 쪽이 더 무겁다 — 그쪽을 먼저 경고한다", () => {
+    // 계약서에 합의된 월 급여보다 적게 쌓이는 것이라 매달 어긋난다
+    const p = { ...DEFAULT_SEVERANCE_POLICY, includeFixedOvertime: false };
+    const w = underMinimumWarning(severanceBase(withVariable(), p), p)!;
+    expect(w).toContain("포괄임금 약정");
+    expect(w).toContain("계약 월 급여총액보다 적어지므로");
   });
 });
