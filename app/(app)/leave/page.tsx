@@ -12,7 +12,10 @@ import { PageHeader } from "@/components/ui";
 import LeaveApprovals from "@/components/LeaveApprovals";
 import LeaveImport from "@/components/LeaveImport";
 import LeaveAdjust from "@/components/LeaveAdjust";
-import LeaveTable, { type LeaveRow } from "@/components/LeaveTable";
+import { type LeaveRow } from "@/components/LeaveTable";
+import LeaveViews from "@/components/LeaveViews";
+import { buildLeaveCalendar } from "@/lib/leave-calendar";
+import { listHolidays } from "@/lib/holiday-service";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +34,7 @@ export default async function LeavePage({
     ? new Date(searchParams.to + "T23:59:59Z")
     : new Date(Date.UTC(year, 11, 31, 23, 59, 59));
 
-  const [employees, txns, pending] = await Promise.all([
+  const [employees, txns, pending, allRequests, holidays] = await Promise.all([
     // 위탁계약(프리랜서·완전비율제)은 근로기준법 미적용 → 연차 관리 대상에서 제외
     prisma.employee.findMany({
       where: { active: true, payScheme: { not: "RATIO" }, isContractor: false },
@@ -43,6 +46,9 @@ export default async function LeavePage({
       include: { employee: true },
       orderBy: { createdAt: "desc" },
     }),
+    // 달력용 — 반려·취소분은 `buildLeaveCalendar` 가 걸러 낸다
+    prisma.leaveRequest.findMany({ include: { employee: true }, orderBy: { startDate: "asc" } }),
+    listHolidays(),
   ]);
 
   const txnByEmp: Record<number, LeaveTxn[]> = {};
@@ -110,6 +116,41 @@ export default async function LeavePage({
 
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
 
+  // 달력 — 신청서(기간)와 원장(날짜)을 합쳐 날짜별로 편다.
+  // 승인 원장은 **시작일 한 줄에 총 일수**라 그것만으로는 여러 날 휴가가 하루로 뭉친다
+  // (자세한 사정은 lib/leave-calendar.ts 머리말).
+  const empById = new Map(employees.map((e) => [e.id, e]));
+  const calendarDays = buildLeaveCalendar({
+    requests: allRequests.map((r) => ({
+      id: r.id,
+      employeeId: r.employeeId,
+      name: r.employee.name,
+      department: r.employee.department,
+      startDate: fmt(r.startDate),
+      endDate: fmt(r.endDate),
+      days: r.days,
+      leaveType: r.leaveType,
+      status: r.status,
+      reason: r.reason,
+      source: r.source,
+    })),
+    txns: txns
+      // 연차 관리 대상이 아닌 사람(위탁 등)은 표와 같은 기준으로 뺀다
+      .filter((t) => empById.has(t.employeeId))
+      .map((t) => ({
+        id: t.id,
+        employeeId: t.employeeId,
+        name: empById.get(t.employeeId)!.name,
+        department: empById.get(t.employeeId)!.department,
+        date: fmt(t.date),
+        days: t.days,
+        category: (t as any).category ?? "STATUTORY",
+        note: t.note,
+        requestId: t.requestId,
+      })),
+    holidays: holidays.map((h) => h.date),
+  });
+
   return (
     /* 화면 높이에 맞춰 표만 안에서 스크롤한다 — 조회 기간·필터·머리글이 늘 붙어 있게 */
     <div className="flex flex-col h-[calc(100dvh-6.5rem)] lg:h-[calc(100dvh-7.5rem)] min-h-[28rem]">
@@ -142,8 +183,12 @@ export default async function LeavePage({
         </div>
       </div>
 
-      <LeaveTable
+      <LeaveViews
         rows={leaveRows}
+        days={calendarDays}
+        holidays={holidays}
+        year={now.getFullYear()}
+        month={now.getMonth() + 1}
         rangeLabel={
           <form method="get" className="flex items-center gap-2 text-xs">
             <span className="text-slate-400">사용 조회 기간</span>
@@ -157,7 +202,7 @@ export default async function LeavePage({
 
       <details className="shrink-0 mt-3">
         <summary className="cursor-pointer text-xs font-semibold text-slate-500 hover:text-slate-700 select-none">
-          표 보는 법 · 연차 규칙
+          표·달력 보는 법 · 연차 규칙
         </summary>
         <p className="text-xs text-slate-400 mt-2 leading-relaxed max-h-[40vh] overflow-auto">
         · <b>본래 연차</b>: 근로기준법 §60 자동 산정 — <b>이번 연차기간(입사일 기준 1년)</b> 의 발생·사용·잔여.
@@ -166,7 +211,13 @@ export default async function LeavePage({
         · <b>기간 내 사용</b>: 위에서 지정한 기간에 사용한 일수 (연차/대휴 구분) &nbsp;
         · <b>연차 미적용</b>: 1주 소정근로시간이 15시간 미만인 초단시간근로자는 연차·주휴가 발생하지 않는다
         (근로기준법 §18③). 직원 카드의 <b>연차 적용</b> 항목으로 계약에 맞춰 바꿀 수 있다 &nbsp;
-        · 열 머리글을 누르면 오름차순 → 내림차순 → 원래 순서로 정렬된다.
+        · 열 머리글을 누르면 오름차순 → 내림차순 → 원래 순서로 정렬된다 &nbsp;
+        · <b>달력 보기</b>: 그날 누가 자리를 비우는지를 날짜 축으로 본다. 표는 &apos;누가 얼마나
+        남았나&apos;, 달력은 &apos;그날 누가 없나&apos; 를 보는 자리라 방학·연휴처럼 여러 사람이 겹치는
+        날은 달력에서만 보인다 &nbsp;
+        · 달력에서 <b>여러 날 휴가는 날짜별로 펼쳐진다</b> — 주말·공휴일은 건너뛰고, 아직 승인하지
+        않은 신청은 <b>⚠ 노란색</b>으로 함께 뜬다 (칩을 누르면 사유와 상태가 나온다) &nbsp;
+        · 병가·경조사는 연차를 깎지 않지만 자리를 비우는 것은 같아 달력에는 나온다.
         </p>
       </details>
     </div>
