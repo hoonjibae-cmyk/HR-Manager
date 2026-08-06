@@ -37,17 +37,21 @@ export function confirmOpensAt(s: ConfirmableSession): Date {
 }
 
 /**
- * 신청자 확정이 닫히는 시각 — **근무한 달의 다음 달 말일 23:59:59**.
+ * 신청자 확정이 닫히는 시각 — **근무한 달의 다음 달 1일 23:59:59**.
  *
- * 그 달 급여는 익월에 지급되므로 이 시점을 넘기면 이미 명세서가 나간 뒤다.
- * 발송(SENT)된 달은 재산정하지 않으므로 뒤늦게 확정해도 수당에 닿지 않는다 —
+ * 그 달 급여 산정이 월초에 시작되므로 그 전에 확정분이 다 들어와 있어야 한다.
+ * 늦게 받아 봐야 이미 산정·발송(SENT)된 달은 재산정하지 않아 수당에 닿지 않는다 —
  * 조용히 받아 두면 '확정했는데 왜 수당이 없냐' 가 된다. 그때부터는 관리자만 손댈 수 있고,
  * 관리자는 급여 잠금 해제까지 함께 판단해야 한다.
+ *
+ * ⚠ **월말 근무는 창이 매우 좁다** — 8월 31일 근무면 9월 1일 하루뿐이다
+ * (확정은 근무 다음날 열린다). 확정 요청 DM 이 그날 오전에 나가므로 그날 안에 처리해야 하고,
+ * 놓친 건은 관리자가 `/makeup` 에서 대신 확정한다.
  */
 export function confirmClosesAt(s: ConfirmableSession): Date {
   const w = workWindow(s as unknown as OtSession);
-  // 다음 달 말일의 마지막 순간 = 두 달 뒤 1일의 1초 전
-  return new Date(Date.UTC(w.start.getUTCFullYear(), w.start.getUTCMonth() + 2, 1) - 1000);
+  // 다음 달 1일의 마지막 순간 = 다음 달 2일의 1초 전
+  return new Date(Date.UTC(w.start.getUTCFullYear(), w.start.getUTCMonth() + 1, 2) - 1000);
 }
 
 export interface SelfConfirmVerdict {
@@ -62,6 +66,17 @@ const dateLabel = (d: Date) =>
   `${d.getUTCFullYear()}.${String(d.getUTCMonth() + 1).padStart(2, "0")}.${String(
     d.getUTCDate()
   ).padStart(2, "0")}`;
+
+/**
+ * 확정 마감일 한 줄 — "9월 1일까지".
+ *
+ * 창이 좁아졌으므로(다음 달 1일) **재촉하는 자리마다 날짜를 박아 준다** —
+ * '언젠가 하면 되겠지' 로 읽히면 월말 근무는 그대로 놓친다.
+ */
+export function confirmDeadlineLabel(s: ConfirmableSession): string {
+  const d = confirmClosesAt(s);
+  return `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일까지`;
+}
 
 /**
  * 신청자가 지금 이 건을 확정할 수 있는가.

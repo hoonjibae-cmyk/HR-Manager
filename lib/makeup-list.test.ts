@@ -25,7 +25,7 @@ const session = (over: any = {}) => ({
   id: 1,
   category: "IMMEDIATE",
   status: "PLANNED",
-  // 확정 가능 기간 안(근무 다음날~다음 달 말일)에 들어오는 지난 근무
+  // 확정 가능 기간 안(근무 다음날~다음 달 1일)에 들어오는 지난 근무
   planStart: t("2026-08-15T09:00:00"),
   planEnd: t("2026-08-15T16:00:00"),
   targetClass: "은가람중3",

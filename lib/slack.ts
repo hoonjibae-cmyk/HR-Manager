@@ -945,6 +945,8 @@ export function makeupConfirmRequestBlocks(args: {
   dateLabel: string;
   targetClass: string;
   alreadyConfirmed?: boolean;
+  /** "9월 1일까지" — 창이 좁아 재촉하는 자리마다 날짜를 박아 준다 */
+  deadlineLabel?: string;
 }) {
   return [
     {
@@ -953,7 +955,8 @@ export function makeupConfirmRequestBlocks(args: {
         type: "mrkdwn",
         text:
           `⏱ *${args.name}님, ${args.kindLabel} 실근무 시간을 확정해 주세요.*\n` +
-          `• 일시(예정): ${args.dateLabel}\n• ${args.categoryLabel} · ${args.targetClass}`,
+          `• 일시(예정): ${args.dateLabel}\n• ${args.categoryLabel} · ${args.targetClass}` +
+          (args.deadlineLabel ? `\n• *${args.deadlineLabel}* 확정해 주세요` : ""),
       },
     },
     {
@@ -961,7 +964,9 @@ export function makeupConfirmRequestBlocks(args: {
       elements: [
         {
           type: "mrkdwn",
-          text: "확정한 시간이 그대로 수당으로 산정됩니다. 실제로 근무한 시간을 있는 그대로 적어 주세요.",
+          text:
+            "확정한 시간이 그대로 수당으로 산정됩니다. 실제로 근무한 시간을 있는 그대로 적어 주세요." +
+            (args.deadlineLabel ? " 기간이 지나면 관리자에게 문의해야 합니다." : ""),
         },
       ],
     },
@@ -1006,13 +1011,17 @@ export function makeupConfirmModalView(ctx: {
   honesty: string;
   /** 내신 상한 안내 — 이미 상한을 넘겼을 때만 */
   capNotice?: string | null;
+  /** "9월 1일까지" */
+  deadlineLabel?: string;
 }) {
   const blocks: any[] = [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*${ctx.kindLabel} 실근무 확정*\n• 신청: ${ctx.dateLabel}\n• ${ctx.categoryLabel} · ${ctx.targetClass}`,
+        text:
+          `*${ctx.kindLabel} 실근무 확정*\n• 신청: ${ctx.dateLabel}\n• ${ctx.categoryLabel} · ${ctx.targetClass}` +
+          (ctx.deadlineLabel ? `\n• 확정 마감: *${ctx.deadlineLabel}*` : ""),
       },
     },
     { type: "section", text: { type: "mrkdwn", text: `⚠️ ${ctx.honesty}` } },

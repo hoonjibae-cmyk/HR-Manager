@@ -44,17 +44,37 @@ describe("confirmOpensAt — 근무 다음날부터", () => {
   });
 });
 
-describe("confirmClosesAt — 다음 달 말일까지", () => {
-  it("8월 근무는 9월 말일까지", () => {
-    expect(confirmClosesAt(session()).toISOString()).toBe("2026-09-30T23:59:59.000Z");
+describe("confirmClosesAt — 다음 달 1일까지", () => {
+  it("8월 근무는 9월 1일까지 (그날 끝까지)", () => {
+    expect(confirmClosesAt(session()).toISOString()).toBe("2026-09-01T23:59:59.000Z");
   });
 
-  it("해를 넘겨도 맞다 (12월 근무 → 이듬해 1월 말일)", () => {
+  it("해를 넘겨도 맞다 (12월 근무 → 이듬해 1월 1일)", () => {
     const s = session({
       planStart: t("2026-12-05T09:00:00"),
       planEnd: t("2026-12-05T12:00:00"),
     });
-    expect(confirmClosesAt(s).toISOString()).toBe("2027-01-31T23:59:59.000Z");
+    expect(confirmClosesAt(s).toISOString()).toBe("2027-01-01T23:59:59.000Z");
+  });
+
+  it("2월처럼 짧은 달도 다음 달 1일이다 (말일 계산이 아니다)", () => {
+    const s = session({
+      planStart: t("2027-02-15T09:00:00"),
+      planEnd: t("2027-02-15T12:00:00"),
+    });
+    expect(confirmClosesAt(s).toISOString()).toBe("2027-03-01T23:59:59.000Z");
+  });
+
+  it("**월말 근무는 창이 하루뿐이다** — 열리는 날과 닫히는 날이 같다", () => {
+    // 8/31 근무 → 9/1 00:00 에 열리고 9/1 23:59:59 에 닫힌다
+    const s = session({
+      planStart: t("2026-08-31T19:00:00"),
+      planEnd: t("2026-08-31T22:00:00"),
+    });
+    expect(confirmOpensAt(s).toISOString()).toBe("2026-09-01T00:00:00.000Z");
+    expect(confirmClosesAt(s).toISOString()).toBe("2026-09-01T23:59:59.000Z");
+    expect(canSelfConfirm(s, t("2026-09-01T10:00:00")).ok).toBe(true);
+    expect(canSelfConfirm(s, t("2026-09-02T00:00:00")).ok).toBe(false);
   });
 });
 

@@ -40,6 +40,7 @@ import {
   honestyNotice,
   mandatoryCapNotice,
   underMandatoryCap,
+  confirmDeadlineLabel,
   NOT_PAYABLE_NOTICE,
 } from "@/lib/makeup-confirm";
 import { sessionHours, workWindow, isPayEligible } from "@/lib/overtime";
@@ -225,6 +226,7 @@ async function openConfirmForm(
       note: row.reviewNote,
       honesty: honestyNotice(row.category),
       capNotice,
+      deadlineLabel: confirmDeadlineLabel(row as any),
     })
   );
 }
@@ -438,7 +440,9 @@ export async function POST(req: Request) {
         ...(f.note ? [`• 특이사항: ${f.note}`] : []),
         ...(res.capNotice ? ["", res.capNotice] : []),
         "",
-        "_확정 내용은 HR 시스템의 보강·오버타임 화면에 반영되었습니다. 급여 마감 전까지는 다시 고칠 수 있습니다._",
+        `_확정 내용은 HR 시스템의 보강·오버타임 화면에 반영되었습니다. ${confirmDeadlineLabel(
+          res.row as any
+        )}는 다시 고칠 수 있습니다._`,
       ].join("\n")
     ).catch(() => {});
 

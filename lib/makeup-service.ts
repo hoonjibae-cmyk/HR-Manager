@@ -566,6 +566,7 @@ export async function sendConfirmRequest(
 ): Promise<ConfirmRequestResult> {
   const { postMessage, slackConfigured, makeupConfirmRequestBlocks } = await import("./slack");
   const { makeupDateLabel } = await import("./makeup-slack");
+  const { confirmDeadlineLabel } = await import("./makeup-confirm");
 
   const r = await prisma.makeupSession.findUnique({ where: { id }, include: { employee: true } });
   if (!r) return { ok: false, reason: "신청 내역을 찾을 수 없습니다." };
@@ -591,6 +592,7 @@ export async function sendConfirmRequest(
     dateLabel: makeupDateLabel(w.start, w.end),
     targetClass: r.targetClass,
     alreadyConfirmed: r.status === "CONFIRMED",
+    deadlineLabel: confirmDeadlineLabel(r as any),
   });
   await postMessage(
     r.slackUserId,
