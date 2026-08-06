@@ -12,6 +12,7 @@ import {
   leaveAmountLabel,
 } from "@/lib/leave-calendar";
 import { listHolidays } from "@/lib/holiday-service";
+import { listDayOffs } from "@/lib/dayoff-service";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +77,7 @@ export default async function Dashboard() {
   const WEEK_MS = 7 * 86400000;
   const windowStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const windowEnd = new Date(windowStart.getTime() + WEEK_MS);
-  const [weekRequests, weekTxns, weekHolidays] = await Promise.all([
+  const [weekRequests, weekTxns, weekHolidays, weekDayOffs] = await Promise.all([
     prisma.leaveRequest.findMany({
       where: { startDate: { lte: windowEnd }, endDate: { gte: windowStart } },
       include: { employee: true },
@@ -87,6 +88,8 @@ export default async function Dashboard() {
       include: { employee: { select: { name: true, department: true } } },
     }),
     listHolidays(),
+    // 평일 휴무도 '그날 자리에 없다' 는 같은 정보다 — 빼면 대시보드와 연차 달력이 어긋난다
+    listDayOffs(ymdUtc(windowStart), ymdUtc(windowEnd)),
   ]);
   const upcoming = upcomingLeave(
     buildLeaveCalendar({
@@ -113,6 +116,7 @@ export default async function Dashboard() {
         note: t.note,
         requestId: t.requestId,
       })),
+      dayOffs: weekDayOffs,
       holidays: weekHolidays.map((h) => h.date),
     }),
     now,
@@ -219,7 +223,7 @@ export default async function Dashboard() {
         <div className="card p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-bold text-slate-800">
-              1주일 내 연차 예정
+              1주일 내 휴가 · 휴무
               {upcoming.length > 0 && (
                 <span className="text-xs font-normal text-slate-400 ml-2">
                   {new Set(upcoming.map((b) => b.employeeId)).size}명
@@ -232,7 +236,7 @@ export default async function Dashboard() {
           </div>
           {upcoming.length === 0 ? (
             <p className="text-sm text-slate-400 py-6 text-center">
-              앞으로 7일 안에 잡힌 연차가 없습니다.
+              앞으로 7일 안에 잡힌 휴가·휴무가 없습니다.
             </p>
           ) : (
             <ul className="divide-y divide-slate-100">

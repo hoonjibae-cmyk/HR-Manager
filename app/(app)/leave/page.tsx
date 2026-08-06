@@ -16,6 +16,9 @@ import { type LeaveRow } from "@/components/LeaveTable";
 import LeaveViews from "@/components/LeaveViews";
 import { buildLeaveCalendar } from "@/lib/leave-calendar";
 import { listHolidays } from "@/lib/holiday-service";
+import { listDayOffs } from "@/lib/dayoff-service";
+import { gcalConfigured } from "@/lib/gcal";
+import DayOffSync from "@/components/DayOffSync";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +37,7 @@ export default async function LeavePage({
     ? new Date(searchParams.to + "T23:59:59Z")
     : new Date(Date.UTC(year, 11, 31, 23, 59, 59));
 
-  const [employees, txns, pending, allRequests, holidays] = await Promise.all([
+  const [employees, txns, pending, allRequests, holidays, dayOffs] = await Promise.all([
     // 위탁계약(프리랜서·완전비율제)은 근로기준법 미적용 → 연차 관리 대상에서 제외
     prisma.employee.findMany({
       where: { active: true, payScheme: { not: "RATIO" }, isContractor: false },
@@ -49,6 +52,8 @@ export default async function LeavePage({
     // 달력용 — 반려·취소분은 `buildLeaveCalendar` 가 걸러 낸다
     prisma.leaveRequest.findMany({ include: { employee: true }, orderBy: { startDate: "asc" } }),
     listHolidays(),
+    // 평일 휴무 — 연차가 아니라 그 주 토요일 당번 근무의 대체다(lib/dayoff.ts)
+    listDayOffs(),
   ]);
 
   const txnByEmp: Record<number, LeaveTxn[]> = {};
@@ -148,6 +153,17 @@ export default async function LeavePage({
         note: t.note,
         requestId: t.requestId,
       })),
+    dayOffs: dayOffs
+      // 연차 표와 같은 기준으로 대상자만 (위탁 등은 뺀다)
+      .filter((d) => empById.has(d.employeeId))
+      .map((d) => ({
+        id: d.id,
+        employeeId: d.employeeId,
+        name: d.name,
+        department: d.department,
+        date: d.date,
+        title: d.title,
+      })),
     holidays: holidays.map((h) => h.date),
   });
 
@@ -158,7 +174,8 @@ export default async function LeavePage({
         title="연차 관리"
         desc="본래 연차(근로기준법 자동 산정) + 대휴보상연차(운영자 수동 부여) · 슬랙 신청 → 승인 → 반영"
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex items-start gap-2 flex-wrap justify-end">
+            <DayOffSync configured={gcalConfigured()} />
             <LeaveImport />
             <LeaveAdjust
               employees={rows.map(({ e, s }) => ({
@@ -217,7 +234,11 @@ export default async function LeavePage({
         날은 달력에서만 보인다 &nbsp;
         · 달력에서 <b>여러 날 휴가는 날짜별로 펼쳐진다</b> — 주말·공휴일은 건너뛰고, 아직 승인하지
         않은 신청은 <b>⚠ 노란색</b>으로 함께 뜬다 (칩을 누르면 사유와 상태가 나온다) &nbsp;
-        · 병가·경조사는 연차를 깎지 않지만 자리를 비우는 것은 같아 달력에는 나온다.
+        · 병가·경조사는 연차를 깎지 않지만 자리를 비우는 것은 같아 달력에는 나온다 &nbsp;
+        · <b>휴무(주황)</b>는 <b>연차가 아니다</b> — 운영팀이 그 주 토요일 당번 근무 대신 평일 하루를
+        쉬는 것이라 <b>연차 잔여를 깎지 않고</b> 위의 &apos;이 달 연차 사용&apos; 합계에도 들어가지 않는다.
+        구글 연차 캘린더의 <b>(휴무)홍길동</b> 일정에서 가져오며(매시 자동 · <b>휴무 가져오기</b> 로
+        바로 갱신), <b>캘린더가 진실</b>이라 거기서 지우면 여기서도 사라진다.
         </p>
       </details>
     </div>

@@ -323,6 +323,66 @@ export async function deleteLeaveEvent(eventId: string): Promise<boolean> {
   return deleteEvent(process.env.GOOGLE_CALENDAR_ID || "", eventId);
 }
 
+/**
+ * 기간 안의 일정 **읽기**. 이 앱에서 캘린더를 읽는 건 여기뿐이다 —
+ * 나머지는 다 쓰기(만들기·지우기)라 지금까지 필요가 없었다.
+ *
+ * 쓰는 곳: 운영팀 평일 휴무(`(휴무)김수민`)를 연차 캘린더에서 끌어온다(lib/dayoff-service.ts).
+ * 그 일정들은 **사람이 손으로 넣은 것**이라 앱이 만들지 않는다. 읽기만 한다.
+ *
+ * - `singleEvents=true` — 반복 일정을 날짜별로 펴서 준다. 안 켜면 매주 반복 휴무가
+ *   원본 한 줄로만 와서 그 주 하루만 잡힌다.
+ * - **다음 쪽이 있으면 끝까지 따라간다**(`nextPageToken`). 기본 250건이라 석 달치면
+ *   넘길 수 있고, 넘긴 줄이 조용히 사라지면 그 사람 휴무가 통째로 빠진다.
+ * - 실패하면 `null` — **빈 배열이 아니다.** 빈 배열로 돌려주면 호출부가 '휴무가 하나도 없다'
+ *   로 읽고 표를 통째로 지운다.
+ */
+export async function listEvents(
+  calendarId: string,
+  timeMin: string,
+  timeMax: string
+): Promise<any[] | null> {
+  const out: any[] = [];
+  let pageToken: string | undefined;
+  try {
+    // **토큰 발급도 try 안에서** — 키가 깨져 있으면 `createSign` 이 예외를 던진다.
+    // 밖에 두면 그 예외가 그대로 올라가 요청이 500 으로 죽는다. 여기서는 '못 읽었다'(null)가 맞다.
+    const token = await accessToken();
+    if (!token || !calendarId) return null;
+    for (let page = 0; page < 20; page++) {
+      const q = new URLSearchParams({
+        timeMin: `${timeMin}T00:00:00Z`,
+        timeMax: `${timeMax}T23:59:59Z`,
+        singleEvents: "true",
+        orderBy: "startTime",
+        maxResults: "2500",
+      });
+      if (pageToken) q.set("pageToken", pageToken);
+      const res = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${q}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const j: any = await res.json().catch(() => null);
+      if (!res.ok || !j) {
+        console.error("[gcal] 일정 조회 실패:", j?.error?.message ?? `HTTP ${res.status}`);
+        return null;
+      }
+      out.push(...(j.items ?? []));
+      pageToken = j.nextPageToken;
+      if (!pageToken) break;
+    }
+    return out;
+  } catch (e: any) {
+    console.error("[gcal] 일정 조회 예외:", e.message);
+    return null;
+  }
+}
+
+/** 연차 캘린더 — 휴무 일정도 여기에 함께 들어 있다 */
+export async function listLeaveCalendarEvents(timeMin: string, timeMax: string) {
+  return listEvents(process.env.GOOGLE_CALENDAR_ID || "", timeMin, timeMax);
+}
+
 async function deleteEvent(calendarId: string, eventId: string): Promise<boolean> {
   const token = await accessToken();
   if (!token || !eventId || !calendarId) return false;

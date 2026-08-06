@@ -42,6 +42,7 @@ export const ACTION_LABEL: Record<string, string> = {
   HOLIDAY_EDIT: "공휴일 직접 수정",
   NOTIFY_CONTRACT_EXPIRY: "계약 종료 예고 알림",
   NOTIFY_BIRTHDAY: "생일 안내 알림",
+  DAYOFF_SYNC: "평일 휴무 동기화",
 };
 
 /** 되돌리기 어렵거나 돈·개인정보가 오가는 작업 (이력 화면 기본 필터) */

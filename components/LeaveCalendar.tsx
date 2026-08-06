@@ -7,6 +7,7 @@ import {
   LEAVE_DAY_STATUS_LABEL,
   POOL_LABEL,
   type LeaveDay,
+  deductsFromBalance,
   type LeavePool,
 } from "@/lib/leave-calendar";
 import { LEAVE_TYPE_LABEL } from "@/lib/constants";
@@ -24,6 +25,8 @@ function chipTone(d: LeaveDay): string {
     ANNUAL: "bg-brand-100 text-brand-800",
     COMP: "bg-violet-100 text-violet-800",
     UNPAID_POOL: "bg-teal-100 text-teal-800",
+    // 휴무는 연차가 아니라 근무를 옮긴 것이다 — 색으로도 확실히 갈라 둔다
+    DAYOFF: "bg-orange-100 text-orange-800",
   };
   return byPool[d.pool];
 }
@@ -94,8 +97,14 @@ export default function LeaveCalendar({
 
   const prefix = `${year}-${String(month).padStart(2, "0")}`;
   const ofMonth = shown.filter((d) => d.date.startsWith(prefix));
-  const usedDays = ofMonth.reduce((a, d) => a + (d.status === "PENDING" ? 0 : d.days), 0);
+  // **휴무는 합계에서 뺀다** — 연차 잔여를 깎지 않는 근무 이동이라, 여기 섞으면
+  // '이 달 연차를 8.5일 썼다' 가 거짓이 된다. 대신 옆에 따로 센다.
+  const usedDays = ofMonth.reduce(
+    (a, d) => a + (d.status === "PENDING" || !deductsFromBalance(d.pool) ? 0 : d.days),
+    0
+  );
   const pending = ofMonth.filter((d) => d.status === "PENDING").length;
+  const dayOffs = ofMonth.filter((d) => d.pool === "DAYOFF").length;
   const people = new Set(ofMonth.map((d) => d.employeeId)).size;
 
   return (
@@ -143,8 +152,13 @@ export default function LeaveCalendar({
               승인 대기 <b>{pending}건</b>
             </span>
           )}
+          {dayOffs > 0 && (
+            <span className="text-orange-600">
+              휴무 <b>{dayOffs}일</b>
+            </span>
+          )}
           <span className="text-slate-500">
-            이 달 사용 <b className="text-brand-600 tnum">{usedDays}일</b>
+            이 달 연차 사용 <b className="text-brand-600 tnum">{usedDays}일</b>
             <span className="text-slate-400"> · {people}명</span>
           </span>
         </div>
@@ -198,9 +212,10 @@ export default function LeaveCalendar({
                             x.span ? ` (${x.span.index}/${x.span.total}일째)` : ""
                           }`}
                         >
+                          {x.pool === "DAYOFF" && <span>(휴무) </span>}
                           <span className="font-semibold">{x.name}</span>
                           {x.days === 0.5 && <span> 반차</span>}
-                          {x.pool !== "ANNUAL" && <span> {POOL_LABEL[x.pool]}</span>}
+                          {x.pool !== "ANNUAL" && x.pool !== "DAYOFF" && <span> {POOL_LABEL[x.pool]}</span>}
                           {x.status === "PENDING" && " ⚠"}
                         </button>
                       ))}
@@ -217,6 +232,7 @@ export default function LeaveCalendar({
         <span className="pill bg-brand-100 text-brand-800">연차</span>
         <span className="pill bg-violet-100 text-violet-800">대휴</span>
         <span className="pill bg-teal-100 text-teal-800">병가·경조(연차 차감 없음)</span>
+        <span className="pill bg-orange-100 text-orange-800">휴무(연차 아님)</span>
         <span className="pill bg-amber-100 text-amber-800">승인 대기 ⚠</span>
         <span className="pill bg-slate-100 text-slate-500 line-through">취소 요청</span>
       </div>
@@ -238,10 +254,21 @@ export default function LeaveCalendar({
             </div>
             <dl className="text-sm space-y-1.5">
               <Row k="날짜" v={open.date + (open.span ? ` (${open.span.index}/${open.span.total}일째)` : "")} />
-              <Row k="종류" v={`${LEAVE_TYPE_LABEL[open.leaveType] ?? open.leaveType} · ${dayLabel(open.days)}`} />
-              <Row k="차감" v={POOL_LABEL[open.pool] + (open.pool === "UNPAID_POOL" ? " (연차 차감 없음)" : "")} />
-              <Row k="상태" v={LEAVE_DAY_STATUS_LABEL[open.status]} />
-              {open.note && <Row k="사유" v={open.note} />}
+              {open.pool === "DAYOFF" ? (
+                <>
+                  <Row k="종류" v="평일 휴무 — 그 주 토요일 당번 근무의 대체" />
+                  <Row k="차감" v="없음 (연차가 아닙니다)" />
+                  <Row k="출처" v="구글 연차 캘린더" />
+                  {open.note && <Row k="일정" v={open.note} />}
+                </>
+              ) : (
+                <>
+                  <Row k="종류" v={`${LEAVE_TYPE_LABEL[open.leaveType] ?? open.leaveType} · ${dayLabel(open.days)}`} />
+                  <Row k="차감" v={POOL_LABEL[open.pool] + (open.pool === "UNPAID_POOL" ? " (연차 차감 없음)" : "")} />
+                  <Row k="상태" v={LEAVE_DAY_STATUS_LABEL[open.status]} />
+                  {open.note && <Row k="사유" v={open.note} />}
+                </>
+              )}
             </dl>
             <Link
               href={`/leave/${open.employeeId}`}

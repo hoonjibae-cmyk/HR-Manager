@@ -200,6 +200,7 @@ model Employee {
   makeups           MakeupSession[]
   timesheetDays     TimesheetDay[]
   severanceBases    SeveranceMonthlyBase[]
+  dayOffs           DayOff[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -255,6 +256,33 @@ model Contract {
   updatedAt DateTime @updatedAt
 
   @@index([employeeId])
+}
+
+/// 평일 휴무 — **연차가 아니다.**
+///
+/// 운영팀은 그 주 토요일에 당번 근무를 하고 대신 그 주 평일 하루를 쉰다. 근로시간을 옮겨 놓은
+/// 것이라 연차 잔여에서 깎지 않는다. 그래서 `LeaveTransaction`(연차 원장)에 넣지 않고 따로 둔다 —
+/// 원장에 넣으면 `summarizeLeave` 가 훑어 잔여가 조용히 줄어든다.
+///
+/// 원본은 **구글 연차 캘린더의 `(휴무)김수민` 일정**이고 사람이 손으로 넣는다.
+/// 이 표는 그 사본이라 동기화가 **캘린더에서 사라진 줄을 지운다**(공휴일 표와 반대다).
+model DayOff {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date       DateTime
+
+  /// 캘린더 제목 원문 — 사람이 눈으로 대조할 수 있게 그대로 남긴다
+  title       String?
+  gcalEventId String?
+  /// GCAL(캘린더에서 가져옴) | MANUAL(관리자가 직접 넣음 — 동기화가 지우지 않는다)
+  source      String  @default("GCAL")
+  note        String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([employeeId, date])
+  @@index([date])
 }
 
 /// 경영지원 알림 설정 — 계약 종료 예고 · 생일 (단일 행, id=1)

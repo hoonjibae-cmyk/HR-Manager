@@ -45,9 +45,24 @@ export interface LeaveTxnInput {
   requestId?: number | null;
 }
 
+/**
+ * 평일 휴무 — 구글 캘린더의 `(휴무)김수민` 에서 온다(lib/dayoff.ts).
+ * **연차 원장과 아예 다른 표**라 따로 받는다.
+ */
+export interface DayOffInput {
+  id: number;
+  employeeId: number;
+  name: string;
+  department: string | null;
+  /** YYYY-MM-DD */
+  date: string;
+  title?: string | null;
+}
+
 export interface LeaveCalendarInput {
   requests: LeaveRequestInput[];
   txns: LeaveTxnInput[];
+  dayOffs?: DayOffInput[];
   /** 공휴일 YYYY-MM-DD — 신청 기간을 펼칠 때 건너뛴다 */
   holidays?: string[];
 }
@@ -74,10 +89,20 @@ export interface LeaveDay {
   span: { index: number; total: number } | null;
 }
 
-/** 달력 색을 가르는 축 — 연차 주머니에서 깎이는지가 실무에서 가장 먼저 궁금하다 */
-export type LeavePool = "ANNUAL" | "COMP" | "UNPAID_POOL";
+/**
+ * 달력 색을 가르는 축 — 연차 주머니에서 깎이는지가 실무에서 가장 먼저 궁금하다.
+ *
+ * `DAYOFF` 는 **연차가 아니다** — 운영팀이 그 주 토요일 당번 근무 대신 평일 하루를 쉬는 것으로,
+ * 근로시간을 옮긴 것이라 잔여에서 깎지 않는다. 달력에는 나오지만 **'이 달 사용' 합계에서는 빠진다**.
+ */
+export type LeavePool = "ANNUAL" | "COMP" | "UNPAID_POOL" | "DAYOFF";
 /** `RECORDED` = 신청서 없이 관리자가 원장에 바로 반영한 것 */
 export type LeaveStatus = "PENDING" | "APPROVED" | "CANCEL_PENDING" | "RECORDED";
+
+/** 연차 잔여를 깎는 주머니인가 — 합계·차감 표시를 가르는 하나뿐인 판정 */
+export function deductsFromBalance(pool: LeavePool): boolean {
+  return pool === "ANNUAL" || pool === "COMP";
+}
 
 /** 연차 잔여에서 깎지 않는 종류 (lib/leave-service.ts 의 NON_DEDUCTIBLE_TYPES 와 같은 뜻) */
 const NON_DEDUCTIBLE = new Set(["SICK", "SPECIAL"]);
@@ -92,6 +117,7 @@ export const POOL_LABEL: Record<LeavePool, string> = {
   ANNUAL: "연차",
   COMP: "대휴",
   UNPAID_POOL: "병가·경조",
+  DAYOFF: "휴무",
 };
 
 export const LEAVE_DAY_STATUS_LABEL: Record<LeaveStatus, string> = {
@@ -187,6 +213,24 @@ export function buildLeaveCalendar(input: LeaveCalendarInput): LeaveDay[] {
       span: null,
     });
   }
+
+  // 평일 휴무 — 이미 날짜별로 한 줄씩이라 펼칠 것이 없다.
+  // **연차가 아니므로** 신청서·원장과 겹칠 일도 없다(다른 표에서 온다).
+  for (const d of input.dayOffs ?? [])
+    out.push({
+      key: `off-${d.id}`,
+      date: d.date,
+      employeeId: d.employeeId,
+      name: d.name,
+      department: d.department,
+      days: 1,
+      pool: "DAYOFF",
+      leaveType: "DAYOFF",
+      status: "RECORDED",
+      requestId: null,
+      note: d.title ?? null,
+      span: null,
+    });
 
   return sortLeaveDays(out);
 }

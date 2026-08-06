@@ -3,6 +3,7 @@ import { runDueSchedules } from "@/lib/scheduler";
 import { runMakeupConfirmReminders } from "@/lib/makeup-service";
 import { holidayStatus, holidayApiConfigured, syncHolidays } from "@/lib/holiday-service";
 import { runHrNotices } from "@/lib/hr-notify-service";
+import { syncDayOffs } from "@/lib/dayoff-service";
 
 export const dynamic = "force-dynamic";
 // Vercel Pro: 함수 최대 실행시간 300초 (인원이 많아도 한 번에 발송 가능)
@@ -70,7 +71,16 @@ async function handle(req: Request) {
     hrNotices = await runHrNotices(new Date()).catch((e) => ({ error: String(e?.message ?? e) }));
   }
 
-  return NextResponse.json({ ...result, makeupReminders, holidaySync, hrNotices });
+  // 평일 휴무 — 구글 연차 캘린더의 `(휴무)홍길동` 일정을 끌어온다.
+  // **매시 돌린다** — 아침에 캘린더에 넣은 휴무가 한 시간 안에 달력에 뜨는 편이 낫고,
+  // 조회 한 번이라 비용이 사실상 없다. 캘린더를 못 읽으면 표를 건드리지 않는다(빈 목록으로
+  // 오해해 지우지 않게, lib/dayoff-service.ts).
+  let dayOffSync: any = null;
+  if (!dryRun) {
+    dayOffSync = await syncDayOffs(new Date()).catch((e) => ({ error: String(e?.message ?? e) }));
+  }
+
+  return NextResponse.json({ ...result, makeupReminders, holidaySync, hrNotices, dayOffSync });
 }
 
 export async function GET(req: Request) {

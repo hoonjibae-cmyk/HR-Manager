@@ -9,6 +9,7 @@ import {
   blockRangeLabel,
   poolOf,
   leaveAmountLabel,
+  deductsFromBalance,
   type LeaveRequestInput,
   type LeaveTxnInput,
 } from "./leave-calendar";
@@ -325,5 +326,73 @@ describe("종류·일수 문구", () => {
     expect(leaveAmountLabel("COMP", 1, "대휴(보상)")).toBe("대휴(보상) 1일");
     // 대휴 반차처럼 종류가 '반차' 가 아닌 반나절도 제대로 읽힌다
     expect(leaveAmountLabel("COMP", 0.5, "대휴(보상)")).toBe("대휴(보상) 반차");
+  });
+});
+
+/* ───────────── 평일 휴무 — 연차가 아니다 ───────────── */
+
+describe("평일 휴무는 달력에 나오되 연차가 아니다", () => {
+  const off = (o: any = {}) => ({
+    id: 1,
+    employeeId: 9,
+    name: "김수민",
+    department: "교육운영팀",
+    date: "2026-08-12",
+    title: "(휴무)김수민",
+    ...o,
+  });
+
+  it("달력에 한 줄로 나온다", () => {
+    const out = buildLeaveCalendar({ requests: [], txns: [], dayOffs: [off()] });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ date: "2026-08-12", name: "김수민", pool: "DAYOFF" });
+  });
+
+  it("**연차 주머니에서 깎이지 않는다** — 합계·차감 판정이 이 하나로 갈린다", () => {
+    expect(deductsFromBalance("DAYOFF")).toBe(false);
+    expect(deductsFromBalance("ANNUAL")).toBe(true);
+    expect(deductsFromBalance("COMP")).toBe(true);
+    expect(deductsFromBalance("UNPAID_POOL")).toBe(false);
+  });
+
+  it("연차·대휴와 한 날에 섞여도 각자 제 주머니로 남는다", () => {
+    const out = buildLeaveCalendar({
+      requests: [req({ startDate: "2026-08-12", endDate: "2026-08-12" })],
+      txns: [txn({ date: "2026-08-12", category: "COMP" })],
+      dayOffs: [off()],
+    });
+    expect(out.map((d) => d.pool).sort()).toEqual(["ANNUAL", "COMP", "DAYOFF"]);
+  });
+
+  it("신청서·원장과 겹쳐 세지 않는다 (다른 표에서 온다)", () => {
+    const out = buildLeaveCalendar({
+      requests: [req({ id: 5, startDate: "2026-08-12", endDate: "2026-08-12" })],
+      txns: [txn({ date: "2026-08-12", days: -1, requestId: 5 })],
+      dayOffs: [off()],
+    });
+    // 연차 한 줄 + 휴무 한 줄. 원장은 신청서의 그림자라 빠진다
+    expect(out).toHaveLength(2);
+  });
+
+  it("휴무만 있는 날도 '그날 자리에 없는 사람' 으로 잡힌다", () => {
+    const days = buildLeaveCalendar({ requests: [], txns: [], dayOffs: [off({ date: "2026-08-11" })] });
+    const up = upcomingLeave(days, new Date("2026-08-10T09:00:00Z"));
+    expect(up).toHaveLength(1);
+    expect(up[0].pool).toBe("DAYOFF");
+  });
+
+  it("연달아 붙은 휴무는 한 줄로 묶이되 연차와 섞이지 않는다", () => {
+    const days = buildLeaveCalendar({
+      requests: [],
+      txns: [],
+      dayOffs: [off({ id: 1, date: "2026-08-12" }), off({ id: 2, date: "2026-08-13" })],
+    });
+    const b = groupConsecutive(days);
+    expect(b).toHaveLength(1);
+    expect(b[0].pool).toBe("DAYOFF");
+  });
+
+  it("휴무를 안 넘기면 예전과 똑같이 돈다 (선택 입력이다)", () => {
+    expect(buildLeaveCalendar({ requests: [req()], txns: [] })).toHaveLength(1);
   });
 });
