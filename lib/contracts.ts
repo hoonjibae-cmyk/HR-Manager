@@ -72,7 +72,22 @@ export function templateKeyOf(payScheme: string): string {
   }
 }
 
-/** templateKey → 급여형태 (역변환) */
+/**
+ * templateKey → 급여형태. **모르는 종류면 null** 을 돌려준다.
+ *
+ * `paySchemeOf` 는 모르는 값을 조용히 MONTHLY 로 떨어뜨린다 — 화면 기본값으로는 쓸 만하지만,
+ * 보수를 계산할 때 그러면 시급제 계약이 월급제로 읽혀 금액이 통째로 틀어진다.
+ * 계산하는 자리에서는 이쪽을 쓰고 null 이면 직원 카드로 물러난다(`?? employee.payScheme`).
+ */
+export function paySchemeOfTemplate(templateKey: string): string | null {
+  if (templateKey === "INCENTIVE") return "INCENTIVE";
+  if (templateKey === "RATIO") return "RATIO";
+  if (templateKey === "HOURLY") return "HOURLY";
+  if (templateKey === "MONTHLY" || templateKey === "REGULAR") return "MONTHLY";
+  return null;
+}
+
+/** templateKey → 급여형태 (역변환). 모르는 종류는 MONTHLY 로 본다 */
 export function paySchemeOf(templateKey: string): string {
   switch (templateKey) {
     case "HOURLY":

@@ -199,6 +199,7 @@ model Employee {
   documents         Document[]
   makeups           MakeupSession[]
   timesheetDays     TimesheetDay[]
+  severanceBases    SeveranceMonthlyBase[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -649,4 +650,34 @@ model SeverancePolicy {
   includeMealCar       Boolean @default(true) // 비과세지만 정기·일률 지급이면 임금이다
 
   updatedAt DateTime @updatedAt
+}
+
+/// 월별 퇴직급여 **산정기준 임금** — 급여 레코드에서 나오지 않는 달을 메우거나 사람이 고친 값.
+///
+/// 퇴직급여는 원래 그 달 급여에서 파생되지만(lib/severance-service.ts), 두 경우에 이게 필요하다:
+///  · **도입 이전 기간** — 시스템에 급여 레코드가 없던 달. 계약 이력에서 추산해 넣는다(ESTIMATED).
+///  · **관리자 정정** — 추산이 틀렸거나 계약에 안 잡히는 사정이 있을 때 직접 고친다(MANUAL).
+///
+/// 우선순위는 **MANUAL > 급여 레코드 > ESTIMATED** 다. 사람이 고친 값이 가장 세고,
+/// 실제 급여가 있으면 추산보다 그쪽이 맞다 — 추산은 '급여가 없을 때 메우는 값' 이기 때문이다.
+model SeveranceMonthlyBase {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  year  Int
+  month Int
+  /// 산정기준 임금(원). 월 적립액 = 이 값 ÷ 12
+  base  Int
+
+  /// ESTIMATED(계약에서 추산 — 마이그레이션) | MANUAL(관리자가 직접 지정)
+  source String  @default("MANUAL")
+  /// 어떻게 나온 값인지 (추산 근거·정정 사유). 화면에 그대로 띄운다
+  note   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([employeeId, year, month])
+  @@index([employeeId])
 }

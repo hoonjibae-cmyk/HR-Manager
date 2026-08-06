@@ -74,8 +74,15 @@ export interface SeveranceRow {
   /** DC 부담금이 시작되는 날 (YYYY-MM-DD) */
   dcStartsAt: string;
 
-  /** 이 달 급여가 아직 없으면 true — 금액은 0이고 '급여 미산정' 으로 표시한다 */
+  /** 이 달 산정기준이 아무것도 없으면 true — 금액은 0이고 '급여 미산정' 으로 표시한다 */
   noPayroll: boolean;
+  /**
+   * 이 달 산정기준 임금이 어디서 왔는가.
+   * MANUAL(관리자 지정) > PAYROLL(그 달 급여) > ESTIMATED(계약 추산) > NONE
+   */
+  baseSource: "MANUAL" | "PAYROLL" | "ESTIMATED" | "NONE";
+  /** 지정·추산값의 근거·사유 (급여에서 나온 달은 빈 문자열) */
+  baseNote: string;
   /** 이 달 급여가 발송(SENT)돼 확정된 상태인가 */
   payrollSent: boolean;
   /** 이 달 산정기준 임금 */
@@ -98,6 +105,8 @@ export interface SeveranceRow {
   cumulativeProvision: number;
   /** DC 부담금 누계 */
   cumulativeDc: number;
+  /** 누계에 섞인 '계약 추산' 달 수 — 실제 급여가 아니라는 것을 화면이 알려야 한다 */
+  estimatedMonths: number;
 }
 
 function serviceLabelOf(hireDate: Date, asOf: Date): { label: string; months: number } {
@@ -136,17 +145,18 @@ export async function severanceMonth(year: number, month: number) {
     return { rows: [] as SeveranceRow[], policy, totals: emptyTotals(), warnings: [] as string[] };
 
   const ids = emps.map((e) => e.id);
-  // 누계를 위해 **입사 이후 전체** 급여 레코드를 읽는다 (이 달치는 그중 하나)
-  const all = await prisma.payrollRecord.findMany({
-    where: { employeeId: { in: ids } },
-    orderBy: [{ year: "asc" }, { month: "asc" }],
-  });
-  const byEmp = new Map<number, typeof all>();
-  for (const r of all) {
-    const arr = byEmp.get(r.employeeId) ?? [];
-    arr.push(r);
-    byEmp.set(r.employeeId, arr);
-  }
+  // 누계를 위해 **입사 이후 전체**를 읽는다 (이 달치는 그중 하나)
+  const [all, overrides] = await Promise.all([
+    prisma.payrollRecord.findMany({
+      where: { employeeId: { in: ids } },
+      orderBy: [{ year: "asc" }, { month: "asc" }],
+    }),
+    prisma.severanceMonthlyBase.findMany({ where: { employeeId: { in: ids } } }),
+  ]);
+  const payrollAt = new Map<string, (typeof all)[number]>();
+  for (const r of all) payrollAt.set(`${r.employeeId}:${r.year}:${r.month}`, r);
+  const baseAt = new Map<string, (typeof overrides)[number]>();
+  for (const o of overrides) baseAt.set(`${o.employeeId}:${o.year}:${o.month}`, o);
 
   const rows: SeveranceRow[] = [];
   const warnings: string[] = [];
@@ -163,32 +173,72 @@ export async function severanceMonth(year: number, month: number) {
     };
     const v = severanceVerdict(subject, asOf, policy);
     const svc = serviceLabelOf(e.hireDate, asOf);
-
-    const records = byEmp.get(e.id) ?? [];
-    const thisMonth = records.find((r) => r.year === year && r.month === month);
-
-    // 이 달
-    const items = thisMonth ? payItemsOf(thisMonth) : payItemsOf({});
-    const b = severanceBase(items, policy);
     const accrues = v.status === "DC" || v.status === "PROVISION";
-    const amount = accrues && thisMonth ? monthlyAccrual(b.base, policy) : 0;
-    const warning = accrues && thisMonth ? underMinimumWarning(b, policy) : null;
+
+    /**
+     * 한 달의 산정기준 임금 — **MANUAL > 급여 레코드 > ESTIMATED**.
+     *
+     * 사람이 고친 값이 가장 세고, 실제 급여가 있으면 추산보다 그쪽이 맞다
+     * (추산은 '급여가 없을 때 메우는 값' 이므로 실제 급여를 이기면 안 된다).
+     */
+    const resolve = (
+      y: number,
+      m: number
+    ): {
+      base: number;
+      source: SeveranceRow["baseSource"];
+      note: string;
+      rec?: (typeof all)[number];
+      breakdown?: ReturnType<typeof severanceBase>;
+    } => {
+      const key = `${e.id}:${y}:${m}`;
+      const rec = payrollAt.get(key);
+      const ov = baseAt.get(key);
+      if (ov?.source === "MANUAL")
+        return { base: ov.base, source: "MANUAL", note: ov.note ?? "", rec };
+      if (rec) {
+        const b = severanceBase(payItemsOf(rec), policy);
+        return { base: b.base, source: "PAYROLL", note: "", rec, breakdown: b };
+      }
+      if (ov) return { base: ov.base, source: "ESTIMATED", note: ov.note ?? "" };
+      return { base: 0, source: "NONE", note: "" };
+    };
+
+    // --- 이 달 ---
+    const cur = resolve(year, month);
+    const b = cur.breakdown ?? severanceBase(payItemsOf(cur.rec ?? {}), policy);
+    const amount = accrues && cur.source !== "NONE" ? monthlyAccrual(cur.base, policy) : 0;
+    // 경고는 급여 레코드로 산정한 달에만 뜻이 있다 — 지정·추산값은 항목별 내역이 없다
+    const warning =
+      accrues && cur.source === "PAYROLL" ? underMinimumWarning(b, policy) : null;
     if (warning) warnings.push(`${e.name}: ${warning}`);
 
-    // 누계 — 각 달의 단계를 그 달 기준으로 다시 판정한다.
-    // 지금 대상이 아닌 사람(위탁·초단시간)은 과거분도 쌓지 않는다: 판정이 바뀌었다면
-    // 그 사실을 화면에서 보고 사람이 처리할 일이지, 조용히 소급해 쌓을 일이 아니다.
+    // --- 누계 — 입사한 달부터 이 달까지 **모든 달**을 돈다 ---
+    // 급여 레코드만 훑으면 도입 이전(추산으로 메운) 달이 통째로 빠진다.
+    // 각 달의 단계는 그 달 기준으로 다시 판정한다. 지금 대상이 아닌 사람(위탁·초단시간)은
+    // 과거분도 쌓지 않는다: 판정이 바뀌었다면 화면에서 보고 사람이 처리할 일이다.
     let cumulativeProvision = 0;
     let cumulativeDc = 0;
+    let estimatedMonths = 0;
     if (accrues) {
-      for (const r of records) {
-        if (r.year > year || (r.year === year && r.month > month)) break;
-        const rEnd = monthEnd(r.year, r.month);
-        const rv = severanceVerdict(subject, rEnd, policy);
-        if (rv.status !== "DC" && rv.status !== "PROVISION") continue;
-        const amt = monthlyAccrual(severanceBase(payItemsOf(r), policy).base, policy);
-        if (rv.status === "DC") cumulativeDc += amt;
-        else cumulativeProvision += amt;
+      let y = e.hireDate.getUTCFullYear();
+      let m = e.hireDate.getUTCMonth() + 1;
+      while (y < year || (y === year && m <= month)) {
+        const r = resolve(y, m);
+        if (r.source !== "NONE") {
+          const rv = severanceVerdict(subject, monthEnd(y, m), policy);
+          if (rv.status === "DC" || rv.status === "PROVISION") {
+            const amt = monthlyAccrual(r.base, policy);
+            if (rv.status === "DC") cumulativeDc += amt;
+            else cumulativeProvision += amt;
+            if (r.source === "ESTIMATED") estimatedMonths++;
+          }
+        }
+        m += 1;
+        if (m > 12) {
+          m = 1;
+          y += 1;
+        }
       }
     }
 
@@ -206,18 +256,24 @@ export async function severanceMonth(year: number, month: number) {
       status: v.status,
       statusReason: v.reason,
       dcStartsAt: ymd(v.dcStartsAt),
-      noPayroll: !thisMonth,
-      payrollSent: thisMonth?.status === "SENT",
-      base: thisMonth ? b.base : 0,
+      noPayroll: cur.source === "NONE",
+      payrollSent: cur.rec?.status === "SENT",
+      baseSource: cur.source,
+      baseNote: cur.note,
+      base: cur.base,
       amount,
-      note: thisMonth ? accrualNote(b, amount, v.status === "DC" ? "DC" : "PROVISION", policy) : "",
-      included: thisMonth ? b.included : [],
-      excluded: thisMonth ? b.excluded : [],
+      note:
+        cur.source === "PAYROLL"
+          ? accrualNote(b, amount, v.status === "DC" ? "DC" : "PROVISION", policy)
+          : cur.note,
+      included: cur.source === "PAYROLL" ? b.included : [],
+      excluded: cur.source === "PAYROLL" ? b.excluded : [],
       warning,
-      retention: thisMonth?.retentionD ?? 0,
+      retention: cur.rec?.retentionD ?? 0,
       cumulative: cumulativeProvision + cumulativeDc,
       cumulativeProvision,
       cumulativeDc,
+      estimatedMonths,
     });
   }
 
@@ -238,6 +294,10 @@ export interface SeveranceTotals {
   excludedCount: number;
   unknownCount: number;
   noPayrollCount: number;
+  /** 이 달 기준급여가 '계약 추산' 인 인원 — 실제 급여가 아니라는 것을 화면이 알려야 한다 */
+  estimatedCount: number;
+  /** 이 달 기준급여를 관리자가 직접 지정한 인원 */
+  manualCount: number;
 }
 
 const emptyTotals = (): SeveranceTotals => ({
@@ -250,6 +310,8 @@ const emptyTotals = (): SeveranceTotals => ({
   excludedCount: 0,
   unknownCount: 0,
   noPayrollCount: 0,
+  estimatedCount: 0,
+  manualCount: 0,
 });
 
 function totalsOf(rows: SeveranceRow[]): SeveranceTotals {
@@ -265,7 +327,11 @@ function totalsOf(rows: SeveranceRow[]): SeveranceTotals {
     else t.excludedCount++;
     t.retention += r.retention;
     t.provisionCumulative += r.cumulativeProvision;
-    if (r.noPayroll && (r.status === "DC" || r.status === "PROVISION")) t.noPayrollCount++;
+    if (r.status === "DC" || r.status === "PROVISION") {
+      if (r.baseSource === "NONE") t.noPayrollCount++;
+      else if (r.baseSource === "ESTIMATED") t.estimatedCount++;
+      else if (r.baseSource === "MANUAL") t.manualCount++;
+    }
   }
   return t;
 }

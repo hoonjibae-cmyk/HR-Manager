@@ -251,6 +251,100 @@ export function overtimeSplit(p: SeverancePayItems) {
   return { fixed: fixedOvertimeOf(p), variable: variableOvertimeOf(p) };
 }
 
+/* ───────────── 계약에서 산정기준 임금 추산 ───────────── */
+
+/** 추산에 쓰는 계약 보수조건 (Contract 또는 직원 카드의 스냅샷) */
+export interface ContractWageTerms {
+  payScheme: string;
+  /** 월급제·인센티브 = 월 지급 총액(식대·차량·약정OT 포함) · 시급제 = 시급 */
+  baseWage: number;
+  positionAllow: number;
+  mealAllow: number;
+  carAllow: number;
+  isContractor: boolean;
+}
+
+export interface ContractBaseEstimate {
+  base: number;
+  /** 어떻게 나온 값인지 — 화면·이력에 그대로 남긴다 */
+  note: string;
+  /** 대상이 아니라 추산하지 않은 경우 */
+  excluded: boolean;
+}
+
+/** 한 달 주수 — 급여 엔진과 같은 값을 써야 시급제 추산이 어긋나지 않는다 */
+const WEEKS_PER_MONTH = 4.345;
+
+/**
+ * **계약서에 합의된 월 급여총액**을 계약 보수조건에서 추산한다.
+ *
+ * 급여 레코드가 없던 달(시스템 도입 이전)의 퇴직급여를 메우기 위한 것이다.
+ * 실제 급여에서 뽑은 `severanceBase()` 와 **같은 금액이 나와야** 두 방식이 섞여도 누계가 매끄럽다.
+ *
+ *  · **월급제·인센티브** — `baseWage` 가 이미 월 지급 총액이고 식대·차량유지비와
+ *    **포괄임금 약정 시간외·야간이 그 안에 들어 있다**(`inclusiveWageBreakdown`).
+ *    그래서 따로 더하지 않고 직책수당만 가산한다 — 직책수당은 총액 밖의 별도 항목이다.
+ *  · **시급제** — 시급 × (주 소정 + 주휴) × 4.345 로 월 환산하고, 식대·차량은 별도 가산이다
+ *    (기본급 개념이 달라 총액에 포함돼 있지 않다).
+ *  · **위탁계약·완전비율제** — 퇴직급여 대상이 아니라 추산하지 않는다.
+ *
+ * ⚠ **추산은 만근 가정**이다. 결근·중도 입퇴사·그 달만의 조정은 반영되지 않는다.
+ * 일할계산은 호출부가 `prorate` 로 넘긴다.
+ */
+export function estimateContractBase(
+  t: ContractWageTerms,
+  opts: {
+    /** 주 소정근로시간 (근로시간표에서) — 시급제 환산에 쓴다 */
+    weeklyContractual?: number;
+    /** 주휴시간 — 시급제 환산에 쓴다 */
+    weeklyHoliday?: number;
+    /** 재직비율 (월중 입·퇴사). 1 이면 만근 */
+    prorate?: number;
+  } = {}
+): ContractBaseEstimate {
+  const prorate = Math.min(Math.max(opts.prorate ?? 1, 0), 1);
+  const won = (n: number) => Math.round(n).toLocaleString("ko-KR");
+
+  if (t.isContractor || t.payScheme === "RATIO")
+    return { base: 0, note: "위탁계약(프리랜서) — 퇴직급여 대상 아님", excluded: true };
+
+  let full: number;
+  let how: string;
+
+  if (t.payScheme === "HOURLY") {
+    const weekly = Math.max(opts.weeklyContractual ?? 0, 0);
+    const holiday = Math.max(opts.weeklyHoliday ?? 0, 0);
+    if (weekly <= 0)
+      return {
+        base: 0,
+        note: "근로시간표가 없어 시급제 월 환산을 할 수 없습니다 — 근로시간표를 넣고 다시 추산하세요.",
+        excluded: false,
+      };
+    const monthHours = (weekly + holiday) * WEEKS_PER_MONTH;
+    full = Math.round(t.baseWage * monthHours) + t.positionAllow + t.mealAllow + t.carAllow;
+    how =
+      `시급 ${won(t.baseWage)}원 × (주 소정 ${weekly}h + 주휴 ${
+        Math.round(holiday * 100) / 100
+      }h) × ${WEEKS_PER_MONTH}주` +
+      (t.positionAllow ? ` + 직책수당 ${won(t.positionAllow)}원` : "") +
+      (t.mealAllow ? ` + 식대 ${won(t.mealAllow)}원` : "") +
+      (t.carAllow ? ` + 차량유지비 ${won(t.carAllow)}원` : "");
+  } else {
+    // 월급제·인센티브 — baseWage 가 곧 월 지급 총액(식대·차량·약정OT 포함)
+    full = t.baseWage + t.positionAllow;
+    how =
+      `계약 월 급여총액 ${won(t.baseWage)}원(식대·차량유지비·포괄임금 약정분 포함)` +
+      (t.positionAllow ? ` + 직책수당 ${won(t.positionAllow)}원` : "");
+  }
+
+  const base = Math.round(full * prorate);
+  const note =
+    prorate < 1
+      ? `계약 추산: ${how} = ${won(full)}원 × 재직비율 ${(prorate * 100).toFixed(1)}% = ${won(base)}원`
+      : `계약 추산: ${how} = ${won(base)}원`;
+  return { base, note, excluded: false };
+}
+
 /**
  * 월 적립액 = 산정기준 임금 ÷ 12.
  *

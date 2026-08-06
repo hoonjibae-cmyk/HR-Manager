@@ -8,6 +8,8 @@ import {
   accrualNote,
   underMinimumWarning,
   overtimeSplit,
+  estimateContractBase,
+  type ContractWageTerms,
   type SeverancePayItems,
   type SeveranceSubject,
 } from "./severance";
@@ -276,5 +278,85 @@ describe("underMinimumWarning — 법정 하한 미달 소지", () => {
     const w = underMinimumWarning(severanceBase(withVariable(), p), p)!;
     expect(w).toContain("포괄임금 약정");
     expect(w).toContain("계약 월 급여총액보다 적어지므로");
+  });
+});
+
+/* ───────────── 계약에서 산정기준 임금 추산 ───────────── */
+
+const terms = (over: Partial<ContractWageTerms> = {}): ContractWageTerms => ({
+  payScheme: "MONTHLY",
+  baseWage: 3_400_000, // 월 지급 총액 (식대 20만·약정OT 포함)
+  positionAllow: 200_000,
+  mealAllow: 200_000,
+  carAllow: 0,
+  isContractor: false,
+  ...over,
+});
+
+describe("estimateContractBase — 급여 레코드가 없던 달 메우기", () => {
+  it("월급제: 월 급여총액 + 직책수당 (식대는 총액 안에 있어 더하지 않는다)", () => {
+    const e = estimateContractBase(terms());
+    // 식대 20만을 또 더하면 3,800,000 이 되어 계약 총액과 어긋난다
+    expect(e.base).toBe(3_600_000);
+    expect(e.excluded).toBe(false);
+  });
+
+  it("인센티브 계약도 월급제와 같다 (인센티브는 산입 대상이 아니다)", () => {
+    expect(estimateContractBase(terms({ payScheme: "INCENTIVE" })).base).toBe(3_600_000);
+  });
+
+  it("**실제 급여에서 뽑은 값과 같은 금액이 나온다** — 두 방식이 섞여도 누계가 매끄럽다", () => {
+    // 계약: 월 총액 340만(식대 20만 + 약정 시간외 30만 포함) + 직책수당 20만
+    const fromContract = estimateContractBase(terms());
+    // 같은 계약으로 산정된 급여 레코드
+    const fromPayroll = severanceBase(
+      pay({
+        baseP: 2_900_000, // 340만 − 식대 20만 − 약정 시간외 30만
+        mealP: 200_000,
+        positionP: 200_000,
+        overtimeP: 300_000,
+        hourlyWage: 20_000,
+      })
+    );
+    expect(fromPayroll.base).toBe(fromContract.base);
+  });
+
+  it("시급제: 시급 × (주 소정 + 주휴) × 4.345 + 식대·차량은 별도 가산", () => {
+    const e = estimateContractBase(
+      terms({ payScheme: "HOURLY", baseWage: 15_000, positionAllow: 0, mealAllow: 100_000 }),
+      { weeklyContractual: 20, weeklyHoliday: 4 }
+    );
+    // 15,000 × 24 × 4.345 = 1,564,200
+    expect(e.base).toBe(1_564_200 + 100_000);
+  });
+
+  it("시급제인데 근로시간표가 없으면 추산하지 않고 사유를 남긴다", () => {
+    const e = estimateContractBase(terms({ payScheme: "HOURLY", baseWage: 15_000 }), {});
+    expect(e.base).toBe(0);
+    expect(e.note).toContain("근로시간표가 없어");
+    expect(e.excluded).toBe(false); // 대상 제외가 아니라 '지금은 못 구한다'
+  });
+
+  it("위탁계약·완전비율제는 추산하지 않는다", () => {
+    expect(estimateContractBase(terms({ isContractor: true })).excluded).toBe(true);
+    expect(estimateContractBase(terms({ payScheme: "RATIO" })).excluded).toBe(true);
+  });
+
+  it("재직비율을 넘기면 일할계산한다 (입·퇴사월)", () => {
+    const e = estimateContractBase(terms(), { prorate: 0.5 });
+    expect(e.base).toBe(1_800_000);
+    expect(e.note).toContain("재직비율 50.0%");
+  });
+
+  it("근거를 문장으로 남긴다 — 나중에 왜 이 금액인지 알 수 있어야 한다", () => {
+    const e = estimateContractBase(terms());
+    expect(e.note).toContain("계약 추산");
+    expect(e.note).toContain("3,400,000원");
+    expect(e.note).toContain("직책수당 200,000원");
+  });
+
+  it("재직비율이 0이나 1을 벗어나면 잘라 낸다", () => {
+    expect(estimateContractBase(terms(), { prorate: -1 }).base).toBe(0);
+    expect(estimateContractBase(terms(), { prorate: 3 }).base).toBe(3_600_000);
   });
 });

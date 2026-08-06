@@ -5,12 +5,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const employees: any[] = [];
 const payrolls: any[] = [];
+const bases: any[] = [];
 let policyRow: any;
 
 vi.mock("./db", () => ({
   prisma: {
     employee: { findMany: async () => employees },
     payrollRecord: { findMany: async () => payrolls },
+    severanceMonthlyBase: { findMany: async () => bases },
     severancePolicy: { upsert: async () => policyRow },
   },
 }));
@@ -74,9 +76,21 @@ const rec = (year: number, month: number, over: any = {}) => ({
   ...over,
 });
 
+/** 월별 산정기준 임금 (관리자 지정 또는 계약 추산) */
+const base = (year: number, month: number, over: any = {}) => ({
+  employeeId: 1,
+  year,
+  month,
+  base: 3_000_000,
+  source: "ESTIMATED",
+  note: "계약 추산",
+  ...over,
+});
+
 beforeEach(() => {
   employees.length = 0;
   payrolls.length = 0;
+  bases.length = 0;
   policyRow = {
     id: 1,
     dcAfterMonths: 12,
@@ -269,5 +283,102 @@ describe("합계", () => {
     expect(totals.provisionCount).toBe(1);
     expect(totals.dc).toBe(283_333);
     expect(totals.provision).toBe(283_333);
+  });
+});
+
+describe("산정기준 임금의 출처 — MANUAL > 급여 레코드 > ESTIMATED", () => {
+  it("급여가 없으면 추산값을 쓴다 (도입 이전 달)", async () => {
+    employees.push(emp());
+    bases.push(base(2026, 6, { base: 3_000_000 }));
+    const r = (await severanceMonth(2026, 6)).rows[0];
+    expect(r.baseSource).toBe("ESTIMATED");
+    expect(r.base).toBe(3_000_000);
+    expect(r.amount).toBe(250_000);
+    expect(r.noPayroll).toBe(false); // 메워졌으니 '미산정' 이 아니다
+  });
+
+  it("급여가 있으면 추산보다 급여가 이긴다", async () => {
+    // 추산은 '급여가 없을 때 메우는 값' 이라 실제 급여를 이기면 안 된다
+    employees.push(emp());
+    payrolls.push(rec(2026, 6));
+    bases.push(base(2026, 6, { base: 9_000_000 }));
+    const r = (await severanceMonth(2026, 6)).rows[0];
+    expect(r.baseSource).toBe("PAYROLL");
+    expect(r.base).toBe(3_400_000);
+  });
+
+  it("관리자가 지정하면 급여 레코드도 이긴다", async () => {
+    employees.push(emp());
+    payrolls.push(rec(2026, 6));
+    bases.push(base(2026, 6, { base: 5_000_000, source: "MANUAL", note: "세무사 확인분" }));
+    const r = (await severanceMonth(2026, 6)).rows[0];
+    expect(r.baseSource).toBe("MANUAL");
+    expect(r.base).toBe(5_000_000);
+    expect(r.baseNote).toBe("세무사 확인분");
+    expect(r.amount).toBe(416_667);
+  });
+
+  it("아무것도 없으면 '급여 미산정' 이다", async () => {
+    employees.push(emp());
+    const r = (await severanceMonth(2026, 6)).rows[0];
+    expect(r.baseSource).toBe("NONE");
+    expect(r.noPayroll).toBe(true);
+    expect(r.amount).toBe(0);
+  });
+
+  it("지정·추산값에는 항목별 내역이 없어 법정 하한 경고를 띄우지 않는다", async () => {
+    employees.push(emp());
+    bases.push(base(2026, 6, { source: "MANUAL" }));
+    expect((await severanceMonth(2026, 6)).rows[0].warning).toBeNull();
+  });
+
+  it("합계가 출처별 인원을 센다", async () => {
+    employees.push(
+      emp({ id: 1, name: "급여있음" }),
+      emp({ id: 2, empNo: "b", name: "추산" }),
+      emp({ id: 3, empNo: "c", name: "지정" })
+    );
+    payrolls.push(rec(2026, 6, { employeeId: 1 }));
+    bases.push(
+      base(2026, 6, { employeeId: 2 }),
+      base(2026, 6, { employeeId: 3, source: "MANUAL" })
+    );
+    const { totals } = await severanceMonth(2026, 6);
+    expect(totals.estimatedCount).toBe(1);
+    expect(totals.manualCount).toBe(1);
+    expect(totals.noPayrollCount).toBe(0);
+  });
+});
+
+describe("누계에 추산으로 메운 달이 함께 잡힌다", () => {
+  it("급여 레코드가 없던 달도 누계에 들어간다", async () => {
+    // 급여 레코드만 훑던 예전 방식은 도입 이전 달을 통째로 빠뜨렸다
+    employees.push(emp()); // 입사 2025-03
+    for (let m = 3; m <= 12; m++) bases.push(base(2025, m, { base: 3_600_000 }));
+    for (let m = 1; m <= 5; m++) bases.push(base(2026, m, { base: 3_600_000 }));
+    payrolls.push(rec(2026, 6)); // 도입 후 첫 급여
+
+    const r = (await severanceMonth(2026, 6)).rows[0];
+    // 2025-03~2026-02 = 12개월 충당 (전부 추산 300,000원)
+    expect(r.cumulativeProvision).toBe(300_000 * 12);
+    // 2026-03~05 추산 3개월 + 2026-06 급여 1개월
+    expect(r.cumulativeDc).toBe(300_000 * 3 + 283_333);
+    expect(r.estimatedMonths).toBe(15);
+  });
+
+  it("입사 전 달은 세지 않는다", async () => {
+    employees.push(emp()); // 입사 2025-03
+    bases.push(base(2025, 1), base(2025, 2), base(2025, 3));
+    const r = (await severanceMonth(2025, 3)).rows[0];
+    expect(r.cumulative).toBe(250_000); // 3월 한 달만
+    expect(r.estimatedMonths).toBe(1);
+  });
+
+  it("대상이 아닌 사람은 추산값이 있어도 쌓지 않는다", async () => {
+    employees.push(emp({ isContractor: true }));
+    bases.push(base(2026, 5), base(2026, 6));
+    const r = (await severanceMonth(2026, 6)).rows[0];
+    expect(r.status).toBe("EXCLUDED");
+    expect(r.cumulative).toBe(0);
   });
 });

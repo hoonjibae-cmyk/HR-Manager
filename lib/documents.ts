@@ -5,6 +5,7 @@ import { won, wonUnit, ymd, ymdKo, maskRRN } from "./format";
 import { DAY_KO, PAY_SCHEME_LABEL, parseSchedule, type ScheduleDay } from "./constants";
 import { computeWeeklyHours, inclusiveWageBreakdown, WEEKS_PER_MONTH } from "./payroll";
 import type { DocGroup, PdfOptions } from "./pdf";
+import { paySchemeOfTemplate } from "./contracts";
 
 /**
  * 부서가 정하는 서류 정책 — 어떤 서류를 발급할지.
@@ -641,15 +642,6 @@ export function contractBodies(args: {
   company: DocCompany;
 }): string[] {
   return contractGroups(args).flatMap((g) => g.bodies);
-}
-
-/** 계약서 종류 → 급여형태. 계약이 진실이므로 카드보다 이쪽을 먼저 본다 */
-function paySchemeOfTemplate(templateKey: string): string | null {
-  if (templateKey === "INCENTIVE") return "INCENTIVE";
-  if (templateKey === "RATIO") return "RATIO";
-  if (templateKey === "HOURLY") return "HOURLY";
-  if (templateKey === "MONTHLY" || templateKey === "REGULAR") return "MONTHLY";
-  return null;
 }
 
 /* ============================ 복무서약서 ============================ */

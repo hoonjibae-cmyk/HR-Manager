@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { won } from "@/lib/format";
 import {
   useTableSort,
@@ -24,6 +25,22 @@ const STATUS_TONE: Record<string, string> = {
   PROVISION: "bg-amber-50 text-amber-700",
   EXCLUDED: "bg-slate-100 text-slate-400",
   UNKNOWN: "bg-rose-50 text-rose-700",
+};
+
+/** 기준급여가 어디서 왔는가 — 실제 급여인지 추산인지 화면에서 바로 갈려야 한다 */
+const SOURCE_BADGE: Record<string, { label: string; tone: string; title: string }> = {
+  MANUAL: {
+    label: "지정",
+    tone: "bg-violet-100 text-violet-700",
+    title: "관리자가 직접 지정한 금액입니다 (그 달 급여보다 우선합니다)",
+  },
+  ESTIMATED: {
+    label: "추산",
+    tone: "bg-amber-100 text-amber-700",
+    title: "급여 레코드가 없어 계약 이력에서 추산한 금액입니다",
+  },
+  PAYROLL: { label: "", tone: "", title: "" },
+  NONE: { label: "", tone: "", title: "" },
 };
 
 export default function SeveranceTable({
@@ -199,10 +216,20 @@ export default function SeveranceTable({
                     </span>
                   </td>
                   <td className="td text-right tnum text-slate-500">
-                    {r.noPayroll ? (
+                    {r.baseSource === "NONE" ? (
                       <span className="text-slate-300">급여 미산정</span>
                     ) : (
-                      won(r.base)
+                      <span className="inline-flex items-center gap-1.5">
+                        {SOURCE_BADGE[r.baseSource].label && (
+                          <span
+                            className={`pill text-[10px] ${SOURCE_BADGE[r.baseSource].tone}`}
+                            title={SOURCE_BADGE[r.baseSource].title}
+                          >
+                            {SOURCE_BADGE[r.baseSource].label}
+                          </span>
+                        )}
+                        {won(r.base)}
+                      </span>
                     )}
                   </td>
                   <td className="td text-right tnum font-semibold text-slate-800">
@@ -219,6 +246,14 @@ export default function SeveranceTable({
                         title="DC 가입 전 기간에 쌓은 충당금 — 소급 납입 대상입니다"
                       >
                         소급 {won(r.cumulativeProvision)}
+                      </div>
+                    )}
+                    {r.estimatedMonths > 0 && (
+                      <div
+                        className="text-[11px] text-slate-400"
+                        title="급여 레코드가 없어 계약에서 추산한 달이 누계에 섞여 있습니다"
+                      >
+                        추산 {r.estimatedMonths}개월 포함
                       </div>
                     )}
                   </td>
@@ -324,6 +359,45 @@ function DetailPanel({
   month: number;
   onClose: () => void;
 }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [base, setBase] = useState(String(row.base || ""));
+  const [note, setNote] = useState(row.baseSource === "MANUAL" ? row.baseNote : "");
+
+  async function save() {
+    setBusy(true);
+    setErr("");
+    const res = await fetch("/api/severance/base", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ employeeId: row.employeeId, year, month, base: Number(base), note }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) return setErr(j.error || "저장하지 못했습니다.");
+    onClose();
+    router.refresh();
+  }
+
+  async function clear() {
+    if (!confirm("지정을 해제하고 그 달 급여(또는 추산값) 기준으로 되돌릴까요?")) return;
+    setBusy(true);
+    setErr("");
+    const res = await fetch(
+      `/api/severance/base?employeeId=${row.employeeId}&year=${year}&month=${month}`,
+      { method: "DELETE" }
+    );
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) return setErr(j.error || "해제하지 못했습니다.");
+    onClose();
+    router.refresh();
+  }
+
+  const accrues = row.status === "DC" || row.status === "PROVISION";
+
   return (
     <div className="fixed inset-0 bg-black/30 z-50 flex items-start justify-center p-4 overflow-y-auto">
       <div className="card w-full max-w-lg my-8 p-6">
@@ -346,34 +420,62 @@ function DetailPanel({
           <div className="text-xs mt-1 opacity-90">{row.statusReason}</div>
         </div>
 
-        {row.noPayroll ? (
-          <p className="text-sm text-slate-500">
+        {row.baseSource === "NONE" ? (
+          <p className="text-sm text-slate-500 mb-4">
             이 달 급여가 아직 산정되지 않았습니다. 급여를 산정하면 적립액이 자동으로 채워집니다.
+            급여와 무관하게 기준급여를 직접 정하려면 아래에서 지정하세요.
           </p>
         ) : (
           <>
-            <table className="w-full text-sm mb-4">
-              <tbody>
-                {row.included.map(([label, v]) => (
-                  <tr key={label} className="border-b border-slate-100">
-                    <td className="py-1.5 text-slate-500">{label}</td>
-                    <td className="py-1.5 text-right tnum">{won(v)}</td>
+            {row.baseSource === "PAYROLL" ? (
+              <table className="w-full text-sm mb-4">
+                <tbody>
+                  {row.included.map(([label, v]) => (
+                    <tr key={label} className="border-b border-slate-100">
+                      <td className="py-1.5 text-slate-500">{label}</td>
+                      <td className="py-1.5 text-right tnum">{won(v)}</td>
+                    </tr>
+                  ))}
+                  <tr className="border-b-2 border-slate-200">
+                    <td className="py-1.5 font-semibold">산정기준 임금</td>
+                    <td className="py-1.5 text-right tnum font-semibold">{won(row.base)}</td>
                   </tr>
-                ))}
-                <tr className="border-b-2 border-slate-200">
-                  <td className="py-1.5 font-semibold">산정기준 임금</td>
-                  <td className="py-1.5 text-right tnum font-semibold">{won(row.base)}</td>
-                </tr>
-                <tr>
-                  <td className="py-2 font-semibold text-brand-700">
+                  <tr>
+                    <td className="py-2 font-semibold text-brand-700">
+                      ÷ 12 = {row.status === "DC" ? "DC 부담금" : "충당금"}
+                    </td>
+                    <td className="py-2 text-right tnum font-bold text-brand-700 text-base">
+                      {won(row.amount)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            ) : (
+              // 지정·추산값은 항목별 내역이 없다 — 금액과 근거만 보여준다
+              <div
+                className={`rounded-lg border p-3 mb-4 ${
+                  row.baseSource === "MANUAL"
+                    ? "bg-violet-50 border-violet-200"
+                    : "bg-amber-50 border-amber-200"
+                }`}
+              >
+                <div className="flex justify-between items-baseline">
+                  <span className="text-sm font-semibold text-slate-700">
+                    산정기준 임금 ({row.baseSource === "MANUAL" ? "관리자 지정" : "계약 추산"})
+                  </span>
+                  <span className="tnum font-semibold">{won(row.base)}</span>
+                </div>
+                <div className="flex justify-between items-baseline mt-1">
+                  <span className="text-sm font-semibold text-brand-700">
                     ÷ 12 = {row.status === "DC" ? "DC 부담금" : "충당금"}
-                  </td>
-                  <td className="py-2 text-right tnum font-bold text-brand-700 text-base">
-                    {won(row.amount)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                  </span>
+                  <span className="tnum font-bold text-brand-700 text-base">{won(row.amount)}</span>
+                </div>
+                {row.baseNote && (
+                  <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">{row.baseNote}</p>
+                )}
+              </div>
+            )}
 
             {row.excluded.length > 0 && (
               <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs mb-4">
@@ -395,6 +497,70 @@ function DetailPanel({
               </div>
             )}
           </>
+        )}
+
+        {/* 기준급여 직접 지정 — 추산이 틀렸거나 계약에 안 잡히는 사정이 있을 때 */}
+        {accrues && (
+          <div className="rounded-lg border border-slate-200 p-3 mb-4">
+            {!editing ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs text-slate-500 leading-relaxed">
+                  {row.baseSource === "MANUAL"
+                    ? "이 달은 관리자가 지정한 기준급여를 쓰고 있습니다 (그 달 급여보다 우선)."
+                    : "추산이 틀렸거나 계약에 안 잡히는 사정이 있으면 기준급여를 직접 정할 수 있습니다."}
+                </span>
+                <div className="flex gap-2 shrink-0">
+                  {row.baseSource === "MANUAL" && (
+                    <button className="btn-ghost text-red-500" onClick={clear} disabled={busy}>
+                      지정 해제
+                    </button>
+                  )}
+                  <button className="btn-outline" onClick={() => setEditing(true)}>
+                    기준급여 수정
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <label className="text-xs block">
+                  <span className="text-slate-500">
+                    기준급여 (원) — {year}년 {month}월
+                  </span>
+                  <input
+                    type="number"
+                    step="1000"
+                    className="input py-1 text-sm mt-0.5"
+                    value={base}
+                    onChange={(e) => setBase(e.target.value)}
+                  />
+                </label>
+                <label className="text-xs block">
+                  <span className="text-slate-500">사유 (선택)</span>
+                  <input
+                    className="input py-1 text-sm mt-0.5"
+                    placeholder="예: 세무사 확인분으로 정정"
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                  />
+                </label>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  지정하면 <b>그 달 급여 레코드보다 우선</b>합니다. 나중에 급여를 정정해도 이
+                  금액에 묶이므로, 필요가 없어지면 <b>지정 해제</b>로 되돌려 주세요. 월 적립액 ={" "}
+                  {won(Math.round((Number(base) || 0) / 12))}
+                </p>
+                {err && <p className="text-xs text-red-600">{err}</p>}
+                <div className="flex justify-end gap-2">
+                  <button className="btn-ghost" onClick={() => setEditing(false)} disabled={busy}>
+                    취소
+                  </button>
+                  <button className="btn-primary" onClick={save} disabled={busy}>
+                    {busy ? "저장 중…" : "지정 저장"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {!editing && err && <p className="text-xs text-red-600 mt-2">{err}</p>}
+          </div>
         )}
 
         <div className="rounded-lg border border-slate-200 p-3 text-xs space-y-1">
