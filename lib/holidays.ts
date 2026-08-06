@@ -28,14 +28,40 @@ export interface HolidayItem {
 }
 
 /**
+ * 인증키 다듬기 — **포털이 키를 두 벌로 주는데 어느 쪽을 넣어도 되게** 한다.
+ *
+ * 공공데이터포털 화면에는 `일반 인증키(Encoding)` 와 `(Decoding)` 이 나란히 있고,
+ * 안내문마저 "구동되는 키를 사용하시기 바랍니다" 라고 적혀 있어 사람이 고를 수가 없다.
+ * 그런데 URL 은 `URLSearchParams` 가 한 번 인코딩하므로 **Encoding 키를 넣으면
+ * `%2F` 가 `%252F` 로 두 번 인코딩되어 인증이 통째로 실패**한다(실제로 겪었다).
+ *
+ * 키는 base64(`A-Za-z0-9+/=`)라 **`%` 가 들어 있을 수 없다** — 있으면 인코딩된 쪽이라는
+ * 뜻이므로 풀어서 원본으로 되돌린다. 판정이 애매할 여지가 없어서 이 방법을 골랐다.
+ */
+export function normalizeServiceKey(raw: string): string {
+  let k = String(raw ?? "").trim();
+  for (let i = 0; i < 3 && /%[0-9A-Fa-f]{2}/.test(k); i++) {
+    let next: string;
+    try {
+      next = decodeURIComponent(k);
+    } catch {
+      break; // 반쪽짜리 `%` 가 섞여 있으면 건드리지 않는다
+    }
+    if (next === k) break;
+    k = next;
+  }
+  return k;
+}
+
+/**
  * 조회 URL. `solMonth` 를 주면 그 달만, 없으면 그해 전체.
  *
- * 인증키는 **디코딩된 원본**을 넣는다 — 포털이 주는 'Encoding' 키를 그대로 쓰면
- * `%2B` 가 한 번 더 인코딩돼 `%252B` 가 되어 인증에 실패한다.
+ * `_type=json` 을 달지만 **포털의 데이터포맷 안내는 XML** 이고 실제로 XML 로 오는 때가
+ * 있다(특히 인증 실패 응답). 그래서 읽는 쪽이 둘 다 받는다(`parseHolidayPayload`).
  */
 export function holidayApiUrl(serviceKey: string, year: number, month?: number): string {
   const p = new URLSearchParams({
-    serviceKey,
+    serviceKey: normalizeServiceKey(serviceKey),
     solYear: String(year),
     numOfRows: "100",
     _type: "json",
@@ -99,6 +125,74 @@ export function parseHolidayResponse(json: any): { items: HolidayItem[]; skipped
   // 같은 날 여러 줄(연휴 이름이 겹칠 때)은 먼저 온 것을 쓴다
   const seen = new Set<string>();
   return { items: items.filter((h) => !seen.has(h.date) && seen.add(h.date)), skipped };
+}
+
+/* ───────────── XML 도 받는다 ───────────── */
+
+const unescapeXml = (s: string) =>
+  s
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .trim();
+
+/** `<locdate>20260101</locdate>` 한 개 꺼내기 */
+function tag(xml: string, name: string): string | null {
+  const m = xml.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
+  return m ? unescapeXml(m[1]) : null;
+}
+
+/**
+ * XML 응답을 JSON 봉투 모양으로 바꾼다 — 그 뒤는 **JSON 과 똑같은 길**을 탄다.
+ *
+ * 파서를 따로 두지 않는 이유: 판정·이름 다듬기·중복 제거가 두 벌이 되면 언젠가 갈라진다.
+ * 응답이 기계가 뱉는 평평한 XML 이라 정규식으로 충분하고, 의존성을 하나 더 들일 일이 아니다.
+ */
+export function xmlToEnvelope(xml: string): any {
+  // 인증 실패는 아예 다른 봉투로 온다
+  const cmm = xml.match(/<cmmMsgHeader>([\s\S]*?)<\/cmmMsgHeader>/);
+  if (cmm)
+    return {
+      OpenAPI_ServiceResponse: {
+        cmmMsgHeader: {
+          errMsg: tag(cmm[1], "errMsg"),
+          returnAuthMsg: tag(cmm[1], "returnAuthMsg"),
+          returnReasonCode: tag(cmm[1], "returnReasonCode"),
+        },
+      },
+    };
+
+  const head = xml.match(/<header>([\s\S]*?)<\/header>/)?.[1] ?? "";
+  const item = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => ({
+    locdate: tag(m[1], "locdate"),
+    dateName: tag(m[1], "dateName"),
+    isHoliday: tag(m[1], "isHoliday"),
+  }));
+
+  return {
+    response: {
+      header: { resultCode: tag(head, "resultCode"), resultMsg: tag(head, "resultMsg") },
+      // 0건이면 `<items/>` 라 item 이 없다 — 빈 배열이 곧 그 뜻이다
+      body: { items: { item } },
+    },
+  };
+}
+
+/**
+ * 응답 본문(문자열)을 봉투로. **JSON 이든 XML 이든 받는다.**
+ *
+ * 포털의 데이터포맷 안내가 XML 이고 `_type=json` 이 안 먹는 때가 있다. 여기서 갈라 두지 않으면
+ * `JSON.parse` 가 터지면서 "응답을 읽을 수 없습니다" 로만 남아 원인이 안 보인다.
+ */
+export function parseHolidayPayload(text: string): any {
+  const t = String(text ?? "").trim();
+  if (t.startsWith("{") || t.startsWith("[")) return JSON.parse(t);
+  if (t.startsWith("<")) return xmlToEnvelope(t);
+  // 둘 다 아니면 JSON 으로 한 번 더 시도하고(BOM·공백), 그래도 아니면 던진다
+  return JSON.parse(t);
 }
 
 /** 응답 헤더가 정상인가 — 인증키가 틀리면 HTTP 200 에 에러코드가 실려 온다 */

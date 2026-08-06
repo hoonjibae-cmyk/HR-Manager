@@ -44,8 +44,10 @@ const body = (items: any) => ({
   response: { header: { resultCode: "00", resultMsg: "NORMAL SERVICE." }, body: { items } },
 });
 
-function reply(json: any, ok = true) {
-  return { ok, status: ok ? 200 : 500, text: async () => JSON.stringify(json) } as any;
+/** 문자열이면 그대로(XML), 아니면 JSON 으로 굳혀서 돌려준다 */
+function reply(payload: any, ok = true) {
+  const text = typeof payload === "string" ? payload : JSON.stringify(payload);
+  return { ok, status: ok ? 200 : 500, text: async () => text } as any;
 }
 
 beforeEach(() => {
@@ -109,6 +111,26 @@ describe("한 해 받아 넣기", () => {
     const r = await syncHolidayYear(2026);
     expect(r.added).toBe(1);
     expect(f).toHaveBeenCalledTimes(13); // 연 1회 + 달 12회
+  });
+});
+
+describe("XML 로 와도 · Encoding 키를 넣어도 받아온다", () => {
+  const XML = `<response><header><resultCode>00</resultCode><resultMsg>NORMAL SERVICE.</resultMsg></header>
+<body><items><item><dateName>한글날</dateName><isHoliday>Y</isHoliday><locdate>20261009</locdate></item></items></body></response>`;
+
+  it("포털 데이터포맷이 XML 이어도 표에 들어간다", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => reply(XML)));
+    expect((await syncHolidayYear(2026)).added).toBe(1);
+    expect((await listHolidays(2026))[0]).toEqual({ date: "2026-10-09", name: "한글날" });
+  });
+
+  it("Encoding 인증키를 넣어도 URL 에 이중 인코딩이 남지 않는다", async () => {
+    process.env.HOLIDAY_API_KEY = encodeURIComponent("k/hAF+eq==");
+    let called = "";
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => ((called = url), reply(XML))));
+    await syncHolidayYear(2026);
+    expect(called).not.toContain("%25"); // %252F 가 남으면 인증이 통째로 실패한다
+    expect(new URL(called).searchParams.get("serviceKey")).toBe("k/hAF+eq==");
   });
 });
 

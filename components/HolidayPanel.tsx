@@ -154,7 +154,9 @@ export default function HolidayPanel({
       {!apiConfigured && (
         <div className="mt-2 rounded-lg bg-slate-50 border border-slate-200 p-2.5 text-[11px] text-slate-600 leading-relaxed">
           자동으로 받아오려면 환경변수 <code className="font-mono">HOLIDAY_API_KEY</code> 에 공공데이터포털
-          「한국천문연구원_특일 정보」 인증키(<b>Decoding</b> 쪽)를 넣으세요. 신청은 무료이고 바로 승인됩니다.
+          「한국천문연구원_특일 정보」 인증키를 넣으세요. 신청은 무료이고 바로 승인됩니다.
+          <b>Encoding·Decoding 어느 쪽을 넣어도 됩니다</b>(앱이 알아서 맞춥니다).
+          발급 직후에는 등록까지 1시간쯤 걸립니다.
           넣어 두면 표가 모자랄 때 <b>크론이 알아서 채웁니다</b>. 지금은 <b>초기 표로 채우기</b>(코드에 든
           2025~2027년 표에서 빠진 날만 넣습니다)나 아래 직접 입력을 쓰세요.
           <br />
@@ -165,7 +167,8 @@ export default function HolidayPanel({
       )}
 
       {msg && <div className="mt-2 text-[11px] text-slate-500">{msg}</div>}
-      {err && <div className="mt-2 text-[11px] text-rose-600">{err}</div>}
+      {/* 에러에는 '다음에 뭘 하면 되는지' 가 줄바꿈으로 붙어 온다 (hintFor, lib/holiday-service.ts) */}
+      {err && <div className="mt-2 text-[11px] text-rose-600 whitespace-pre-line leading-relaxed">{err}</div>}
       {extra.length > 0 && (
         <div className="mt-2 rounded-lg bg-slate-50 border border-slate-200 p-2.5 text-[11px] text-slate-600">
           표에는 있는데 관공서 공휴일 목록에는 없는 날입니다 —{" "}

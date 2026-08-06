@@ -6,6 +6,7 @@ import { prisma } from "./db";
 import { logActivity } from "./activity";
 import {
   holidayApiUrl,
+  parseHolidayPayload,
   parseHolidayResponse,
   responseError,
   diffHolidays,
@@ -108,18 +109,37 @@ async function fetchHolidays(key: string, year: number, month?: number) {
     headers: { Accept: "application/json" },
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`특일정보 API 응답 ${res.status}`);
   const text = await res.text();
+  if (!res.ok) throw new Error(`특일정보 API 응답 ${res.status} — ${text.slice(0, 160)}`);
+
   let json: any;
   try {
-    json = JSON.parse(text);
+    // JSON 도 XML 도 받는다 — 포털 데이터포맷이 XML 이고 `_type=json` 이 안 먹는 때가 있다
+    json = parseHolidayPayload(text);
   } catch {
-    // 인증 실패·서버 오류는 JSON 이 아니라 XML 로 오기도 한다
+    // 원문을 잘라서라도 남긴다. "읽을 수 없습니다" 만 남으면 원인을 못 찾는다
     throw new Error(`응답을 읽을 수 없습니다: ${text.slice(0, 160)}`);
   }
   const err = responseError(json);
-  if (err) throw new Error(err);
+  if (err) throw new Error(hintFor(err));
   return parseHolidayResponse(json);
+}
+
+/**
+ * 에러 문구에 **다음에 뭘 해야 하는지**를 붙인다.
+ *
+ * 포털이 주는 코드는 영문 상수라 그 자체로는 무엇을 고쳐야 할지 알 수 없다.
+ * 화면에 그대로 뿌려지는 문구이므로 여기서 한 번에 풀어 준다.
+ */
+function hintFor(err: string): string {
+  const e = err.toUpperCase();
+  if (e.includes("SERVICE_KEY_IS_NOT_REGISTERED") || e.includes("SERVICE KEY IS NOT REGISTERED"))
+    return `${err}\n· 인증키가 아직 등록되지 않았습니다. 발급 직후에는 반영까지 1시간쯤 걸립니다 — 조금 뒤 다시 눌러 보세요.\n· 「특일 정보」 서비스 활용신청이 승인되었는지도 확인해 주세요.`;
+  if (e.includes("LIMITED_NUMBER_OF_SERVICE_REQUESTS") || e.includes("REQUEST_EXCEED"))
+    return `${err}\n· 오늘 호출 한도를 넘었습니다. 내일 다시 받아오거나, 그때까지는 직접 입력으로 채워 주세요.`;
+  if (e.includes("DEADLINE") || e.includes("EXPIRED"))
+    return `${err}\n· 인증키 사용 기간이 끝났습니다. 포털에서 연장 신청을 해 주세요.`;
+  return err;
 }
 
 /** 올해·내년을 한 번에. 한 해가 실패해도 나머지는 계속한다 */

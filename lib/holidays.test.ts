@@ -10,6 +10,8 @@ import {
   yearsToSync,
   MIN_HOLIDAYS_PER_YEAR,
   BUILTIN_HOLIDAYS,
+  normalizeServiceKey,
+  parseHolidayPayload,
 } from "./holidays";
 
 const ok = (items: any) => ({
@@ -248,5 +250,78 @@ describe("초기 표", () => {
   it("정렬돼 있다 (사람이 손으로 고치는 표라 눈으로 찾을 수 있어야 한다)", () => {
     const dates = BUILTIN_HOLIDAYS.map((h) => h.date);
     expect(dates).toEqual([...dates].sort());
+  });
+});
+
+describe("인증키 — 포털이 두 벌로 주고 어느 쪽인지 안 알려 준다", () => {
+  const DEC = "k/hAFLy5CWrR+eq==";
+  const ENC = encodeURIComponent(DEC); // 포털의 '일반 인증키(Encoding)'
+
+  it("Encoding 키를 넣어도 원본으로 되돌린다", () => {
+    expect(normalizeServiceKey(ENC)).toBe(DEC);
+  });
+
+  it("Decoding 키는 손대지 않는다 (base64 에는 % 가 없다)", () => {
+    expect(normalizeServiceKey(DEC)).toBe(DEC);
+  });
+
+  it("어느 쪽을 넣어도 URL 에는 같은 값이 실린다 — 이게 안 되면 인증이 통째로 실패한다", () => {
+    const a = new URL(holidayApiUrl(ENC, 2026)).searchParams.get("serviceKey");
+    const b = new URL(holidayApiUrl(DEC, 2026)).searchParams.get("serviceKey");
+    expect(a).toBe(DEC);
+    expect(a).toBe(b);
+    // 이중 인코딩(%252F)이 남아 있으면 안 된다
+    expect(holidayApiUrl(ENC, 2026)).not.toContain("%25");
+  });
+
+  it("앞뒤 공백은 털어 낸다 (환경변수에 붙여넣다 딸려 오는 일이 잦다)", () => {
+    expect(normalizeServiceKey(`  ${ENC}\n`)).toBe(DEC);
+  });
+
+  it("반쪽짜리 % 가 섞여 있으면 건드리지 않는다 (엉뚱하게 망가뜨리지 않는다)", () => {
+    expect(normalizeServiceKey("abc%zz")).toBe("abc%zz");
+  });
+});
+
+describe("XML 응답도 읽는다 — 포털 데이터포맷 안내가 XML 이다", () => {
+  const XML = `<?xml version="1.0" encoding="UTF-8"?>
+<response><header><resultCode>00</resultCode><resultMsg>NORMAL SERVICE.</resultMsg></header>
+<body><items>
+<item><dateKind>01</dateKind><dateName>1월1일</dateName><isHoliday>Y</isHoliday><locdate>20260101</locdate><seq>1</seq></item>
+<item><dateKind>01</dateKind><dateName>대체공휴일</dateName><isHoliday>Y</isHoliday><locdate>20260302</locdate><seq>1</seq></item>
+</items><numOfRows>100</numOfRows><pageNo>1</pageNo><totalCount>2</totalCount></body></response>`;
+
+  it("JSON 과 똑같은 결과가 나온다 (판정이 두 벌이 되면 언젠가 갈라진다)", () => {
+    const { items } = parseHolidayResponse(parseHolidayPayload(XML));
+    expect(items).toEqual([
+      { date: "2026-01-01", name: "신정" },
+      { date: "2026-03-02", name: "대체공휴일" },
+    ]);
+    expect(responseError(parseHolidayPayload(XML))).toBeNull();
+  });
+
+  it("0건이면 <items/> 라 item 이 없다", () => {
+    const empty = `<response><header><resultCode>00</resultCode></header><body><items/></body></response>`;
+    expect(parseHolidayResponse(parseHolidayPayload(empty)).items).toEqual([]);
+  });
+
+  it("인증 실패 XML 도 에러로 잡는다", () => {
+    const fail = `<OpenAPI_ServiceResponse><cmmMsgHeader><errMsg>SERVICE ERROR</errMsg>
+<returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg><returnReasonCode>30</returnReasonCode>
+</cmmMsgHeader></OpenAPI_ServiceResponse>`;
+    expect(responseError(parseHolidayPayload(fail))).toContain("SERVICE_KEY_IS_NOT_REGISTERED_ERROR");
+  });
+
+  it("CDATA·XML 엔티티가 섞여도 이름을 읽는다", () => {
+    const x = `<response><header><resultCode>00</resultCode></header><body><items>
+<item><dateName><![CDATA[임시공휴일]]></dateName><isHoliday>Y</isHoliday><locdate>20260601</locdate></item>
+<item><dateName>3&#39;1절</dateName><isHoliday>Y</isHoliday><locdate>20260301</locdate></item>
+</items></body></response>`;
+    expect(parseHolidayResponse(parseHolidayPayload(x)).items.map((h) => h.name)).toEqual(["임시공휴일", "3'1절"]);
+  });
+
+  it("JSON 이 오면 그대로 JSON 으로 읽는다", () => {
+    const j = JSON.stringify(ok({ item: [{ locdate: 20261009, dateName: "한글날", isHoliday: "Y" }] }));
+    expect(parseHolidayResponse(parseHolidayPayload(j)).items).toEqual([{ date: "2026-10-09", name: "한글날" }]);
   });
 });
