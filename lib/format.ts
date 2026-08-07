@@ -65,3 +65,14 @@ export function wonToKorean(n: number): string {
   }
   return result;
 }
+
+/**
+ * **KST 오늘** (`YYYY-MM-DD`) — 달력의 '오늘' 칸을 가릴 때 쓴다.
+ *
+ * 반드시 **서버에서 구해 넘긴다**. 클라이언트에서 `Date.now()` 로 구하면 서버가 그린 HTML 과
+ * 달라질 수 있어 하이드레이션이 어긋난다(자정 언저리에 실제로 갈린다).
+ * 앱 전체가 KST 벽시계를 UTC 필드에 담는 규칙이라 여기서도 +9h 로 맞춘다.
+ */
+export function kstTodayYmd(now: Date = new Date()): string {
+  return new Date(now.getTime() + 9 * 3600000).toISOString().slice(0, 10);
+}

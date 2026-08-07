@@ -10,6 +10,8 @@ import {
 } from "@/lib/constants";
 import type { MakeupRow } from "@/lib/makeup-service";
 
+import { TODAY_CELL, TODAY_NUM } from "@/components/ui";
+
 const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
 const won = (n: number) => n.toLocaleString("ko-KR");
 
@@ -51,6 +53,7 @@ export default function MakeupCalendar({
   holidays,
   examPeriods,
   calendarSynced,
+  todayYmd,
 }: {
   year: number;
   month: number;
@@ -59,13 +62,13 @@ export default function MakeupCalendar({
   holidays: Array<{ date: string; name: string }>;
   examPeriods: Array<{ id: number; name: string; startDate: string; endDate: string; capHours: number }>;
   calendarSynced: boolean;
+  /** KST 오늘 — **서버에서 넘긴다**(클라이언트에서 구하면 하이드레이션이 어긋난다) */
+  todayYmd: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState<MakeupRow | null>(null);
   const [dept, setDept] = useState("");
   const [emp, setEmp] = useState("");
-  // 근무가 끝났는데 아직 확정이 안 된 건을 표시하기 위한 오늘 날짜 (KST 벽시계 규칙)
-  const todayYmd = useMemo(() => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10), []);
 
   const holidayMap = useMemo(
     () => new Map(holidays.map((h) => [h.date, h.name])),
@@ -200,7 +203,7 @@ export default function MakeupCalendar({
               <div
                 key={i}
                 className={`min-h-[104px] border-b border-r border-slate-100 p-1.5 ${
-                  d ? "" : "bg-slate-50/60"
+                  !d ? "bg-slate-50/60" : d === todayYmd ? TODAY_CELL : ""
                 }`}
               >
                 {d && (
@@ -208,7 +211,13 @@ export default function MakeupCalendar({
                     <div className="flex items-baseline gap-1 mb-1">
                       <span
                         className={`text-xs font-bold tnum ${
-                          hol || dow === 0 ? "text-rose-500" : dow === 6 ? "text-indigo-500" : "text-slate-500"
+                          d === todayYmd
+                            ? TODAY_NUM
+                            : hol || dow === 0
+                              ? "text-rose-500"
+                              : dow === 6
+                                ? "text-indigo-500"
+                                : "text-slate-500"
                         }`}
                       >
                         {Number(d.slice(8))}

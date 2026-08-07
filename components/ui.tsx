@@ -74,3 +74,16 @@ export function Empty({ children }: { children: React.ReactNode }) {
     <div className="text-center text-sm text-slate-400 py-12">{children}</div>
   );
 }
+
+/* ───────────── 달력 '오늘' 칸 ───────────── */
+//
+// ⚠ **이 문자열들은 반드시 `components/` 안에 있어야 한다.** Tailwind 의 `content` 는
+// `app/**` 과 `components/**` 만 훑으므로(tailwind.config.ts), `lib/` 에 적으면 클래스가
+// 아예 생성되지 않아 **조용히 아무 효과도 나지 않는다**(겪었다 — 칸 배경·테두리가 통째로 빠졌다).
+
+/** 오늘 칸 — 테두리를 **안쪽**으로 둘러 칸 크기가 밀리지 않게 한다(바깥 ring 은 격자를 흔든다) */
+export const TODAY_CELL = "bg-brand-50 ring-2 ring-inset ring-brand-500";
+
+/** 오늘 날짜 숫자 — 채운 동그라미 */
+export const TODAY_NUM =
+  "inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-brand-600 text-white";

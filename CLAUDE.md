@@ -90,6 +90,13 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   있으면 정작 볼 행이 두어 줄만 남는다. 연차의 *승인 대기* 칸도 `max-h` 로 묶어 표를 밀어내지 않게 한다.
   보강 화면(`/makeup`)만 표가 아니라 **월 달력**(`components/MakeupCalendar.tsx`) — 누가 언제 보강하는지가
   날짜 축으로 보여야 하고, 구글 보강캘린더와 같은 그림을 보게 하기 위함.
+- **달력의 '오늘' 칸**은 연차·보강이 **같은 모양**을 쓴다(`TODAY_CELL`/`TODAY_NUM`, components/ui.tsx).
+  칸에 옅은 배경 + **안쪽** 테두리(`ring-inset` — 바깥 ring 은 격자를 흔든다), 날짜 숫자에 채운 동그라미.
+  - **오늘 날짜는 서버에서 구해 넘긴다**(`kstTodayYmd`, lib/format.ts). 클라이언트에서 `Date.now()` 로
+    구하면 서버가 그린 HTML 과 달라져 하이드레이션이 어긋난다(자정 언저리에 실제로 갈린다).
+  - ⚠ **Tailwind 클래스 문자열을 `lib/` 에 두지 않는다.** `content` 가 `app/**`·`components/**` 만
+    훑어서(tailwind.config.ts) `lib/` 에 적으면 클래스가 아예 생성되지 않고 **조용히 아무 효과도
+    나지 않는다**(겪었다 — 칸 배경·테두리가 통째로 빠졌다).
 - **연차 달력**(`lib/leave-calendar.ts` 순수 함수·테스트 있음 + `components/LeaveCalendar.tsx`).
   연차 화면은 **표/달력 탭**(`components/LeaveViews.tsx`)으로 가른다 — 표는 '누가 얼마나 남았나',
   달력은 '그날 누가 자리에 없나' 다. 방학·연휴처럼 여러 사람이 겹치는 날은 표로는 안 보인다.

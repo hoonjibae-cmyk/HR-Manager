@@ -19,6 +19,7 @@ import { listHolidays } from "@/lib/holiday-service";
 import { listDayOffs } from "@/lib/dayoff-service";
 import { gcalConfigured } from "@/lib/gcal";
 import DayOffSync from "@/components/DayOffSync";
+import { kstTodayYmd } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -206,6 +207,7 @@ export default async function LeavePage({
         holidays={holidays}
         year={now.getFullYear()}
         month={now.getMonth() + 1}
+        todayYmd={kstTodayYmd(now)}
         rangeLabel={
           <form method="get" className="flex items-center gap-2 text-xs">
             <span className="text-slate-400">사용 조회 기간</span>

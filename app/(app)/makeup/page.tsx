@@ -4,6 +4,7 @@ import { makeupCalendarConfigured } from "@/lib/gcal";
 import MakeupCalendar from "@/components/MakeupCalendar";
 import MakeupPolicyPanel from "@/components/MakeupPolicyPanel";
 import { holidayStatus } from "@/lib/holiday-service";
+import { kstTodayYmd } from "@/lib/format";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -66,6 +67,7 @@ export default async function MakeupPage({
         holidays={holidays}
         examPeriods={examPeriods}
         calendarSynced={makeupCalendarConfigured()}
+        todayYmd={kstTodayYmd(now)}
       />
 
       <p className="text-xs text-slate-400 mt-4 leading-relaxed">

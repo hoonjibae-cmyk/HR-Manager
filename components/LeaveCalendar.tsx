@@ -12,6 +12,8 @@ import {
 } from "@/lib/leave-calendar";
 import { LEAVE_TYPE_LABEL } from "@/lib/constants";
 
+import { TODAY_CELL, TODAY_NUM } from "@/components/ui";
+
 const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
 
 /**
@@ -47,11 +49,14 @@ export default function LeaveCalendar({
   holidays,
   initialYear,
   initialMonth,
+  todayYmd,
 }: {
   days: LeaveDay[];
   holidays: Array<{ date: string; name: string }>;
   initialYear: number;
   initialMonth: number;
+  /** KST 오늘 — **서버에서 넘긴다**(클라이언트에서 구하면 하이드레이션이 어긋난다) */
+  todayYmd: string;
 }) {
   const [year, setYear] = useState(initialYear);
   const [month, setMonth] = useState(initialMonth);
@@ -188,14 +193,22 @@ export default function LeaveCalendar({
             return (
               <div
                 key={i}
-                className={`min-h-[92px] border-b border-r border-slate-100 p-1.5 ${d ? "" : "bg-slate-50/60"}`}
+                className={`min-h-[92px] border-b border-r border-slate-100 p-1.5 ${
+                  !d ? "bg-slate-50/60" : d === todayYmd ? TODAY_CELL : ""
+                }`}
               >
                 {d && (
                   <>
                     <div className="flex items-baseline gap-1 mb-1">
                       <span
                         className={`text-xs font-bold tnum ${
-                          hol || dow === 0 ? "text-rose-500" : dow === 6 ? "text-indigo-500" : "text-slate-500"
+                          d === todayYmd
+                            ? TODAY_NUM
+                            : hol || dow === 0
+                              ? "text-rose-500"
+                              : dow === 6
+                                ? "text-indigo-500"
+                                : "text-slate-500"
                         }`}
                       >
                         {Number(d.slice(8))}

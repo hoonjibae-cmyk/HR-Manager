@@ -26,6 +26,7 @@ export default function LeaveViews({
   holidays,
   year,
   month,
+  todayYmd,
 }: {
   rows: LeaveRow[];
   rangeLabel: ReactNode;
@@ -33,6 +34,7 @@ export default function LeaveViews({
   holidays: Array<{ date: string; name: string }>;
   year: number;
   month: number;
+  todayYmd: string;
 }) {
   const [view, setView] = useStoredState<View>("yoossam.table.leave.view", "table", (v) =>
     v === "calendar" ? "calendar" : "table"
@@ -63,7 +65,7 @@ export default function LeaveViews({
       {view === "table" ? (
         <LeaveTable rows={rows} rangeLabel={rangeLabel} />
       ) : (
-        <LeaveCalendar days={days} holidays={holidays} initialYear={year} initialMonth={month} />
+        <LeaveCalendar days={days} holidays={holidays} initialYear={year} initialMonth={month} todayYmd={todayYmd} />
       )}
     </>
   );
