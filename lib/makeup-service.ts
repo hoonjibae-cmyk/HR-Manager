@@ -33,12 +33,14 @@ import {
 } from "./overtime";
 import {
   canSelfConfirm,
+  canSelfCancel,
   mandatoryCapNotice,
   underMandatoryCap,
   NOT_PAYABLE_NOTICE,
   type ConfirmableSession,
 } from "./makeup-confirm";
 import { computeWeeklyHours, inclusiveWageBreakdown } from "./payroll";
+import { logActivity } from "./activity";
 import { empToPayInput } from "./repo";
 import { wageSegmentsFor, applyMidMonthBlend, type MonthContractTerms } from "./payroll-service";
 
@@ -550,6 +552,68 @@ export async function confirmMakeupActuals(
   });
   await syncMakeupCalendar(id).catch(() => null);
   return { row, capNotice };
+}
+
+/* ───────────── 미실시 처리 (근무를 하지 않은 경우) ───────────── */
+
+/**
+ * **근무하지 않은 건을 내린다** — 신청자 본인 또는 관리자.
+ *
+ * 상태를 `NOSHOW`(미실시) 로 둔다. `CANCELED` 가 아니라 `NOSHOW` 인 이유: 신청은 실제로
+ * 있었고 그날 근무만 없었던 것이라, 애초에 없던 일로 지우는 것과는 기록의 뜻이 다르다.
+ * 둘 다 오버타임 엔진에서 빠지고(lib/overtime.ts) 보강캘린더에서도 내려간다.
+ *
+ * **지우지 않고 상태만 바꾼다** — 신청이 있었다는 사실과 사유는 남아야 관리자가 되돌릴 수 있고,
+ * "분명히 신청했는데 사라졌다" 가 되지 않는다.
+ *
+ * 이미 확정해 둔 시각(`actualStart`/`actualEnd`)은 **지운다** — 남겨 두면 나중에 상태를 되돌렸을 때
+ * 하지도 않은 근무 시간이 되살아난다.
+ */
+export async function cancelMakeupSession(
+  id: number,
+  input: { by: "EMPLOYEE" | "ADMIN"; reason?: string | null; now?: Date }
+) {
+  const before = await prisma.makeupSession.findUnique({ where: { id }, include: { employee: true } });
+  if (!before) throw new Error("신청 내역을 찾을 수 없습니다.");
+
+  if (input.by === "EMPLOYEE") {
+    // 옛 메시지에 남은 버튼은 목록을 거치지 않고 바로 눌린다 — 누른 시점에도 다시 막는다
+    const v = canSelfCancel(before as unknown as ConfirmableSession, input.now ?? new Date());
+    if (!v.ok) throw new Error(v.reason ?? "지금은 미실시로 내릴 수 없습니다.");
+  }
+
+  const reason = (input.reason ?? "").trim();
+  const stamp = input.by === "EMPLOYEE" ? "신청자" : "관리자";
+  const row = await prisma.makeupSession.update({
+    where: { id },
+    data: {
+      status: "NOSHOW",
+      actualStart: null,
+      actualEnd: null,
+      confirmedBy: input.by,
+      confirmedAt: new Date(),
+      reviewNote: [before.reviewNote, `[미실시 · ${stamp}] ${reason || "사유 미기재"}`]
+        .filter(Boolean)
+        .join("\n"),
+      ...(input.by === "ADMIN" ? { reviewedAt: new Date() } : {}),
+    },
+    include: { employee: true },
+  });
+  // 보강캘린더에서 내린다 (하지 않은 수업이 남아 있으면 안 된다)
+  await syncMakeupCalendar(id).catch(() => null);
+
+  await logActivity({
+    action: "MAKEUP_UPDATE",
+    actor: input.by === "EMPLOYEE" ? "SLACK" : "ADMIN",
+    actorName: row.employee?.name,
+    employeeId: row.employeeId,
+    target: `makeup:${id}`,
+    summary:
+      `${row.employee?.name ?? "직원"}의 ${MAKEUP_CATEGORY_LABEL[row.category] ?? row.category}을(를) ` +
+      `미실시로 내렸습니다 (${stamp}).${reason ? ` 사유: ${reason}` : ""}`,
+  }).catch(() => {});
+
+  return row;
 }
 
 /* ───────────── 실근무 확정 요청 알림 ───────────── */

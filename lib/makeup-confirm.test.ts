@@ -9,6 +9,8 @@ import {
   NOT_PAYABLE_HINT,
   NOT_PAYABLE_NOTICE,
   type ConfirmableSession,
+  canSelfCancel,
+  cancelNotice,
 } from "./makeup-confirm";
 
 /** KST 벽시계 값을 UTC 필드에 담는 앱 규칙 그대로 */
@@ -184,5 +186,53 @@ describe("수당 미반영 건 안내", () => {
 
   it("'수당이 산정된다' 는 단정을 담지 않는다", () => {
     expect(NOT_PAYABLE_HINT).not.toContain("산정됩니다");
+  });
+});
+
+/* ───────────── 미실시 처리 ───────────── */
+
+describe("근무하지 않은 건을 신청자가 내릴 수 있는가", () => {
+  const s = session;
+
+  it("**확정보다 넓게 연다** — 근무 전에도 내릴 수 있다", () => {
+    // 확정은 다음날부터인데, 미실시는 미리 알수록 좋다
+    expect(canSelfConfirm(s(), t("2026-08-10T12:00:00")).ok).toBe(false);
+    expect(canSelfCancel(s(), t("2026-08-10T12:00:00")).ok).toBe(true);
+  });
+
+  it("근무가 지난 뒤에도 내릴 수 있다", () => {
+    expect(canSelfCancel(s(), t("2026-08-16T12:00:00")).ok).toBe(true);
+  });
+
+  it("확정 마감이 지나도 아직 확정 안 한 건은 내릴 수 있다 — 캘린더에 남아 있으면 안 된다", () => {
+    expect(canSelfCancel(s(), t("2026-10-01T12:00:00")).ok).toBe(true);
+  });
+
+  it("이미 확정한 건은 **마감 전까지** 되돌릴 수 있다", () => {
+    const done = s({ status: "CONFIRMED" });
+    expect(canSelfCancel(done, t("2026-08-16T12:00:00")).ok).toBe(true);
+    const late = canSelfCancel(done, t("2026-10-01T12:00:00"));
+    expect(late.ok).toBe(false);
+    expect(late.reason).toContain("관리자");
+  });
+
+  it("확정된 건이 아직 근무 전이어도 막지 않는다 — '이르다' 는 취소를 막을 이유가 아니다", () => {
+    // `canSelfConfirm` 을 그대로 쓰면 여기서 '다음날부터 가능합니다' 로 막혔다
+    expect(canSelfCancel(s({ status: "CONFIRMED" }), t("2026-08-10T12:00:00")).ok).toBe(true);
+  });
+
+  it("이미 내려간 건은 두 번 내리지 않는다", () => {
+    for (const st of ["NOSHOW", "CANCELED"]) {
+      const v = canSelfCancel(s({ status: st }), t("2026-08-16T12:00:00"));
+      expect(v.ok, st).toBe(false);
+      expect(v.reason).toContain("이미");
+    }
+  });
+
+  it("안내문은 되돌릴 수 있다는 점까지 적는다 — 잘못 눌렀을 때 막막하지 않게", () => {
+    const t = cancelNotice({ category: "ABSENCE" });
+    expect(t).toContain("미실시");
+    expect(t).toContain("수당은 발생하지 않");
+    expect(t).toContain("관리자가 되돌릴 수 있");
   });
 });

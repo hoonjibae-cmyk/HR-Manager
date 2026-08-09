@@ -8,7 +8,7 @@ import {
   makeupKindLabel,
 } from "./constants";
 import { sessionHours, workWindow, isPayEligible, DEFAULT_OT_POLICY, type OtPolicy } from "./overtime";
-import { canSelfConfirm, NOT_PAYABLE_HINT, type ConfirmableSession } from "./makeup-confirm";
+import { canSelfConfirm, canSelfCancel, NOT_PAYABLE_HINT, type ConfirmableSession } from "./makeup-confirm";
 import type { MakeupModalValues } from "./slack";
 
 const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
@@ -134,16 +134,21 @@ export async function makeupListBlocks(
       return;
     }
     for (const r of list) {
-      const section: any = {
-        type: "section",
-        text: { type: "mrkdwn", text: lineOf(r, label(r)) },
-      };
+      blocks.push({ type: "section", text: { type: "mrkdwn", text: lineOf(r, label(r)) } });
+
       const open = withButton && canSelfConfirm(r as unknown as ConfirmableSession, now).ok;
       const payable = isPayEligible(r, policy, holidays);
-      if (open && payable) {
-        section.accessory = {
+      // **미실시는 수당 대상과 무관하게, 근무 전에도 열어 둔다** — 취소는 돈 이야기가 아니라
+      // '그 일이 있었나' 의 문제이고, 미리 알수록 캘린더·확정 요청이 헛돌지 않는다.
+      const cancelable = canSelfCancel(r as unknown as ConfirmableSession, now).ok;
+
+      // 한 줄에 버튼이 둘일 수 있어 accessory 가 아니라 actions 블록을 쓴다
+      // (섹션 accessory 는 하나만 붙는다).
+      const buttons: any[] = [];
+      if (open && payable)
+        buttons.push({
           type: "button",
-          style: r.status === "CONFIRMED" ? undefined : "primary",
+          ...(r.status === "CONFIRMED" ? {} : { style: "primary" }),
           text: {
             type: "plain_text",
             text: r.status === "CONFIRMED" ? "확정 수정" : "실근무 확정",
@@ -151,11 +156,17 @@ export async function makeupListBlocks(
           },
           action_id: "open_makeup_confirm",
           value: String(r.id),
-        };
-        if (!section.accessory.style) delete section.accessory.style;
-      }
-      blocks.push(section);
-      // 버튼 자리를 비워 두기만 하면 왜 없는지 알 수 없다 — 그 줄 바로 밑에 작게 적는다
+        });
+      if (cancelable)
+        buttons.push({
+          type: "button",
+          text: { type: "plain_text", text: "미실시", emoji: true },
+          action_id: "open_makeup_cancel",
+          value: String(r.id),
+        });
+      if (buttons.length) blocks.push({ type: "actions", elements: buttons });
+
+      // 확정 버튼 자리를 비워 두기만 하면 왜 없는지 알 수 없다 — 그 줄 밑에 작게 적는다
       if (open && !payable)
         blocks.push({
           type: "context",

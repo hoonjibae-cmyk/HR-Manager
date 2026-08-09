@@ -184,3 +184,53 @@ export const NOT_PAYABLE_HINT =
 
 /** 신청자가 그래도 확정을 시도했을 때 돌려주는 문구 (옛 메시지에 남은 버튼 등) */
 export const NOT_PAYABLE_NOTICE = `이 건은 ${NOT_PAYABLE_HINT}`;
+
+/* ───────────── 미실시 처리 (근무를 하지 않은 경우) ───────────── */
+
+export interface SelfCancelVerdict {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * 신청자가 **"근무하지 않았다"** 고 스스로 내릴 수 있는가.
+ *
+ * 확정(`canSelfConfirm`)보다 **넓게 연다** — 성질이 다르기 때문이다.
+ *  - 확정은 '몇 시간 일했나' 라서 근무가 끝난 뒤에만 뜻이 있다. 그래서 다음날부터 열린다.
+ *  - 미실시는 **미리 알수록 좋다**. 다음 주 보강이 취소된 걸 아는데 그날이 지나기를 기다려
+ *    내리게 하면, 그 사이 보강캘린더에 없는 수업이 남아 있고 확정 요청 DM 까지 나간다.
+ *    그래서 **아직 확정하지 않은 건은 언제든** 내릴 수 있다.
+ *  - **수당 대상 여부와 무관하다.** 결시보강처럼 반영이 정해지지 않은 건도 취소는 할 수 있어야
+ *    한다 — 취소는 돈 이야기가 아니라 '그 일이 있었나' 의 문제다.
+ *
+ * 이미 확정한 건은 **되돌리는 것**이라 확정과 같은 창(마감 전)에서만 연다. 마감이 지난 뒤의
+ * 정정은 급여에 이미 실렸을 수 있어 관리자가 봐야 한다.
+ */
+export function canSelfCancel(s: ConfirmableSession, now: Date): SelfCancelVerdict {
+  const what = makeupKindLabel(s.category);
+  if (s.status === "CANCELED" || s.status === "NOSHOW")
+    return { ok: false, reason: "이미 취소·미실시로 처리된 건입니다." };
+  if (s.status === "CONFIRMED") {
+    // **마감이 지났을 때만** 막는다. `canSelfConfirm` 을 그대로 쓰면 '아직 근무 전이라 이르다' 로도
+    // 막히는데, 취소에는 맞지 않는 이유다 — 내일 할 일을 오늘 안 하기로 정할 수 있어야 한다.
+    const closesAt = confirmClosesAt(s);
+    if (now > closesAt)
+      return {
+        ok: false,
+        reason:
+          `이미 확정한 ${what}이고 정정 기간(${dateLabel(closesAt)}까지)이 지났습니다. ` +
+          `급여에 이미 실렸을 수 있어 관리자가 확인해야 합니다.`,
+      };
+  }
+  return { ok: true };
+}
+
+/** 미실시 처리 전에 보여 줄 안내 — 되돌릴 수 있다는 점을 함께 적는다 */
+export function cancelNotice(s: { category: string }): string {
+  const what = makeupKindLabel(s.category);
+  return (
+    `이 ${what}을(를) **미실시**로 내립니다. 수당은 발생하지 않고, 보강캘린더에 올라가 있었다면 ` +
+    `일정도 내려갑니다.\n실제로는 근무하셨다면 이 버튼을 누르지 마시고 «실근무 확정» 으로 시간을 ` +
+    `적어 주세요. 잘못 눌렀다면 관리자가 되돌릴 수 있습니다.`
+  );
+}

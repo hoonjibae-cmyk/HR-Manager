@@ -20,6 +20,8 @@ import {
   makeupRecordBlocks,
   makeupConfirmModalView,
   readMakeupConfirmModal,
+  makeupCancelModalView,
+  readMakeupCancelModal,
 } from "@/lib/slack";
 import {
   parseMakeupInput,
@@ -31,6 +33,7 @@ import {
 import {
   createMakeupSession,
   confirmMakeupActuals,
+  cancelMakeupSession,
   mandatoryCapContext,
   getOvertimePolicy,
   holidayYmds,
@@ -42,6 +45,8 @@ import {
   mandatoryCapNotice,
   underMandatoryCap,
   confirmDeadlineLabel,
+  canSelfCancel,
+  cancelNotice,
   NOT_PAYABLE_NOTICE,
 } from "@/lib/makeup-confirm";
 import { sessionHours, workWindow, isPayEligible } from "@/lib/overtime";
@@ -408,6 +413,26 @@ export async function POST(req: Request) {
         errors: { sdate: "본인이 신청한 내역만 확정할 수 있습니다." },
       });
 
+    // **'근무하지 않았다' 를 고른 경우** — 시간은 보지 않고 미실시로 내린다.
+    // 여기서 갈라 주지 않으면 취소하려던 사람이 예정 시간을 그대로 제출하게 된다.
+    if (!f.didWork) {
+      try {
+        const row = await cancelMakeupSession(f.id, { by: "EMPLOYEE", reason: f.note });
+        await postMessage(
+          userId,
+          `🚫 *${makeupKindLabel(row.category)}을(를) 미실시로 처리했습니다.*\n` +
+            `• ${makeupDateLabel(row.planStart, row.planEnd)} · ${row.targetClass}\n` +
+            `• 수당은 발생하지 않습니다. 실제로는 근무하셨다면 관리자에게 알려 주세요.`
+        );
+      } catch (e: any) {
+        return Response.json({
+          response_action: "errors",
+          errors: { did: String(e.message).slice(0, 150) },
+        });
+      }
+      return Response.json({ response_action: "clear" });
+    }
+
     const parsed = parseConfirmInput(f);
     if (!parsed.ok)
       return Response.json({
@@ -463,6 +488,44 @@ export async function POST(req: Request) {
   }
 
   /* ---------- 휴가 취소 신청 모달 제출 ---------- */
+  if (payload.type === "view_submission" && payload.view?.callback_id === "makeup_cancel_submit") {
+    const userId = payload.user?.id as string;
+    const { emp, info } = await resolveEmployee(userId);
+    if (!emp)
+      return Response.json({
+        response_action: "errors",
+        errors: { reason: notLinkedText(info).replace(/\n/g, " ").slice(0, 150) },
+      });
+    const { id, reason } = readMakeupCancelModal(payload.view);
+    if (!id)
+      return Response.json({
+        response_action: "errors",
+        errors: { reason: "어느 신청인지 알 수 없습니다. 목록에서 다시 눌러 주세요." },
+      });
+    const target = await prisma.makeupSession.findUnique({ where: { id } });
+    if (!target || target.employeeId !== emp.id)
+      return Response.json({
+        response_action: "errors",
+        errors: { reason: "본인이 신청한 내역만 처리할 수 있습니다." },
+      });
+
+    try {
+      const row = await cancelMakeupSession(id, { by: "EMPLOYEE", reason });
+      await postMessage(
+        userId,
+        `🚫 *${makeupKindLabel(row.category)}을(를) 미실시로 처리했습니다.*\n` +
+          `• ${makeupDateLabel(row.planStart, row.planEnd)} · ${row.targetClass}\n` +
+          `• 수당은 발생하지 않습니다. 되돌리려면 관리자에게 알려 주세요.`
+      );
+    } catch (e: any) {
+      return Response.json({
+        response_action: "errors",
+        errors: { reason: String(e.message).slice(0, 150) },
+      });
+    }
+    return Response.json({ response_action: "clear" });
+  }
+
   if (payload.type === "view_submission" && payload.view?.callback_id === "leave_cancel_submit") {
     const userId = payload.user?.id as string;
     const { emp } = await resolveEmployee(userId);
@@ -568,6 +631,41 @@ export async function POST(req: Request) {
       Number(action.value),
       payload.container?.channel_id || payload.channel?.id
     );
+    return new Response("", { status: 200 });
+  }
+
+  /* ---------- '미실시' 버튼 (근무를 하지 않은 경우) ---------- */
+  if (action.action_id === "open_makeup_cancel") {
+    const uid = payload.user?.id as string;
+    const channelId = payload.container?.channel_id || payload.channel?.id;
+    const { emp, info } = await resolveEmployee(uid);
+    if (!emp) {
+      await tellUser(channelId, uid, notLinkedText(info));
+      return new Response("", { status: 200 });
+    }
+    const row = await prisma.makeupSession.findUnique({ where: { id: Number(action.value) } });
+    if (!row || row.employeeId !== emp.id) {
+      await tellUser(channelId, uid, "본인이 신청한 내역만 처리할 수 있습니다.");
+      return new Response("", { status: 200 });
+    }
+    // 옛 메시지에 남은 버튼은 목록을 거치지 않고 바로 눌린다 — 여는 시점에도 다시 본다
+    const v = canSelfCancel(row as any, new Date());
+    if (!v.ok) {
+      await tellUser(channelId, uid, v.reason ?? "지금은 미실시로 내릴 수 없습니다.");
+      return new Response("", { status: 200 });
+    }
+    const w = workWindow(row as any);
+    await slackCall("views.open", {
+      trigger_id: payload.trigger_id,
+      view: makeupCancelModalView({
+        id: row.id,
+        kindLabel: makeupKindLabel(row.category),
+        dateLabel: makeupDateLabel(w.start, w.end),
+        categoryLabel: MAKEUP_CATEGORY_LABEL[row.category] ?? row.category,
+        targetClass: row.targetClass,
+        notice: cancelNotice(row),
+      }),
+    });
     return new Response("", { status: 200 });
   }
 

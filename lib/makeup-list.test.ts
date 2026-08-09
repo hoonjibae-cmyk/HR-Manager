@@ -38,9 +38,15 @@ const session = (over: any = {}) => ({
   ...over,
 });
 
-/** 확정 버튼(accessory)이 붙은 줄 */
-const confirmButtons = (blocks: any[]) =>
-  blocks.filter((b) => b.accessory?.action_id === "open_makeup_confirm");
+/** 버튼은 `actions` 블록에 담긴다 — 한 줄에 «실근무 확정» 과 «미실시» 가 함께 붙을 수 있어서다 */
+const buttons = (blocks: any[], actionId: string) =>
+  blocks
+    .filter((b) => b.type === "actions")
+    .flatMap((b: any) => b.elements)
+    .filter((e: any) => e.action_id === actionId);
+
+const confirmButtons = (blocks: any[]) => buttons(blocks, "open_makeup_confirm");
+const cancelButtons = (blocks: any[]) => buttons(blocks, "open_makeup_cancel");
 
 const flat = (blocks: any[]) => JSON.stringify(blocks);
 
@@ -54,7 +60,7 @@ describe("수당 대상인 건 — 확정 버튼이 붙는다", () => {
     rows.push(session());
     const { blocks } = await makeupListBlocks(1, "김지연", NOW);
     expect(confirmButtons(blocks)).toHaveLength(1);
-    expect(confirmButtons(blocks)[0].accessory.value).toBe("1");
+    expect(confirmButtons(blocks)[0].value).toBe("1");
   });
 
   it("관리자가 반영하기로 정한 결시보강", async () => {
@@ -64,7 +70,7 @@ describe("수당 대상인 건 — 확정 버튼이 붙는다", () => {
 
   it("이미 확정한 건은 '확정 수정' 으로 다시 열린다", async () => {
     rows.push(session({ status: "CONFIRMED", confirmedBy: "EMPLOYEE" }));
-    const btn = confirmButtons((await makeupListBlocks(1, "김지연", NOW)).blocks)[0].accessory;
+    const btn = confirmButtons((await makeupListBlocks(1, "김지연", NOW)).blocks)[0];
     expect(btn.text.text).toBe("확정 수정");
   });
 });
@@ -84,10 +90,8 @@ describe("수당 대상이 아닌 건 — 확정을 닫고 사유를 적는다",
   it("버튼만 없애지 않고 왜 닫혔는지·무엇을 하면 되는지를 그 줄 밑에 적는다", async () => {
     rows.push(session({ category: "ABSENCE" }));
     const { blocks } = await makeupListBlocks(1, "김지연", NOW);
-    const i = blocks.findIndex((b) => b.text?.text?.includes("결시보강"));
-    const note = blocks[i + 1];
-    expect(note.type).toBe("context");
-    expect(note.elements[0].text).toContain("관리자에게 문의");
+    const note = blocks.find((b) => b.type === "context" && b.elements?.[0]?.text?.includes("관리자에게 문의"));
+    expect(note).toBeTruthy();
   });
 
   it("아직 근무 전인 건에는 그 안내를 붙이지 않는다 (확정 시점 자체가 안 왔다)", async () => {
@@ -138,5 +142,42 @@ describe("목록 안내 문구", () => {
     const { blocks } = await makeupListBlocks(1, "김지연", NOW);
     expect(confirmButtons(blocks)).toHaveLength(0);
     expect(flat(blocks)).toContain("등록된 신청이 없습니다");
+  });
+});
+
+
+describe("근무를 하지 않은 건은 «미실시» 로 내린다", () => {
+  it("아직 확정하지 않은 건에는 미실시 버튼이 붙는다", async () => {
+    rows.push(session());
+    expect(cancelButtons((await makeupListBlocks(1, "김지연", NOW)).blocks)).toHaveLength(1);
+  });
+
+  it("**근무 전(예정)에도 붙는다** — 확정 버튼은 아직 없어도 취소는 미리 할 수 있어야 한다", async () => {
+    rows.push(session({ planStart: t("2026-08-25T09:00:00"), planEnd: t("2026-08-25T16:00:00") }));
+    const { blocks } = await makeupListBlocks(1, "김지연", NOW);
+    expect(confirmButtons(blocks)).toHaveLength(0);
+    expect(cancelButtons(blocks)).toHaveLength(1);
+  });
+
+  it("**수당 대상이 아니어도 붙는다** — 취소는 돈 이야기가 아니다", async () => {
+    rows.push(session({ category: "ABSENCE" }));
+    const { blocks } = await makeupListBlocks(1, "김지연", NOW);
+    expect(confirmButtons(blocks)).toHaveLength(0);
+    expect(cancelButtons(blocks)).toHaveLength(1);
+  });
+
+  it("이미 미실시로 내려간 건에는 안 붙는다", async () => {
+    rows.push(session({ status: "NOSHOW" }));
+    expect(cancelButtons((await makeupListBlocks(1, "김지연", NOW)).blocks)).toHaveLength(0);
+  });
+
+  it("확정 가능한 건에는 두 버튼이 나란히 붙는다", async () => {
+    rows.push(session());
+    const { blocks } = await makeupListBlocks(1, "김지연", NOW);
+    const row = blocks.find((b) => b.type === "actions");
+    expect(row.elements.map((e: any) => e.action_id)).toEqual([
+      "open_makeup_confirm",
+      "open_makeup_cancel",
+    ]);
   });
 });

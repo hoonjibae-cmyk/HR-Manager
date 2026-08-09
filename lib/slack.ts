@@ -1029,6 +1029,35 @@ export function makeupConfirmModalView(ctx: {
   if (ctx.capNotice) blocks.push({ type: "section", text: { type: "mrkdwn", text: ctx.capNotice } });
   blocks.push(
     { type: "divider" },
+    // **근무를 안 한 경우도 여기서 끝낸다** — 이 칸이 없으면 취소하려고 들어온 사람이
+    // 갈 곳이 없어 예정 시간을 그대로 제출해 버린다(하지도 않은 근무가 수당이 된다).
+    {
+      type: "input",
+      block_id: "did",
+      label: { type: "plain_text", text: "이 근무를 하셨나요?" },
+      element: {
+        type: "radio_buttons",
+        action_id: "v",
+        initial_option: {
+          text: { type: "plain_text", text: "네, 근무했습니다 — 아래에 실제 시간을 적습니다" },
+          value: "YES",
+        },
+        options: [
+          {
+            text: { type: "plain_text", text: "네, 근무했습니다 — 아래에 실제 시간을 적습니다" },
+            value: "YES",
+          },
+          {
+            text: { type: "plain_text", text: "아니요, 하지 않았습니다 (미실시 처리)" },
+            value: "NO",
+          },
+        ],
+      },
+      hint: {
+        type: "plain_text",
+        text: "‘아니요’ 를 고르면 아래 시간은 무시되고 수당도 발생하지 않습니다.",
+      },
+    },
     {
       type: "input",
       block_id: "sdate",
@@ -1061,7 +1090,10 @@ export function makeupConfirmModalView(ctx: {
       block_id: "note",
       optional: true,
       label: { type: "plain_text", text: "특이사항이 있으면 적어 주세요" },
-      hint: { type: "plain_text", text: "ex)학생 사정으로 30분 일찍 종료." },
+      hint: {
+        type: "plain_text",
+        text: "ex)학생 사정으로 30분 일찍 종료. / 미실시라면 그 사유를 적어 주세요.",
+      },
       element: {
         type: "plain_text_input",
         action_id: "v",
@@ -1087,6 +1119,8 @@ export interface MakeupConfirmValues {
   endDate: string | null;
   endTime: string | null;
   note: string;
+  /** 라디오 '이 근무를 하셨나요?' — false 면 미실시 처리로 간다 */
+  didWork: boolean;
   id: number | null;
 }
 
@@ -1103,8 +1137,64 @@ export function readMakeupConfirmModal(view: any): MakeupConfirmValues {
     endDate: v.edate?.v?.selected_date ?? null,
     endTime: v.etime?.v?.selected_time ?? null,
     note: (v.note?.v?.value ?? "").trim(),
+    // 라디오가 없던 시절의 옛 모달이 열려 있을 수 있다 — 없으면 '근무했음' 으로 본다
+    // (예전과 같은 동작이라 갑자기 미실시로 처리되는 일이 없다)
+    didWork: (v.did?.v?.selected_option?.value ?? "YES") !== "NO",
     id,
   };
+}
+
+/**
+ * 미실시 전용 모달 — 목록의 «미실시» 버튼에서 연다.
+ *
+ * 확정 모달과 따로 두는 이유: 확정 모달은 '몇 시부터 몇 시까지' 를 묻는 자리라 아직 하지도 않은
+ * (또는 안 하기로 한) 근무에는 물음 자체가 맞지 않는다. 여기서는 **사유만** 받는다.
+ */
+export function makeupCancelModalView(ctx: {
+  id: number;
+  kindLabel: string;
+  dateLabel: string;
+  categoryLabel: string;
+  targetClass: string;
+  /** lib/makeup-confirm 의 cancelNotice */
+  notice: string;
+}) {
+  return {
+    type: "modal",
+    callback_id: "makeup_cancel_submit",
+    private_metadata: JSON.stringify({ id: ctx.id }),
+    title: { type: "plain_text", text: "미실시 처리" },
+    submit: { type: "plain_text", text: "미실시로 내리기" },
+    close: { type: "plain_text", text: "닫기" },
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*${ctx.kindLabel} 미실시 처리*\n• 신청: ${ctx.dateLabel}\n• ${ctx.categoryLabel} · ${ctx.targetClass}`,
+        },
+      },
+      { type: "section", text: { type: "mrkdwn", text: `⚠️ ${ctx.notice}` } },
+      { type: "divider" },
+      {
+        type: "input",
+        block_id: "reason",
+        label: { type: "plain_text", text: "하지 않게 된 사유" },
+        hint: { type: "plain_text", text: "ex)학생 전원 결석으로 취소. / 일정이 다음 주로 옮겨짐." },
+        element: { type: "plain_text_input", action_id: "v", multiline: true },
+      },
+    ],
+  };
+}
+
+export function readMakeupCancelModal(view: any): { id: number | null; reason: string } {
+  const v = view?.state?.values ?? {};
+  let id: number | null = null;
+  try {
+    const n = Number(JSON.parse(view?.private_metadata || "{}").id);
+    id = Number.isFinite(n) && n > 0 ? n : null;
+  } catch {}
+  return { id, reason: (v.reason?.v?.value ?? "").trim() };
 }
 
 /* ==================== 휴가 취소 신청 ==================== */

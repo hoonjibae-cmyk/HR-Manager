@@ -13,6 +13,8 @@ import {
   makeupConfirmModalView,
   readMakeupConfirmModal,
   makeupConfirmRequestBlocks,
+  makeupCancelModalView,
+  readMakeupCancelModal,
 } from "./slack";
 
 describe("parseLeaveText — 빠른 신청 문법", () => {
@@ -355,7 +357,24 @@ describe("readMakeupConfirmModal", () => {
       endDate: null,
       endTime: "14:00",
       note: "30분 일찍 종료",
+      didWork: true,
     });
+  });
+
+  it("**라디오가 없던 옛 모달은 '근무했음' 으로 본다** — 갑자기 미실시로 처리되면 안 된다", () => {
+    const v = readMakeupConfirmModal({
+      private_metadata: JSON.stringify({ id: 7 }),
+      state: { values: { sdate: { v: { selected_date: "2026-08-15" } } } },
+    });
+    expect(v.didWork).toBe(true);
+  });
+
+  it("'아니요' 를 고르면 미실시로 간다", () => {
+    const v = readMakeupConfirmModal({
+      private_metadata: JSON.stringify({ id: 7 }),
+      state: { values: { did: { v: { selected_option: { value: "NO" } } } } },
+    });
+    expect(v.didWork).toBe(false);
   });
 
   it("id 가 없거나 깨졌으면 null — 남의 건을 건드리지 않게 호출부가 막는다", () => {
@@ -402,5 +421,32 @@ describe("makeupConfirmRequestBlocks — 확정 요청 DM", () => {
 
   it("확정한 시간이 곧 수당이라고 알린다", () => {
     expect(JSON.stringify(makeupConfirmRequestBlocks(args))).toContain("수당으로 산정");
+  });
+});
+
+
+describe("makeupCancelModalView — 미실시 처리", () => {
+  it("사유만 받는다 — 하지도 않은 근무에 '몇 시부터' 를 묻지 않는다", () => {
+    const v = makeupCancelModalView({
+      id: 9,
+      kindLabel: "보강",
+      dateLabel: "2026.08.15(토) 09:00~16:00 · 7시간",
+      categoryLabel: "직전보강",
+      targetClass: "은가람중3",
+      notice: "미실시로 내립니다.",
+    });
+    expect(v.callback_id).toBe("makeup_cancel_submit");
+    expect(JSON.parse(v.private_metadata).id).toBe(9);
+    const ids = v.blocks.filter((b: any) => b.type === "input").map((b: any) => b.block_id);
+    expect(ids).toEqual(["reason"]);
+    expect(JSON.stringify(v.blocks)).toContain("은가람중3");
+  });
+
+  it("readMakeupCancelModal 이 id 와 사유를 읽는다", () => {
+    const r = readMakeupCancelModal({
+      private_metadata: JSON.stringify({ id: 9 }),
+      state: { values: { reason: { v: { value: " 학생 전원 결석 " } } } },
+    });
+    expect(r).toEqual({ id: 9, reason: "학생 전원 결석" });
   });
 });
