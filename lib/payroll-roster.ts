@@ -161,6 +161,51 @@ export function planSheetCleanup(
   return plan;
 }
 
+/**
+ * **조회 시점** 기준 퇴직 여부.
+ *
+ * 급여 시트는 '그 달에 재직했는가' 로 만들지만, 화면을 보는 시점은 그보다 뒤다 —
+ * 8월 시트에 8/15 퇴직자가 올라와 있는 건 맞는 일이고(마지막 급여), 9월에 그 화면을
+ * 열면 그 사람은 이미 나간 사람이다. 이름만 봐서는 재직자와 구분이 안 돼
+ * **엉뚱한 사람에게 급여가 나갈 수 있으므로** 행을 다르게 그린다.
+ *
+ * - `RESIGNED` — 오늘 기준 이미 퇴직 (지급 전에 반드시 확인할 행)
+ * - `LEAVING`  — 퇴사일이 잡혀 있으나 아직 오지 않음 (마지막 급여를 앞둔 행)
+ *
+ * ⚠ Tailwind 클래스는 여기 두지 않는다 — `content` 가 `lib/` 를 훑지 않아
+ * 조용히 아무 효과도 나지 않는다. 색은 부르는 쪽(components/app)에서 고른다.
+ */
+export type ResignStatus = "NONE" | "RESIGNED" | "LEAVING";
+
+export function resignStatusOf(
+  resignDate: string | null | undefined,
+  todayYmd: string
+): ResignStatus {
+  if (!resignDate) return "NONE";
+  const day = resignDate.slice(0, 10); // ISO 문자열로 와도 날짜만 본다
+  return day <= todayYmd ? "RESIGNED" : "LEAVING";
+}
+
+/** 이름 옆에 붙이는 짧은 표시 — 날짜를 함께 적어야 '언제 나갔나' 를 되묻지 않는다 */
+export function resignBadgeLabel(resignDate: string, status: ResignStatus): string {
+  const day = resignDate.slice(0, 10);
+  if (status === "LEAVING") return `${day} 퇴사 예정`;
+  return `${day} 퇴직`;
+}
+
+/** 시트 위에 띄우는 한 줄 — 몇 명이 얼마짜리인지까지 적어야 지급 전에 걸린다 */
+export function resignedSummary(
+  rows: Array<{ name: string; resignDate?: string | null; gross: number }>,
+  todayYmd: string
+): { count: number; gross: number; names: string[] } {
+  const hit = rows.filter((r) => resignStatusOf(r.resignDate, todayYmd) === "RESIGNED");
+  return {
+    count: hit.length,
+    gross: hit.reduce((a, r) => a + r.gross, 0),
+    names: hit.map((r) => r.name),
+  };
+}
+
 /** 산정 결과 화면에 띄우는 안내 — 조용히 빠지면 왜 없어졌는지 아무도 모른다 */
 export function cleanupNotice(plan: SheetCleanupPlan): string {
   const lines: string[] = [];

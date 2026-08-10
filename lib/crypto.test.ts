@@ -117,9 +117,17 @@ describe("키가 다르거나 값이 손상됐을 때", () => {
     expect(decryptField(enc)).toBeNull();
   });
 
-  it("암호문이 한 글자라도 바뀌면 거부한다 (GCM 인증 태그)", () => {
+  it("암호문이 한 바이트라도 바뀌면 거부한다 (GCM 인증 태그)", () => {
     const enc = encryptField(RRN) as string;
-    const tampered = enc.slice(0, -2) + (enc.endsWith("A") ? "B" : "A") + "=";
+    // **base64 의 마지막 글자를 바꾸는 것으로는 부족하다** — 끝자락의 남는 비트는
+    // 디코딩에서 버려져 바이트열이 그대로일 때가 있다. IV 가 매번 새로 뽑혀
+    // 암호문 길이·끝자락이 실행마다 달라지므로 이 테스트가 이따금 통과해 버렸다
+    // (스무 번에 한두 번 꼴로 붉어졌다). 바이트를 직접 뒤집어 확실히 훼손한다.
+    const [p, v, iv, tag, ct] = enc.split(":");
+    const buf = Buffer.from(ct, "base64");
+    buf[0] ^= 0xff;
+    const tampered = [p, v, iv, tag, buf.toString("base64")].join(":");
+    expect(tampered).not.toBe(enc);
     expect(decryptField(tampered)).toBeNull();
   });
 

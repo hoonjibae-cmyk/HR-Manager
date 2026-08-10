@@ -9,6 +9,8 @@ import { prisma } from "@/lib/db";
 import { getCompany } from "@/lib/repo";
 import { buildBankTransferWorkbook } from "@/lib/bank-transfer";
 import { logActivity } from "@/lib/activity";
+import { resignedSummary } from "@/lib/payroll-roster";
+import { kstTodayYmd } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -61,7 +63,23 @@ export async function GET(req: Request) {
       "Cache-Control": "no-store",
       // 화면이 경고를 띄울 수 있게 (헤더는 ASCII 만 가능해 base64 로 싣는다)
       "X-Export-Warnings": Buffer.from(
-        JSON.stringify({ missingAccount, zeroAmount, count: rows.length, total }),
+        JSON.stringify({
+          missingAccount,
+          zeroAmount,
+          count: rows.length,
+          total,
+          // 여기가 돈이 실제로 나가는 자리다 — 오늘 기준 이미 퇴직한 사람이 파일에
+          // 들어 있으면 마지막으로 한 번 더 걸리게 한다(막지는 않는다. 마지막 급여와
+          // 퇴직 정산은 정상적으로 이 파일에 실려야 한다).
+          resigned: resignedSummary(
+            records.map((r) => ({
+              name: r.employee.name,
+              resignDate: r.employee.resignDate?.toISOString() ?? null,
+              gross: r.net,
+            })),
+            kstTodayYmd()
+          ),
+        }),
         "utf8"
       ).toString("base64"),
     },

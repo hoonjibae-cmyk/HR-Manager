@@ -12,6 +12,9 @@ import {
   cleanupNotice,
   monthSpan,
   ymd,
+  resignStatusOf,
+  resignBadgeLabel,
+  resignedSummary,
   type RosterEmp,
   type SheetRecord,
 } from "./payroll-roster";
@@ -199,6 +202,80 @@ describe("planSheetCleanup — 남은 기록 내리기", () => {
     expect(plan.remove.map((x) => x.recordId).sort()).toEqual([102, 105]);
     expect(plan.kept.map((x) => x.recordId)).toEqual([103]);
     expect(plan.locked.map((x) => x.recordId)).toEqual([104]);
+  });
+});
+
+describe("resignStatusOf — 조회 시점 기준 퇴직 여부", () => {
+  const TODAY = "2026-09-10";
+
+  it("퇴사일이 없으면 NONE", () => {
+    expect(resignStatusOf(null, TODAY)).toBe("NONE");
+    expect(resignStatusOf(undefined, TODAY)).toBe("NONE");
+  });
+
+  it("지난 퇴사일이면 RESIGNED", () => {
+    expect(resignStatusOf("2026-08-15", TODAY)).toBe("RESIGNED");
+  });
+
+  it("**오늘이 퇴사일이면 RESIGNED** — 그날까지가 재직이지만 화면은 이미 나간 것으로 알려야 한다", () => {
+    expect(resignStatusOf("2026-09-10", TODAY)).toBe("RESIGNED");
+  });
+
+  it("아직 오지 않은 퇴사일이면 LEAVING", () => {
+    expect(resignStatusOf("2026-09-30", TODAY)).toBe("LEAVING");
+  });
+
+  it("ISO 문자열로 와도 날짜만 본다 (API 응답이 그대로 들어온다)", () => {
+    expect(resignStatusOf("2026-08-15T00:00:00.000Z", TODAY)).toBe("RESIGNED");
+    expect(resignStatusOf("2026-09-30T00:00:00.000Z", TODAY)).toBe("LEAVING");
+  });
+
+  // 8월 시트에 8/15 퇴직자가 있는 건 맞는 일이다(마지막 급여). 문제는 9월에 그 화면을
+  // 열었을 때 재직자와 구분이 안 되는 것이라, 판정은 '그 달' 이 아니라 '오늘' 로 한다.
+  it("그 달 재직 여부와는 별개다 — 8월 시트의 8/15 퇴직자는 8월엔 재직, 9월엔 이미 퇴직", () => {
+    const e = emp({ resignDate: d("2026-08-15") });
+    expect(employedInMonth(e, 2026, 8)).toBe(true);
+    expect(resignStatusOf("2026-08-15", "2026-08-10")).toBe("LEAVING");
+    expect(resignStatusOf("2026-08-15", "2026-09-10")).toBe("RESIGNED");
+  });
+});
+
+describe("resignBadgeLabel — 날짜를 함께 적는다", () => {
+  it("퇴직은 날짜 + '퇴직'", () => {
+    expect(resignBadgeLabel("2026-08-15", "RESIGNED")).toBe("2026-08-15 퇴직");
+  });
+
+  it("예정은 '퇴사 예정' 으로 갈라 적는다 — 같은 말로 적으면 이미 나간 줄 안다", () => {
+    expect(resignBadgeLabel("2026-09-30", "LEAVING")).toBe("2026-09-30 퇴사 예정");
+  });
+
+  it("ISO 문자열도 날짜만 남긴다", () => {
+    expect(resignBadgeLabel("2026-08-15T00:00:00.000Z", "RESIGNED")).toBe("2026-08-15 퇴직");
+  });
+});
+
+describe("resignedSummary — 지급 전에 걸리게 하는 한 줄", () => {
+  const TODAY = "2026-09-10";
+  const rows = [
+    { name: "재직자", resignDate: null, gross: 3_000_000 },
+    { name: "지난달퇴직", resignDate: "2026-08-15", gross: 1_500_000 },
+    { name: "퇴사예정", resignDate: "2026-09-30", gross: 4_000_000 },
+    { name: "정산분", resignDate: "2026-06-30T00:00:00.000Z", gross: 700_000 },
+  ];
+
+  it("이미 퇴직한 사람만 세고 금액을 더한다", () => {
+    const s = resignedSummary(rows, TODAY);
+    expect(s.count).toBe(2);
+    expect(s.gross).toBe(2_200_000);
+    expect(s.names).toEqual(["지난달퇴직", "정산분"]);
+  });
+
+  it("**퇴사 예정은 세지 않는다** — 아직 재직 중이라 정상 지급이다", () => {
+    expect(resignedSummary(rows, TODAY).names).not.toContain("퇴사예정");
+  });
+
+  it("아무도 없으면 0 — 경고를 띄우지 않는다", () => {
+    expect(resignedSummary([rows[0]], TODAY)).toEqual({ count: 0, gross: 0, names: [] });
   });
 });
 

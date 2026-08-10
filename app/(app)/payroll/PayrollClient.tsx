@@ -9,6 +9,7 @@ import {
   isContractorContract,
 } from "@/lib/constants";
 import { Pill } from "@/components/ui";
+import { resignStatusOf, resignBadgeLabel, resignedSummary } from "@/lib/payroll-roster";
 import {
   useTableSort,
   useStoredState,
@@ -155,7 +156,7 @@ const SORT_LABELS: Record<string, string> = {
   status: "상태",
 };
 
-export default function PayrollClient() {
+export default function PayrollClient({ today }: { today: string }) {
   // 마지막으로 보던 연·월을 기억한다 — 급여 작업은 한 달을 며칠에 걸쳐 여러 번 드나들며 한다
   const [period, setPeriod] = useStoredState("payroll.period", {
     year: now.getFullYear(),
@@ -325,6 +326,12 @@ export default function PayrollClient() {
               ? `계좌가 없어 빠진 ${w.missingAccount.length}건: ${w.missingAccount.join(", ")}\n→ 직원 정보에 은행·계좌번호를 넣은 뒤 다시 받으세요.`
               : "",
             w.zeroAmount?.length ? `지급액이 0원이라 빠진 직원: ${w.zeroAmount.join(", ")}` : "",
+            // 돈이 실제로 나가는 파일이라 여기서 한 번 더 걸리게 한다 (막지는 않는다)
+            w.resigned?.count
+              ? `오늘 기준 이미 퇴직한 직원 ${w.resigned.count}명이 이체 파일에 있습니다 (실지급 ${Number(
+                  w.resigned.gross
+                ).toLocaleString()}원)\n${w.resigned.names.join(", ")}\n→ 마지막 급여·퇴직 정산이면 정상입니다. 아니라면 올리기 전에 확인하세요.`
+              : "",
           ].filter(Boolean);
           if (msgs.length) alert("⚠️ 확인이 필요합니다\n\n" + msgs.join("\n\n"));
         }
@@ -438,6 +445,17 @@ export default function PayrollClient() {
   // 화면을 걸렀다고 줄어들면 안 된다. 대신 필터가 걸려 있으면 카드에 '전체 기준' 을 붙인다.
   const totalNet = recs.reduce((s, r) => s + r.net, 0);
   const totalGross = recs.reduce((s, r) => s + r.gross, 0);
+
+  // 조회 시점 기준 이미 퇴직한 사람 — 합계 카드와 같은 원칙으로 **거른 것과 무관하게**
+  // 그 달 전체를 센다. 화면을 걸렀다고 경고가 사라지면 경고가 아니게 된다.
+  const resigned = React.useMemo(
+    () =>
+      resignedSummary(
+        recs.map((r) => ({ name: r.employee.name, resignDate: r.employee.resignDate, gross: r.gross })),
+        today
+      ),
+    [recs, today]
+  );
 
   const filtered = React.useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -730,6 +748,22 @@ export default function PayrollClient() {
         </div>
       )}
 
+      {/* 지급 전에 한 번 걸리게 하는 줄 — 행마다 붙은 표시는 스크롤해야 보이지만
+          이 줄은 늘 위에 있다. 몇 명이 얼마짜리인지까지 적어야 실제로 확인하게 된다. */}
+      {resigned.count > 0 && (
+        <div className="card p-3 mb-5 border-rose-200 bg-rose-50/60 text-sm text-rose-900">
+          <b>⚠️ 오늘 기준 이미 퇴직한 직원 {resigned.count}명</b>이 이 달 시트에 있습니다 · 지급액{" "}
+          <b>{won(resigned.gross)}원</b>
+          <div className="text-xs text-rose-700 mt-1">
+            {resigned.names.join(", ")}
+          </div>
+          <div className="text-xs text-rose-700/80 mt-1">
+            그 달에 재직한 마지막 급여이거나 직접 올린 정산분이면 정상입니다. 아니라면
+            이체 전에 <b>직원 정보의 퇴사일</b>을 확인하고 <b>급여 일괄 산정</b>을 다시 누르세요.
+          </div>
+        </div>
+      )}
+
       </div>
 
       {/* 표 — 남은 높이를 채우고 여기 안에서만 스크롤한다(필터 줄과 머리글은 붙어 있다) */}
@@ -821,11 +855,43 @@ export default function PayrollClient() {
                   payScheme: r.payScheme,
                   isContractor: r.employee?.isContractor,
                 });
+                // **조회 시점** 기준 퇴직 여부 — 이 달 시트에 있는 것은 맞아도(마지막 급여)
+                // 지금은 이미 나간 사람일 수 있다. 이름만 봐서는 구분이 안 돼 엉뚱한 사람에게
+                // 급여가 나갈 수 있으므로 행째로 다르게 그린다.
+                const resign = resignStatusOf(r.employee.resignDate, today);
                 return (
                 <React.Fragment key={r.id}>
-                <tr className="hover:bg-slate-50">
+                <tr
+                  className={
+                    resign === "RESIGNED"
+                      ? "bg-rose-50/50 hover:bg-rose-50"
+                      : resign === "LEAVING"
+                        ? "bg-amber-50/40 hover:bg-amber-50"
+                        : "hover:bg-slate-50"
+                  }
+                >
                   <td className="td">
-                    <div className="font-semibold whitespace-nowrap">{r.employee.name}</div>
+                    <div className="font-semibold whitespace-nowrap flex items-center gap-1.5">
+                      <span className={resign === "RESIGNED" ? "text-rose-900" : undefined}>
+                        {r.employee.name}
+                      </span>
+                      {resign !== "NONE" && r.employee.resignDate && (
+                        <span
+                          className={`pill text-[10px] whitespace-nowrap ${
+                            resign === "RESIGNED"
+                              ? "bg-rose-100 text-rose-800"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                          title={
+                            resign === "RESIGNED"
+                              ? "오늘 기준 이미 퇴직한 직원입니다. 이 달 마지막 급여가 맞는지 확인하고 이체하세요."
+                              : "퇴사일이 잡혀 있습니다. 이 달이 마지막 급여가 될 수 있습니다."
+                          }
+                        >
+                          {resignBadgeLabel(r.employee.resignDate, resign)}
+                        </span>
+                      )}
+                    </div>
                     <div className="text-xs text-slate-400 whitespace-nowrap">
                       {r.employee.department} {r.employee.position}
                     </div>
