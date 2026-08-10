@@ -63,6 +63,8 @@ interface Rec {
   /** 최초 발송 시각 (정정본에 '최초 발급일' 로 찍힌다) */
   firstSentAt: string | null;
   emailedAt: string | null;
+  /** 그 달 재직 기간이 없는데 관리자가 직접 올린 행 — 배치 산정이 내리지 않는다 */
+  manualAdd?: boolean;
   employee: {
     name: string;
     empNo: string;
@@ -70,7 +72,22 @@ interface Rec {
     position: string | null;
     isContractor?: boolean;
     parkingFee?: number;
+    resignDate?: string | null;
   };
+}
+
+/** 시트에 없는 직원 — 수동 추가 후보 */
+interface Candidate {
+  id: number;
+  name: string;
+  empNo: string;
+  department: string | null;
+  position: string | null;
+  resignDate: string | null;
+  hireDate: string;
+  employed: boolean;
+  reason: string;
+  note: string;
 }
 
 const now = new Date();
@@ -153,6 +170,7 @@ export default function PayrollClient() {
   const [busy, setBusy] = useState("");
   const [openDedId, setOpenDedId] = useState<number | null>(null);
   const [unlockRec, setUnlockRec] = useState<Rec | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
   const [tsResult, setTsResult] = useState<any>(null);
   const [incResult, setIncResult] = useState<any>(null);
   // 이름 검색은 기억하지 않는다 — 그때그때 한 사람 찾는 동작이지 기본값이 아니다
@@ -185,13 +203,42 @@ export default function PayrollClient() {
     for (const [id, v] of Object.entries(inputs)) {
       cleanInputs[Number(id)] = cleanRowInput(v);
     }
-    await fetch("/api/payroll/run", {
+    const res = await fetch("/api/payroll/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ year, month, inputs: cleanInputs }),
     });
+    const j = await res.json().catch(() => ({}));
     await load();
     setBusy("");
+    // 시트에서 빠진 사람은 반드시 알린다 — 조용히 사라지면 왜 없어졌는지 알 수 없고,
+    // 퇴직일 오타 하나로 멀쩡한 행이 지워진 것을 알아챌 길이 없다.
+    const msgs: string[] = [];
+    if (j.removed?.length)
+      msgs.push(
+        `퇴직·미입사로 시트에서 제외한 ${j.removed.length}명\n` +
+          j.removed.map((e: any) => `· ${e.note}`).join("\n") +
+          `\n\n실제로는 지급할 몫이 남았다면 «＋ 직원 추가» 로 다시 올릴 수 있습니다.` +
+          `\n퇴직일이 잘못 입력된 것이라면 직원 정보를 고친 뒤 다시 산정하세요.`
+      );
+    if (j.locked?.length)
+      msgs.push(
+        `⚠️ 재직 기간이 없는데 이미 명세서가 발송돼 그대로 둔 ${j.locked.length}건\n` +
+          j.locked.map((e: any) => `· ${e.note}`).join("\n") +
+          `\n→ 잘못된 발송이면 상태 필터를 '발송완료' 로 좁혀 «🔓 발송 잠금 해제» 후 다시 산정하세요.`
+      );
+    if (msgs.length) alert(msgs.join("\n\n"));
+  }
+
+  /** 시트에서 내리기 — 직접 추가한 행만 (재직자 행은 다음 산정에서 도로 생긴다) */
+  async function dropRow(r: Rec) {
+    if (!confirm(`${r.employee.name}의 ${year}년 ${month}월 급여 기록을 시트에서 내릴까요?\n직접 추가했던 행이라 되돌리려면 다시 추가해야 합니다.`))
+      return;
+    setBusy(`drop-${r.id}`);
+    const res = await fetch(`/api/payroll/${r.id}`, { method: "DELETE" });
+    setBusy("");
+    if (!res.ok) return alert("내리기 실패: " + ((await res.json().catch(() => ({}))).error || ""));
+    await load();
   }
 
   /** 한 직원만 변동입력 저장 + 재산정 (다른 행의 입력 중인 값은 유지) */
@@ -453,6 +500,14 @@ export default function PayrollClient() {
         </select>
         <button className="btn-primary" onClick={run} disabled={!!busy}>
           {busy === "calc" ? "산정 중…" : "급여 일괄 산정"}
+        </button>
+        <button
+          className="btn-outline"
+          onClick={() => setAddOpen(true)}
+          disabled={!!busy}
+          title="퇴직자에게 남은 지급분(보강 수당·미사용 연차수당·인센티브 정산)을 이 달 시트에 올립니다"
+        >
+          ＋ 직원 추가
         </button>
         <label className={`btn-outline cursor-pointer ${busy ? "opacity-50 pointer-events-none" : ""}`}>
           {busy === "ts" ? "처리 중…" : "📤 시간기록표 업로드"}
@@ -777,6 +832,27 @@ export default function PayrollClient() {
                     {r.prorationRatio < 1 && (r.payScheme === "MONTHLY" || r.payScheme === "INCENTIVE") && (
                       <div className="text-[10px] text-amber-600 mt-0.5">일할 {(r.prorationRatio * 100).toFixed(0)}%</div>
                     )}
+                    {/* 재직 기간이 없는데 올라와 있는 행 — 왜 여기 있는지가 행에 드러나야 한다 */}
+                    {r.manualAdd && (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span
+                          className="pill bg-violet-50 text-violet-700 text-[10px]"
+                          title={`${r.employee.resignDate ? r.employee.resignDate.slice(0, 10) + " 퇴직 — " : ""}재직 기간이 없지만 직접 올린 행입니다. 기본급은 0원이고 직접 넣은 항목만 지급됩니다.`}
+                        >
+                          직접 추가
+                        </span>
+                        {r.status !== "SENT" && (
+                          <button
+                            className="text-[10px] text-slate-400 hover:text-rose-600"
+                            onClick={() => dropRow(r)}
+                            disabled={!!busy}
+                            title="이 행을 시트에서 내립니다"
+                          >
+                            내리기 ✕
+                          </button>
+                        )}
+                      </div>
+                    )}
                     {/* 인센티브 칸이 없던 시절 상여 칸에 인센티브를 넣던 흔적 —
                         그대로 두면 퇴직유보금(인센티브×1/12)이 잡히지 않는다 */}
                     {r.payScheme === "INCENTIVE" && r.bonusP > 0 && r.incentiveP === 0 && (
@@ -1049,6 +1125,178 @@ export default function PayrollClient() {
           }}
         />
       )}
+      {addOpen && (
+        <AddEmployeeModal
+          year={year}
+          month={month}
+          onClose={() => setAddOpen(false)}
+          onDone={async () => {
+            setAddOpen(false);
+            await load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 시트에 없는 직원을 이 달 시트에 올리는 창.
+ *
+ * 쓰는 자리는 대개 **퇴직자 정산**이다 — 마지막 급여를 보낸 뒤에 보강 수당이 확정되거나,
+ * 미사용 연차수당·인센티브 정산이 남았을 때. 그래서 퇴직자를 목록 맨 위에 세우고,
+ * **기본급이 0원이라는 사실을 미리 적는다** — 그걸 모르고 올리면 '왜 0원이냐' 가 되고,
+ * 반대로 만근 금액이 나올 줄 알고 그대로 발송하면 되돌리기 어렵다.
+ */
+function AddEmployeeModal({
+  year,
+  month,
+  onClose,
+  onDone,
+}: {
+  year: number;
+  month: number;
+  onClose: () => void;
+  onDone: () => Promise<void>;
+}) {
+  const [list, setList] = useState<Candidate[] | null>(null);
+  const [picked, setPicked] = useState<number[]>([]);
+  const [q, setQ] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch(`/api/payroll/add?year=${year}&month=${month}`)
+      .then((r) => (r.ok ? r.json() : { candidates: [] }))
+      .then((j) => setList(j.candidates ?? []))
+      .catch(() => setList([]));
+  }, [year, month]);
+
+  const shown = (list ?? []).filter((c) => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return true;
+    return [c.name, c.empNo, c.department, c.position]
+      .filter(Boolean)
+      .some((v) => String(v).toLowerCase().includes(needle));
+  });
+  const toggle = (id: number) =>
+    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  async function submit() {
+    if (!picked.length) return;
+    setSaving(true);
+    const res = await fetch("/api/payroll/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ year, month, employeeIds: picked }),
+    });
+    setSaving(false);
+    if (res.ok) await onDone();
+    else alert("추가 실패: " + ((await res.json().catch(() => ({}))).error || ""));
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="card w-full max-w-2xl p-5 bg-white flex flex-col max-h-[85vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="font-bold text-slate-800 mb-1">
+          ＋ 급여 시트에 직원 추가 — {year}년 {month}월
+        </h3>
+        <p className="text-xs text-slate-500 mb-3">
+          이 달 시트에 없는 직원입니다. 퇴직자가 먼저 나옵니다.
+        </p>
+
+        <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 space-y-1 mb-3">
+          <div className="font-semibold">퇴직자를 올릴 때 알아두세요</div>
+          <div>
+            · 그 달 재직 기간이 없으므로 <b>일할계산 0% — 기본급·수당은 0원</b>입니다.
+            보강 수당·미사용 연차수당·인센티브 정산처럼 <b>직접 넣는 항목만</b> 지급됩니다.
+          </div>
+          <div>
+            · 올린 행은 <b>직접 추가</b> 표시가 붙어 다음 일괄 산정에서 사라지지 않습니다.
+            잘못 올렸으면 행의 <b>내리기 ✕</b> 로 뺍니다.
+          </div>
+          <div>
+            · 실제로는 그 달에도 재직한 것이라면 여기가 아니라 <b>직원 정보의 퇴사일</b>을
+            고친 뒤 일괄 산정하세요 — 그래야 기본급이 제대로 잡힙니다.
+          </div>
+        </div>
+
+        <input
+          className="input mb-2"
+          placeholder="이름·사번·부서로 찾기"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+
+        <div className="flex-1 min-h-0 overflow-auto border border-slate-200 rounded">
+          {list === null ? (
+            <div className="text-center text-slate-400 py-10 text-sm">불러오는 중…</div>
+          ) : shown.length === 0 ? (
+            <div className="text-center text-slate-400 py-10 text-sm">
+              {list.length === 0 ? "모든 직원이 이미 시트에 있습니다." : "조건에 맞는 직원이 없습니다."}
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {shown.map((c) => (
+                <li key={c.id}>
+                  <label className="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={picked.includes(c.id)}
+                      onChange={() => toggle(c.id)}
+                    />
+                    <span className="flex-1 min-w-0">
+                      <span className="flex items-center gap-2 flex-wrap">
+                        <b className="text-sm">{c.name}</b>
+                        <span className="text-xs text-slate-400">{c.empNo}</span>
+                        <span className="text-xs text-slate-400">
+                          {c.department} {c.position}
+                        </span>
+                        {c.reason === "RESIGNED" && (
+                          <span className="pill bg-rose-50 text-rose-700 text-[10px]">
+                            {c.resignDate} 퇴직
+                          </span>
+                        )}
+                        {c.reason === "NOT_HIRED" && (
+                          <span className="pill bg-slate-100 text-slate-600 text-[10px]">
+                            {c.hireDate} 입사 예정
+                          </span>
+                        )}
+                        {c.employed && (
+                          <span className="pill bg-emerald-50 text-emerald-700 text-[10px]">재직 중</span>
+                        )}
+                      </span>
+                      <span className="block text-[11px] text-slate-400 mt-0.5">
+                        {c.employed
+                          ? "재직 중인데 시트에 없습니다 — 일괄 산정을 돌리면 정상적으로 올라옵니다."
+                          : "재직 기간 없음 — 기본급 0원, 직접 넣은 항목만 지급됩니다."}
+                      </span>
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 mt-3">
+          <span className="text-xs text-slate-500 mr-auto">
+            {picked.length ? `${picked.length}명 선택` : "추가할 직원을 고르세요"}
+          </span>
+          <button className="btn-outline" onClick={onClose} disabled={saving}>
+            취소
+          </button>
+          <button className="btn-primary" onClick={submit} disabled={saving || !picked.length}>
+            {saving ? "추가 중…" : "시트에 추가"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

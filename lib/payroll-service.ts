@@ -10,6 +10,12 @@ import { getActiveRates, getTaxTable, empToPayInput } from "./repo";
 import { summarizeIncentive, isRevenueRoster, type RosterStudent } from "./incentive";
 import { overtimeInputsFor } from "./makeup-service";
 import { parkingDeductionOf } from "./constants";
+import {
+  planSheetCleanup,
+  employedInMonth,
+  type SheetCleanupPlan,
+} from "./payroll-roster";
+import { logActivity } from "./activity";
 
 export interface PayrollInputMap {
   [employeeId: number]: MonthlyInput;
@@ -288,6 +294,21 @@ function assembleDeductions(args: {
   };
 }
 
+export interface PayrollRunOptions {
+  /**
+   * `onlyEmployeeIds` 로 지목한 직원을 **재직 기간과 무관하게** 시트에 올린다.
+   * 퇴직 뒤에 확정된 보강 수당·미사용 연차수당·인센티브 정산처럼 마지막 급여
+   * 이후에 지급할 몫이 생겼을 때 쓴다. 기록에 표시가 남아 배치가 다시 내리지 않는다.
+   */
+  manualAdd?: boolean;
+}
+
+export interface PayrollRunResult {
+  records: any[];
+  /** 재직 기간이 없어 시트에서 내린 기록 */
+  plan: SheetCleanupPlan;
+}
+
 /**
  * 한 달치 급여를 (활성 직원 전원 또는 지정 직원) 계산하여 upsert.
  * - 공제모드 기본 MANUAL: 법정공제(4대보험·소득세)는 세무사 지정값을 직접 입력(공제 편집).
@@ -295,14 +316,29 @@ function assembleDeductions(args: {
  * - AUTO 모드 레코드는 법정공제를 엔진으로 재산출.
  * - 퇴직유보금(인센티브×8.3%)은 모드와 무관하게 자동 산출.
  * - 월중 입/퇴사자는 일할계산 자동 적용.
+ * - **전월 자 퇴직자는 시트에 올리지 않고, 남아 있던 기록도 내린다**(전체 산정일 때).
+ *   단 `manualAdd` 로 올려 둔 기록은 그대로 둔다.
  */
 export async function runPayrollMonth(
   year: number,
   month: number,
   inputs: PayrollInputMap = {},
-  onlyEmployeeIds?: number[]
-) {
+  onlyEmployeeIds?: number[],
+  opts: PayrollRunOptions = {}
+): Promise<PayrollRunResult> {
   const [rates, tax] = await Promise.all([getActiveRates(), getTaxTable()]);
+  // 이미 수동으로 올려 둔 사람 — 재직 기간이 없어도 계속 시트에 남고 다시 계산된다.
+  // (배치가 이 표시를 못 읽으면 다음 산정에서 조용히 사라진다)
+  const manualIds = new Set(
+    (
+      await prisma.payrollRecord.findMany({
+        where: { year, month, manualAdd: true },
+        select: { employeeId: true },
+      })
+    ).map((r) => r.employeeId)
+  );
+  if (opts.manualAdd) for (const id of onlyEmployeeIds ?? []) manualIds.add(id);
+
   const where: any = {
     OR: [
       { active: true },
@@ -313,6 +349,7 @@ export async function runPayrollMonth(
           lte: new Date(Date.UTC(year, month, 0)),
         },
       },
+      ...(manualIds.size ? [{ id: { in: [...manualIds] } }] : []),
     ],
   };
   if (onlyEmployeeIds && onlyEmployeeIds.length)
@@ -386,7 +423,10 @@ export async function runPayrollMonth(
       emp.hireDate,
       emp.resignDate
     );
-    if (mInput.prorationRatio === 0) continue; // 해당 월 재직 없음
+    // 그 달 재직 기간이 없으면 시트에 올리지 않는다 — 다만 관리자가 일부러 올린 건은
+    // 남긴다(기본급은 일할 0% 라 0 원이고, 직접 넣은 항목만 지급된다).
+    const manualAdd = manualIds.has(emp.id) && !employedInMonth(emp, year, month);
+    if (mInput.prorationRatio === 0 && !manualAdd) continue;
 
     // 월중 계약 갱신 시 기본급(시급)·수당을 역일수 가중평균으로 치환
     const payInput = empToPayInput(emp);
@@ -425,6 +465,12 @@ export async function runPayrollMonth(
     // (`runPayrollMonth(y, m, {}, [id])`) 화면이 보낸 값이 없어 매출이 0 으로 지워졌었다.
     if (mInput.classRevenue === undefined)
       mInput.classRevenue = existing?.classRevenue ?? null;
+    // 상여·미사용연차도 같은 이유로 보존한다. 특히 **수동 추가한 퇴직자 행**은 기본급이
+    // 0 원이라 이 두 칸이 지급액의 전부다 — 화면을 거치지 않는 재산정에서 지워지면
+    // 정산분이 통째로 사라진다. (화면은 빈칸도 0 으로 명시해 보내므로 지우는 길은 그대로 있다)
+    if (mInput.bonus === undefined) mInput.bonus = existing?.bonus ?? 0;
+    if (mInput.unusedLeaveDays === undefined)
+      mInput.unusedLeaveDays = existing?.unusedLeaveDays ?? 0;
 
     const r = computePayroll(payInput, mInput, rates, tax);
 
@@ -552,6 +598,7 @@ export async function runPayrollMonth(
           : null,
       }),
       status: "DRAFT",
+      manualAdd,
     };
 
     const rec = await prisma.payrollRecord.upsert({
@@ -561,7 +608,61 @@ export async function runPayrollMonth(
     });
     results.push(rec);
   }
-  return results;
+
+  // 전체 산정일 때만 훑는다 — 한 사람만 지목해 저장했는데 남의 행이 사라지면
+  // 무슨 일이 일어난 건지 알 수 없다.
+  const plan =
+    onlyEmployeeIds && onlyEmployeeIds.length
+      ? { remove: [], locked: [], kept: [] }
+      : await pruneResignedFromSheet(year, month);
+
+  return { records: results, plan };
+}
+
+/**
+ * 그 달 시트에서 **재직 기간이 없는 기록을 내린다**(전월 자 퇴직자·미입사자).
+ *
+ * - 발송(SENT)된 기록은 건드리지 않는다 — 명세서가 이미 직원에게 갔으므로
+ *   사유를 남기는 '발송 잠금 해제' 를 거쳐야 한다. 대신 결과에 실어 알린다.
+ * - 관리자가 올린 기록(`manualAdd`)은 그대로 둔다.
+ * - **지운 금액을 작업 이력에 남긴다** — 퇴직일 오타 하나로 공제 입력값까지
+ *   사라지므로, 무엇이 얼마짜리였는지 사람이 되짚을 수 있어야 한다.
+ */
+export async function pruneResignedFromSheet(
+  year: number,
+  month: number
+): Promise<SheetCleanupPlan> {
+  const records = await prisma.payrollRecord.findMany({
+    where: { year, month },
+    include: { employee: { select: { id: true, name: true, hireDate: true, resignDate: true } } },
+  });
+  const plan = planSheetCleanup(
+    records.map((r) => ({
+      id: r.id,
+      employeeId: r.employeeId,
+      status: r.status,
+      manualAdd: r.manualAdd,
+      gross: r.gross,
+      net: r.net,
+    })),
+    records.map((r) => r.employee),
+    year,
+    month
+  );
+  if (!plan.remove.length) return plan;
+
+  await prisma.payrollRecord.deleteMany({
+    where: { id: { in: plan.remove.map((e) => e.recordId) } },
+  });
+  await logActivity({
+    action: "PAYROLL_PRUNE",
+    target: `${year}-${String(month).padStart(2, "0")}`,
+    summary:
+      `${year}년 ${month}월 급여 시트에서 재직 기간이 없는 ${plan.remove.length}명을 제외했습니다. ` +
+      plan.remove.map((e) => e.name).join(", "),
+    meta: { removed: plan.remove },
+  });
+  return plan;
 }
 
 export interface OtherDeductItem {

@@ -393,6 +393,11 @@ model PayrollRecord {
   /// 마지막 잠금 해제 사유. **내부 감사용**이라 명세서·메일에는 싣지 않는다
   unlockReason String?
 
+  /// 그 달 재직 기간이 없는데 관리자가 일부러 시트에 올린 기록(퇴직자 미지급분 정산 등).
+  /// 배치 재산정이 **지우지 않고 그대로 다시 계산**하는 표시다 — 이 표시가 없는
+  /// '재직 기간 없는 기록' 은 전월 퇴직자가 남은 것으로 보고 시트에서 뺀다.
+  manualAdd Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -14,6 +14,8 @@ export const ACTION_LABEL: Record<string, string> = {
   PAYROLL_RUN: "급여 일괄 산정",
   PAYROLL_EDIT: "급여 개별 수정",
   PAYROLL_DELETE: "급여 기록 삭제",
+  PAYROLL_PRUNE: "퇴직자 급여 시트 제외",
+  PAYROLL_ADD: "퇴직자 급여 시트 수동 추가",
   PAYROLL_UNLOCK: "발송 잠금 해제",
   PAYROLL_TIMESHEET: "시간기록표 반영",
   PAYROLL_INCENTIVE: "인센티브 명단 반영",

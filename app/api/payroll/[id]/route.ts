@@ -68,3 +68,38 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ error: e.message }, { status: 400 });
   }
 }
+
+/**
+ * 시트에서 한 행을 내린다 — **직접 추가한 행(manualAdd)만**.
+ * 재직 중인 직원의 행까지 여기서 지울 수 있으면 다음 산정에서 도로 생기므로
+ * 지운 셈도 안 되면서 그 사이에 세무·이체 파일만 어긋난다.
+ * 전월 퇴직자가 남은 행은 산정이 알아서 내린다(pruneResignedFromSheet).
+ */
+export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+  if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const rec = await prisma.payrollRecord.findUnique({
+    where: { id: Number(params.id) },
+    include: { employee: { select: { name: true } } },
+  });
+  if (!rec) return NextResponse.json({ error: "기록을 찾을 수 없습니다" }, { status: 404 });
+  if (!rec.manualAdd)
+    return NextResponse.json(
+      { error: "직접 추가한 행만 내릴 수 있습니다. 재직 중인 직원은 급여 산정 대상입니다." },
+      { status: 400 }
+    );
+  if (rec.status === "SENT")
+    return NextResponse.json(
+      { error: "이미 명세서가 발송된 기록입니다. '발송 잠금 해제' 로 사유를 남긴 뒤 내리세요." },
+      { status: 400 }
+    );
+
+  await prisma.payrollRecord.delete({ where: { id: rec.id } });
+  await logActivity({
+    action: "PAYROLL_DELETE",
+    employeeId: rec.employeeId,
+    target: `${rec.employee.name} ${rec.year}-${String(rec.month).padStart(2, "0")}`,
+    summary: `직접 추가했던 ${rec.employee.name}의 ${rec.year}년 ${rec.month}월 급여 기록을 시트에서 내렸습니다. (지급액 ${rec.gross.toLocaleString()}원)`,
+    meta: { gross: rec.gross, net: rec.net },
+  });
+  return NextResponse.json({ ok: true });
+}
