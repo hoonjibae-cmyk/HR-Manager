@@ -9,15 +9,18 @@ const onServerless =
   !!process.env.AWS_LAMBDA_FUNCTION_NAME ||
   !!process.env.AWS_EXECUTION_ENV;
 
-// @sparticuz/chromium 은 AWS_EXECUTION_ENV / AWS_LAMBDA_JS_RUNTIME 에 "20.x" 가
-// 있어야만 NSS 라이브러리(libnss3 등, al2023.tar.br)를 추출하고 LD_LIBRARY_PATH 를
-// /tmp/al2023/lib 로 설정한다. Vercel 은 이 변수를 설정하지 않아 chromium 이
-// libnss3 를 찾지 못하므로, @sparticuz/chromium import 이전에 직접 설정한다.
-if (
-  onServerless &&
-  !process.env.AWS_EXECUTION_ENV &&
-  !process.env.AWS_LAMBDA_JS_RUNTIME
-) {
+// @sparticuz/chromium(123) 은 환경변수에 **문자열 "20.x" 가 들어 있을 때만**
+// Amazon Linux 2023 용 NSS 라이브러리(libnss3 등, al2023.tar.br)를 풀고
+// LD_LIBRARY_PATH 를 /tmp/al2023/lib 로 잡는다. 없으면 옛 AL2 쪽을 풀어
+// chromium 이 libnss3 를 찾지 못하고 죽는다.
+//
+// Vercel 은 AL2023 위에서 돌면서도 이 변수들을 채워 주지 않으므로 직접 넣는다.
+// **여기 적힌 "20.x" 는 런타임 Node 버전이 아니라 라이브러리 묶음을 고르는 스위치**다 —
+// Node 24 로 올려도 바탕은 여전히 AL2023 이라 이 값을 그대로 둔다.
+// 비어 있을 때만이 아니라 **항상** 넣는 이유: Vercel 이 나중에
+// AWS_EXECUTION_ENV=AWS_Lambda_nodejs24.x 를 채우기 시작하면 예전 조건에서는
+// 이 줄이 건너뛰어져 AL2 묶음만 풀리고 PDF 가 통째로 죽는다.
+if (onServerless && !process.env.AWS_LAMBDA_JS_RUNTIME?.includes("20.x")) {
   process.env.AWS_LAMBDA_JS_RUNTIME = "nodejs20.x";
 }
 

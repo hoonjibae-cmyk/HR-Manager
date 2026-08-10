@@ -1,6 +1,6 @@
 {
   "name": "유쌤에듀 HR",
-  "image": "mcr.microsoft.com/devcontainers/javascript-node:20-bookworm",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:24-bookworm",
   "features": {},
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "forwardPorts": [3000],

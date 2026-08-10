@@ -3,7 +3,7 @@
 
 generator client {
   provider      = "prisma-client-js"
-  // Vercel(서버리스, Amazon Linux/Node20) 런타임 바이너리 포함
+  // Vercel(서버리스, Amazon Linux 2023) 런타임 바이너리 포함 — Node 버전과 무관
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
