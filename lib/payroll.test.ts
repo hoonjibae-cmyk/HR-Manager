@@ -6,6 +6,7 @@ import {
   floor10,
   blendWageTerms,
   inclusiveWageBreakdown,
+  isEstimatedHourly,
   DEFAULT_RATES_2025,
   type EmployeePayInput,
   type TaxBracketRow,
@@ -1097,5 +1098,51 @@ describe("퇴직유보금 — 인센티브 직원에게 항상, 위탁계약은 
 
   it("그 달 인센티브가 0이면 유보액도 0", () => {
     expect(run({ students: 5 }).retentionD).toBe(0);
+  });
+});
+
+// 시급제 기본급은 `시급 × 그 달 근로시간` 인데, 기록표도 직접 입력도 없으면 계약
+// 근로시간표로 **만근을 가정해** 어림잡는다. 결근·지각이 하나도 반영되지 않아
+// 실제보다 많이 나오는 쪽으로 틀리므로 화면이 지급액을 붉게 그린다.
+describe("isEstimatedHourly — 어림으로 산출한 달인가 (화면이 붉게 그리는 근거)", () => {
+  it("시급제인데 실근로시간이 없으면 추정", () => {
+    expect(isEstimatedHourly({ payScheme: "HOURLY", workedHours: null })).toBe(true);
+    expect(isEstimatedHourly({ payScheme: "HOURLY", workedHours: undefined })).toBe(true);
+    expect(isEstimatedHourly({ payScheme: "HOURLY" })).toBe(true);
+  });
+
+  it("0시간도 추정으로 본다 — 엔진과 같은 규칙이다(0을 '실제로 0시간 일했다' 로 읽지 않는다)", () => {
+    expect(isEstimatedHourly({ payScheme: "HOURLY", workedHours: 0 })).toBe(true);
+  });
+
+  it("실근로시간이 있으면 추정이 아니다 (기록표 업로드 또는 직접 입력)", () => {
+    expect(isEstimatedHourly({ payScheme: "HOURLY", workedHours: 86.5 })).toBe(false);
+  });
+
+  it("시급제가 아니면 언제나 거짓 — 월급제는 근로시간으로 기본급을 만들지 않는다", () => {
+    for (const s of ["MONTHLY", "INCENTIVE", "RATIO"])
+      expect(isEstimatedHourly({ payScheme: s, workedHours: null })).toBe(false);
+  });
+
+  // 화면이 따로 판정하면 언젠가 갈라져 '추정인데 검게' 또는 '실제 기록인데 붉게' 나온다.
+  it("**엔진의 '추정' 안내문과 답이 같아야 한다**", () => {
+    const emp: EmployeePayInput = {
+      incomeType: "EMPLOYEE",
+      payScheme: "HOURLY",
+      baseWage: 12_000,
+      positionAllow: 0,
+      mealAllow: 0,
+      carAllow: 0,
+      dependents: 1,
+      schedule: instructor,
+    };
+    const noted = (workedHours: number | null) =>
+      computePayroll(emp, { workedHours }, DEFAULT_RATES_2025, smallTaxTable)
+        .notes.join()
+        .includes("시간기록표 미반영");
+
+    for (const h of [null, 0, 86.5, 120]) {
+      expect(noted(h)).toBe(isEstimatedHourly({ payScheme: "HOURLY", workedHours: h }));
+    }
   });
 });

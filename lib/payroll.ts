@@ -393,6 +393,26 @@ export function lookupIncomeTax(
 }
 
 /**
+ * **시급제인데 실근로시간이 없어 '어림' 으로 산출한 달인가.**
+ *
+ * 시급제 기본급은 `시급 × 그 달 근로시간` 인데, 시간기록표를 올리지도 근로시간을
+ * 직접 넣지도 않으면 계약 근로시간표로 **만근을 가정해** 추정한다. 결근·지각·조퇴가
+ * 하나도 반영되지 않은 값이라 **실제보다 많이 나오는 쪽으로 틀린다** — 그대로 이체하면
+ * 과지급이 된다. 그래서 화면이 이 달의 지급액을 붉게 표시한다.
+ *
+ * 판정을 여기 둔 이유: `computePayroll` 이 이 함수로 추정 여부를 가리므로 화면과
+ * 엔진이 **같은 답**을 낸다. 화면이 따로 판정하면 언젠가 갈라져, 추정인데 검게 나오거나
+ * 실제 기록이 있는데 붉게 나온다.
+ */
+export function isEstimatedHourly(rec: {
+  payScheme: string;
+  workedHours?: number | null;
+}): boolean {
+  if (rec.payScheme !== "HOURLY") return false;
+  return !(rec.workedHours != null && rec.workedHours > 0);
+}
+
+/**
  * 월 급여/사업소득 산정.
  * 반환값의 모든 금액은 '원' 단위 정수.
  */
@@ -460,7 +480,10 @@ export function computePayroll(
   if (emp.payScheme === "HOURLY") {
     // 시간기록표를 올렸으면 그 실근로시간, 아니면 계약 근로시간표로 **추정**한다.
     // 추정치는 결근·지각·추가근무가 하나도 반영되지 않은 '만근 가정' 값이므로 명세서에 반드시 남긴다.
-    const estimated = !(month.workedHours != null && month.workedHours > 0);
+    const estimated = isEstimatedHourly({
+      payScheme: emp.payScheme,
+      workedHours: month.workedHours,
+    });
     const monthHours = estimated
       ? weeklyContractual * WEEKS_PER_MONTH * prorate // 스케줄 기반 추정
       : month.workedHours!; // 실제 근로시간 입력 시 그대로 사용(일할 이미 반영됨)

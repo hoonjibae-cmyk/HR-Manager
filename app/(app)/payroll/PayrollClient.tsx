@@ -10,6 +10,7 @@ import {
 } from "@/lib/constants";
 import { Pill } from "@/components/ui";
 import { resignStatusOf, resignBadgeLabel, resignedSummary } from "@/lib/payroll-roster";
+import { isEstimatedHourly } from "@/lib/payroll";
 import {
   useTableSort,
   useStoredState,
@@ -46,6 +47,8 @@ interface Rec {
   bonus: number;
   unusedLeaveDays: number;
   hourlyWage: number;
+  /** 시급제 실근로시간 — 비어 있으면 계약 근로시간표로 어림잡은 달이다 */
+  workedHours: number | null;
   deductMode: string;
   pensionD: number;
   employmentD: number;
@@ -859,6 +862,8 @@ export default function PayrollClient({ today }: { today: string }) {
                 // 지금은 이미 나간 사람일 수 있다. 이름만 봐서는 구분이 안 돼 엉뚱한 사람에게
                 // 급여가 나갈 수 있으므로 행째로 다르게 그린다.
                 const resign = resignStatusOf(r.employee.resignDate, today);
+                // 시급제 어림 산출 — 지급액을 붉게 그리는 근거(엔진과 같은 판정)
+                const estimated = isEstimatedHourly(r);
                 return (
                 <React.Fragment key={r.id}>
                 <tr
@@ -1016,7 +1021,26 @@ export default function PayrollClient({ today }: { today: string }) {
                       </button>
                     </div>
                   </td>
-                  <td className="td text-right tnum whitespace-nowrap">{won(r.gross)}</td>
+                  {/* 시급제인데 실근로시간이 없어 계약 근로시간표로 어림잡은 달은 붉게.
+                      만근 가정이라 **실제보다 많이 나오는 쪽으로 틀리므로** 그대로 이체하면
+                      과지급이 된다. 판정은 엔진과 같은 함수(isEstimatedHourly)를 쓴다. */}
+                  <td className="td text-right whitespace-nowrap">
+                    {estimated ? (
+                      <>
+                        <div
+                          className="tnum font-semibold text-rose-600"
+                          title="시간기록표를 올리지도, 근로시간을 직접 넣지도 않아 계약 근로시간표로 만근을 가정해 어림잡은 금액입니다. 결근·지각이 반영되지 않아 실제보다 많을 수 있습니다."
+                        >
+                          {won(r.gross)}
+                        </div>
+                        <div className="text-[10px] text-rose-500 leading-tight">
+                          추정 · 기록표 미반영
+                        </div>
+                      </>
+                    ) : (
+                      <span className="tnum">{won(r.gross)}</span>
+                    )}
+                  </td>
                   <td className="td text-right whitespace-nowrap">
                     <button
                       className="tnum text-slate-600 underline decoration-dotted underline-offset-2 hover:text-brand-600"
@@ -1124,6 +1148,13 @@ export default function PayrollClient({ today }: { today: string }) {
           <p>
             · <b>휴일h</b>: 일요일(주휴일)·공휴일 근무시간 → 휴일근로수당(×1.5) &nbsp;
             · <b>야간h</b>: 22시~06시 근무시간 → 야간가산(+0.5)
+          </p>
+          <p>
+            · <b className="text-rose-600">지급액이 붉게 나오는 시급제 행</b>은 시간기록표를 올리지도,
+            근로시간을 직접 넣지도 않아 <b>계약 근로시간표로 만근을 가정해 어림잡은 금액</b>이다.
+            결근·지각이 하나도 반영되지 않아 <b>실제보다 많이 나오는 쪽으로 틀리므로</b> 그대로
+            이체하면 과지급이 된다. <b>📤 시간기록표 업로드</b>를 하면 실근로 기준으로 다시 계산되고
+            붉은 표시가 사라진다.
           </p>
           <p>
             · <b>주휴수당(시급제)</b>은 <b>1주 단위</b>로 판정하고, 근무 형태에 따라 기준이 갈린다
