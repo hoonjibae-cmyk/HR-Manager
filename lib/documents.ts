@@ -2,7 +2,7 @@
 // 엑셀의 실제 계약서/서약서/동의서/명세서 법적 문구를 원문 그대로 재현.
 
 import { won, wonUnit, ymd, ymdKo, maskRRN } from "./format";
-import { DAY_KO, PAY_SCHEME_LABEL, parseSchedule, type ScheduleDay } from "./constants";
+import { DAY_KO, PAY_SCHEME_LABEL, parseSchedule, isContractorContract, type ScheduleDay } from "./constants";
 import { computeWeeklyHours, inclusiveWageBreakdown, WEEKS_PER_MONTH } from "./payroll";
 import type { DocGroup, PdfOptions } from "./pdf";
 import { paySchemeOfTemplate } from "./contracts";
@@ -725,9 +725,13 @@ export function pledgeServiceHtml(args: { employee: DocEmployee; company: DocCom
 /**
  * **개인정보를 국외에서 처리(위탁·보관)하는 사업자.**
  *
- * 인사 시스템이 실제로 개인정보를 보내는 곳만 적는다 — 안 보내는 곳을 적으면
+ * 실제로 개인정보가 국외 서버로 나가는 곳만 적는다 — 안 보내는 곳을 적으면
  * 사실과 다른 고지가 되고, 보내는 곳을 빠뜨리면 고지 의무를 지키지 못한다.
- * 새 연동을 붙이면 **여기에 함께 적어야 한다**.
+ *
+ * **두 갈래가 섞여 있다.** ① 이 앱이 직접 연동해 보내는 것(슬랙·구글 캘린더)과
+ * ② 직원이 업무에 쓰면서 개인정보가 담기는 도구(구글 드라이브·노션)다. 고지 의무에는
+ * 둘의 차이가 없다 — 회사가 위탁한 곳에 개인정보가 있으면 적어야 한다.
+ * 그래서 **새 연동을 붙일 때뿐 아니라 회사가 새 업무 도구를 도입할 때도 여기를 고쳐야 한다**.
  *
  * ⚠ 생성형 AI(Claude·ChatGPT 등)는 여기 없다 — 이 앱은 어떤 AI API 도 호출하지 않는다.
  * 코드를 사람이 AI 의 도움으로 작성한 것과, 앱이 직원 정보를 AI 에 보내는 것은 다른 이야기다.
@@ -741,18 +745,6 @@ export const OVERSEAS_PROCESSORS: Array<{
   items: string;
 }> = [
   {
-    name: "Vercel Inc.",
-    country: "미국",
-    purpose: "인사 시스템(웹) 운영·호스팅",
-    items: "시스템 이용 과정에서 처리되는 인사정보 일체",
-  },
-  {
-    name: "Supabase Inc.",
-    country: "미국(데이터베이스 소재 리전에 따름)",
-    purpose: "인사정보 데이터베이스 보관",
-    items: "인사기록·급여·계약 정보(주민등록번호·계좌번호는 암호화 보관)",
-  },
-  {
     name: "Slack Technologies, LLC",
     country: "미국",
     purpose: "연차·보강 신청 및 안내 메시지 발송",
@@ -761,8 +753,44 @@ export const OVERSEAS_PROCESSORS: Array<{
   {
     name: "Google LLC",
     country: "미국",
-    purpose: "연차·보강 일정 공유(구글 캘린더)",
-    items: "성명, 휴가·보강 일자",
+    purpose: "연차·보강 일정 공유(구글 캘린더), 업무 문서 저장·공유(구글 드라이브)",
+    items: "성명, 휴가·보강 일자, 업무 문서에 포함되는 개인정보",
+  },
+  {
+    name: "Notion Labs, Inc.",
+    country: "미국",
+    purpose: "업무 문서·자료의 작성 및 공유",
+    items: "업무 문서에 포함되는 개인정보",
+  },
+];
+
+/**
+ * **국내(서울) 리전에 보관하지만 운영사가 국외 법인**인 곳.
+ *
+ * 데이터가 국내에 있으므로 §28의8 의 '국외 이전' 자체는 아니다. 다만 운영사의 기술지원
+ * 인력이 장애 대응 등 유지보수 목적으로 국외에서 접근할 수 있어, 같은 상자에서 함께 알린다
+ * (§26 의 처리위탁 공개 의무도 이 항목으로 갈음한다).
+ *
+ * ⚠ **리전을 바꾸면 여기도 고쳐야 한다** — 앱 리전은 `vercel.json` 의 `regions`,
+ * DB 리전은 Supabase 프로젝트 설정이다. 문서만 남고 실제가 달라지면 사실과 다른 고지가 된다.
+ */
+export const DOMESTIC_REGION_PROCESSORS: Array<{
+  name: string;
+  region: string;
+  purpose: string;
+  items: string;
+}> = [
+  {
+    name: "Vercel Inc. (미국 법인)",
+    region: "대한민국 서울(icn1)",
+    purpose: "인사 시스템(웹) 운영·호스팅",
+    items: "시스템 이용 과정에서 처리되는 인사정보 일체",
+  },
+  {
+    name: "Supabase Inc. (미국 법인)",
+    region: "대한민국 서울(AWS ap-northeast-2)",
+    purpose: "인사정보 데이터베이스 보관",
+    items: "인사기록·급여·계약 정보(주민등록번호·계좌번호는 암호화 보관)",
   },
 ];
 
@@ -780,17 +808,28 @@ function overseasNoticeBox(): string {
     (p) =>
       `<tr><td>${esc(p.name)}</td><td>${esc(p.country)}</td><td>${esc(p.purpose)}</td><td>${esc(p.items)}</td></tr>`
   ).join("");
+  const domesticRows = DOMESTIC_REGION_PROCESSORS.map(
+    (p) =>
+      `<tr><td>${esc(p.name)}</td><td>${esc(p.region)}</td><td>${esc(p.purpose)}</td><td>${esc(p.items)}</td></tr>`
+  ).join("");
   // `avoid` — 상자가 쪽 경계에 걸리면 테두리가 두 쪽으로 잘려 한 항목으로 안 읽힌다.
   // 통째로 다음 장으로 넘어가는 편이 낫다(동의서는 원래도 서명란까지 두 장이 된다).
   return `<div class="avoid" style="border:1px solid #999;padding:8px 10px;margin:8px 0;">
-    <div style="font-weight:700;margin-bottom:4px">□ 개인정보의 국외 처리(위탁·보관)에 관한 안내</div>
-    <div class="small" style="margin-bottom:4px">회사는 인사·급여 업무를 전산으로 처리하기 위하여 아래 사업자에게 개인정보의 처리를 위탁하며, 그 과정에서 개인정보가 국외에 보관될 수 있습니다. 「개인정보 보호법」 제28조의8 제1항 제3호에 따라 아래와 같이 알려드립니다.</div>
+    <div style="font-weight:700;margin-bottom:4px">□ 개인정보 처리위탁 및 국외 이전에 관한 안내</div>
+    <div class="small" style="margin-bottom:4px">회사는 인사·급여 업무를 전산으로 처리하기 위하여 아래 사업자에게 개인정보의 처리를 위탁합니다. 「개인정보 보호법」 제26조 및 제28조의8 제1항 제3호에 따라 아래와 같이 알려드립니다.</div>
+    <div class="small" style="font-weight:700;margin:6px 0 2px">가. 개인정보가 국외로 이전되는 경우</div>
     <table class="kv" style="margin:0;font-size:11px">
       <thead><tr><th>이전받는 자</th><th>국가</th><th>이용 목적</th><th>이전 항목</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    <div class="small" style="margin-top:4px">· <b>이전 시기·방법</b>: 인사 시스템 이용 시 정보통신망을 통하여 수시로 이전<br>
-    · <b>보유·이용 기간</b>: 위탁계약 종료 시 또는 회사의 개인정보 보유기간 종료 시까지<br>
+    <div class="small" style="margin-top:3px">· <b>이전 시기·방법</b>: 인사 시스템 이용 시 정보통신망을 통하여 수시로 이전</div>
+    <div class="small" style="font-weight:700;margin:6px 0 2px">나. 개인정보를 국내에 보관하는 경우 (수탁자가 국외 법인)</div>
+    <table class="kv" style="margin:0;font-size:11px">
+      <thead><tr><th>수탁자</th><th>보관 위치</th><th>위탁 업무</th><th>위탁 항목</th></tr></thead>
+      <tbody>${domesticRows}</tbody>
+    </table>
+    <div class="small" style="margin-top:3px">· 인사정보는 <b>대한민국 내 서버에 보관</b>되므로 국외로 이전되지 않습니다. 다만 수탁자의 기술지원 인력이 장애 대응 등 <b>유지보수 목적</b>으로 국외에서 접근할 수 있어 함께 알려드립니다.</div>
+    <div class="small" style="margin-top:5px">· <b>보유·이용 기간</b>: 위탁계약 종료 시 또는 회사의 개인정보 보유기간 종료 시까지<br>
     · <b>거부 방법·효과</b>: 회사에 서면으로 요구하여 거부할 수 있으나, 이 경우 전산 인사·급여 처리가 제한되어 급여명세서 교부·연차 신청 등 일부 업무를 수기로 처리하게 됩니다.<br>
     · 이 항목은 <b>동의를 받는 것이 아니라 알려드리는 것</b>이며, 위 사항은 「개인정보 보호법」 제28조의8 제2항에 따른 고지사항입니다.</div>
     <div class="small" style="margin-top:4px">※ 위 사항을 고지받아 확인하였습니다. ( 확인 : ______ )</div>
@@ -837,18 +876,42 @@ export function consentPrivacyHtml(args: { employee: DocEmployee; company: DocCo
 }
 
 /* ============================ 임금공제 동의서 ============================ */
+/**
+ * 그 사람의 급여에서 **4대보험을 떼는가**.
+ *
+ * 급여 엔진과 같은 판정이어야 한다 — 엔진은 위탁계약자면 세무구분이 EMPLOYEE 로 남아 있어도
+ * 보험료를 떼지 않고 3.3% 로 처리한다(lib/payroll.ts). 문서만 4대보험을 적으면
+ * **떼지도 않는 것을 동의받는 셈**이고, 위탁계약자에게는 4대보험 가입 사실을 시인하는 것처럼
+ * 읽혀 근로자성 다툼의 빌미가 된다.
+ */
+export function deductsInsurance(e: DocEmployee): boolean {
+  return e.incomeType === "EMPLOYEE" && !isContractorContract(e);
+}
+
 export function consentDeductionHtml(args: { employee: DocEmployee; company: DocCompany; date?: Date }): string {
   const { employee: e, company: c } = args;
   const date = args.date ?? new Date();
+  // 3.3% 원천징수 대상에게는 4대보험 문구를 적지 않는다 — 떼지도 않는 것을 동의받는 셈이고,
+  // 위탁계약자에게는 4대보험 가입 사실을 시인하는 것처럼 읽혀 근로자성 다툼의 빌미가 된다.
+  const insured = deductsInsurance(e);
+  const items = insured
+    ? `4대보험(국민연금·건강보험·고용보험·장기요양) 근로자 부담분, 근로소득세 및 지방소득세`
+    : `사업소득세 및 지방소득세 (원천징수 3.3%)`;
+  const reason = insured
+    ? `법령에 따른 원천징수 및 사회보험료 납부`
+    : `「소득세법」 제127조에 따른 사업소득 원천징수`;
+  const foot = insured
+    ? `※ 본 동의는 근로기준법 제43조(임금 전액지급의 원칙)의 예외로서, 법령에 근거하지 않은 임의공제에는 적용되지 아니합니다.`
+    : `※ 위 공제는 법령에 따른 원천징수이며, 법령에 근거하지 않은 임의공제에는 적용되지 아니합니다.`;
   return `${companyHead(c)}
   <div class="doc-title">임 금 공 제 동 의 서</div>
-  <p><b>${esc(e.name)}</b> (이하 "을") 은(는) 아래 항목에 대하여 매월 임금에서 공제하는 것에 동의합니다.</p>
+  <p><b>${esc(e.name)}</b> (이하 "을") 은(는) 아래 항목에 대하여 매월 ${insured ? "임금" : "지급액"}에서 공제하는 것에 동의합니다.</p>
   <table class="kv">
-    <tr><th>공제 항목</th><td>4대보험(국민연금·건강보험·고용보험·장기요양) 근로자 부담분, 근로소득세 및 지방소득세 (사업소득자의 경우 원천징수 3.3%)</td></tr>
-    <tr><th>공제 사유</th><td>법령에 따른 원천징수 및 사회보험료 납부</td></tr>
-    <tr><th>정산</th><td>과·오납 발생 시 익월 임금에서 정산함에 동의</td></tr>
+    <tr><th>공제 항목</th><td>${items}</td></tr>
+    <tr><th>공제 사유</th><td>${reason}</td></tr>
+    <tr><th>정산</th><td>과·오납 발생 시 익월 ${insured ? "임금" : "지급액"}에서 정산함에 동의</td></tr>
   </table>
-  <p class="small">※ 본 동의는 근로기준법 제43조(임금 전액지급의 원칙)의 예외로서, 법령에 근거하지 않은 임의공제에는 적용되지 아니합니다.</p>
+  <p class="small">${foot}</p>
   <div class="doc-foot">
     <div class="date-center">${ymdKo(date)}</div>
     <div class="sign-area">

@@ -8,7 +8,10 @@ import { describe, it, expect } from "vitest";
 import {
   contractHtml,
   consentPrivacyHtml,
+  consentDeductionHtml,
+  deductsInsurance,
   OVERSEAS_PROCESSORS,
+  DOMESTIC_REGION_PROCESSORS,
   FIXED_TERM_NOTICE_LABEL,
   type DocCompany,
   type DocContract,
@@ -158,10 +161,43 @@ describe("개인정보 국외 처리 고지", () => {
 
   it("실제로 정보를 보내는 사업자를 모두 적는다", () => {
     const t = html();
-    for (const p of OVERSEAS_PROCESSORS) expect(t).toContain(p.name);
-    expect(OVERSEAS_PROCESSORS.map((p) => p.name)).toEqual(
-      expect.arrayContaining(["Vercel Inc.", "Supabase Inc.", "Slack Technologies, LLC", "Google LLC"])
-    );
+    for (const p of [...OVERSEAS_PROCESSORS, ...DOMESTIC_REGION_PROCESSORS]) expect(t).toContain(p.name);
+  });
+
+  // 서울 리전에 보관하므로 데이터가 국외로 나가지 않는다. '국외 이전' 으로 적으면 사실과 다르다.
+  it("**국내 보관(서울 리전)과 국외 이전을 갈라 적는다**", () => {
+    const t = html();
+    expect(OVERSEAS_PROCESSORS.map((p) => p.name)).toEqual([
+      "Slack Technologies, LLC",
+      "Google LLC",
+      "Notion Labs, Inc.",
+    ]);
+    expect(DOMESTIC_REGION_PROCESSORS.map((p) => p.name)).toEqual([
+      "Vercel Inc. (미국 법인)",
+      "Supabase Inc. (미국 법인)",
+    ]);
+    expect(t).toContain("가. 개인정보가 국외로 이전되는 경우");
+    expect(t).toContain("나. 개인정보를 국내에 보관하는 경우");
+    expect(t).toContain("대한민국 내 서버에 보관");
+  });
+
+  it("서울 리전을 정확히 적는다 (앱 icn1 · DB ap-northeast-2)", () => {
+    const t = html();
+    expect(t).toContain("대한민국 서울(icn1)");
+    expect(t).toContain("대한민국 서울(AWS ap-northeast-2)");
+  });
+
+  // 국내 보관이라고 침묵하면, 수탁자 인력이 국외에서 들여다볼 수 있다는 사실이 가려진다
+  it("국내 보관이어도 유지보수 목적의 국외 접근 가능성을 적는다", () => {
+    expect(html()).toContain("유지보수 목적");
+  });
+
+  // 앱이 연동하는 것(슬랙·캘린더)만이 아니라 **직원이 업무에 쓰는 도구**도 대상이다 —
+  // 회사가 위탁한 곳에 개인정보가 있으면 고지 의무에는 차이가 없다.
+  it("직원이 업무에 쓰는 도구(구글 드라이브·노션)도 적는다", () => {
+    const t = html();
+    expect(t).toContain("구글 드라이브");
+    expect(t).toContain("Notion Labs, Inc.");
   });
 
   // 이 앱은 어떤 AI API 도 호출하지 않는다. 안 보내는 곳을 적으면 사실과 다른 고지가 된다.
@@ -173,6 +209,7 @@ describe("개인정보 국외 처리 고지", () => {
   it("법 제28조의8 제2항의 고지사항을 갖춘다 (항목·국가·목적·시기·기간·거부방법)", () => {
     const t = html();
     expect(t).toContain("제28조의8");
+    expect(t).toContain("제26조");
     expect(t).toContain("이전 항목");
     expect(t).toContain("국가");
     expect(t).toContain("이용 목적");
@@ -196,5 +233,47 @@ describe("개인정보 국외 처리 고지", () => {
     expect(t).toContain("개인정보 수집에 관한 동의");
     expect(t).toContain("개인정보 이용 및 제공에 관한 동의");
     expect(t).toContain("고유식별정보의 처리에 관한 동의");
+  });
+});
+
+describe("임금공제 동의서 — 3.3% 대상자에게는 4대보험을 적지 않는다", () => {
+  const html = (over: Partial<DocEmployee>) =>
+    text(consentDeductionHtml({ employee: emp(over), company }));
+
+  it("근로소득자: 4대보험 + 근로소득세", () => {
+    const t = html({ incomeType: "EMPLOYEE" });
+    expect(t).toContain("4대보험(국민연금·건강보험·고용보험·장기요양)");
+    expect(t).toContain("근로소득세 및 지방소득세");
+    expect(t).not.toContain("3.3%");
+  });
+
+  it("사업소득자: 3.3% 만 적고 **4대보험은 빠진다**", () => {
+    const t = html({ incomeType: "FREELANCE" });
+    expect(t).not.toContain("4대보험");
+    expect(t).not.toContain("국민연금");
+    expect(t).toContain("사업소득세 및 지방소득세 (원천징수 3.3%)");
+  });
+
+  // 급여 엔진은 위탁이면 세무구분이 EMPLOYEE 라도 보험료를 떼지 않고 3.3% 로 처리한다.
+  // 문서만 4대보험을 적으면 떼지도 않는 것을 동의받는 셈이다.
+  it("위탁계약자는 세무구분이 근로소득이어도 4대보험을 적지 않는다", () => {
+    expect(deductsInsurance(emp({ incomeType: "EMPLOYEE", isContractor: true } as any))).toBe(false);
+    expect(html({ incomeType: "EMPLOYEE", isContractor: true } as any)).not.toContain("4대보험");
+  });
+
+  it("완전비율제도 위탁이라 빠진다 (payScheme 만 봐도 위탁)", () => {
+    expect(deductsInsurance(emp({ incomeType: "EMPLOYEE", payScheme: "RATIO" } as any))).toBe(false);
+  });
+
+  it("공제 사유·각주도 함께 갈린다", () => {
+    expect(html({ incomeType: "EMPLOYEE" })).toContain("근로기준법 제43조");
+    const f = html({ incomeType: "FREELANCE" });
+    expect(f).toContain("「소득세법」 제127조");
+    expect(f).not.toContain("근로기준법 제43조");
+  });
+
+  it("'임금' 이 아니라 '지급액' 으로 적는다 (위탁은 임금이 아니다)", () => {
+    expect(html({ incomeType: "FREELANCE" })).toContain("매월 지급액에서 공제");
+    expect(html({ incomeType: "EMPLOYEE" })).toContain("매월 임금에서 공제");
   });
 });

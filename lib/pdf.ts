@@ -186,7 +186,24 @@ export interface PdfOptions {
    * 쪽번호와 같은 줄에 그려지고, 간인과 마찬가지로 **2장 이상일 때만** 나온다.
    */
   initials?: boolean;
+  /**
+   * **이 장수 안에 담아 본다** — 넘치면 글자·여백을 한 단계씩 줄여 다시 뽑는다.
+   *
+   * 근로계약서는 2장에 맞춰 놓은 서식인데, 조항이 하나 늘 때마다 마지막 서명란만
+   * 3장째로 밀려 **거의 빈 장**이 한 장 붙는다(실제로 겪었다). 조항이 늘고 주는 것은
+   * 앞으로도 계속 있을 일이라 문구를 그때그때 줄이는 대신, **뽑아 보고 안 맞으면
+   * 한 단계 줄여 다시 뽑는다**. 장수는 렌더 전에는 알 수 없으므로 이 방법뿐이다.
+   *
+   * 끝까지 줄여도 안 들어가면 **가장 작은 판을 쓴다**(더 줄이면 읽을 수 없다).
+   */
+  fitPages?: number;
 }
+
+/**
+ * 한 단계씩 줄여 보는 배율. 4% 씩 내리고 **0.86 에서 멈춘다** —
+ * A4 10pt 기준 8.6pt 라 계약서로 읽히는 하한이다.
+ */
+const FIT_SCALES = [0.96, 0.92, 0.89, 0.86];
 
 /**
  * 완성된 본문 HTML 을 A4 PDF 로 렌더링.
@@ -205,18 +222,31 @@ async function renderPdf(innerBody: string, opts: PdfOptions = {}): Promise<Buff
  * 같은 자리에 약식 서명을 또 받을 이유가 없다. 넣고 뺀 두 벌을 뽑아 장별로 골라 붙인다.
  */
 async function renderDoc(browser: Browser, innerBody: string, opts: PdfOptions): Promise<Buffer> {
-  const wantsCount = !!opts.seamStamp || !!opts.paginate || !!opts.initials;
+  const wantsCount = !!opts.seamStamp || !!opts.paginate || !!opts.initials || !!opts.fitPages;
   if (!wantsCount) return renderOnce(browser, innerBody, opts, 0);
 
-  const first = await renderOnce(browser, innerBody, opts, 0);
-  const pages = countPdfPages(first);
+  let scale = 1;
+  let first = await renderOnce(browser, innerBody, opts, 0, undefined, scale);
+  let pages = countPdfPages(first);
+
+  // 목표 장수를 넘으면 한 단계씩 줄여 다시 뽑는다. 맞는 순간 멈추므로
+  // 대개는 첫 판(배율 1)에서 끝나고, 넘칠 때만 값을 치른다.
+  if (opts.fitPages && pages > opts.fitPages) {
+    for (const s of FIT_SCALES) {
+      scale = s;
+      first = await renderOnce(browser, innerBody, opts, 0, undefined, scale);
+      pages = countPdfPages(first);
+      if (pages <= opts.fitPages) break;
+    }
+  }
+
   if (pages < 2) return first; // 1장짜리엔 간인도 쪽번호도 이니셜란도 필요 없다
 
-  const marked = await renderOnce(browser, innerBody, opts, pages);
+  const marked = await renderOnce(browser, innerBody, opts, pages, undefined, scale);
   if (!opts.initials) return marked;
 
   // 마지막 장만 이니셜란 없는 판으로 갈아 끼운다
-  const plainLast = await renderOnce(browser, innerBody, opts, pages, false);
+  const plainLast = await renderOnce(browser, innerBody, opts, pages, false, scale);
   return pickPages([
     { pdf: marked, pages: range(0, pages - 1) },
     { pdf: plainLast, pages: [pages - 1] },
@@ -236,11 +266,12 @@ async function renderOnce(
   innerBody: string,
   opts: PdfOptions,
   pages: number,
-  withInitials = !!opts.initials
+  withInitials = !!opts.initials,
+  scale = 1
 ): Promise<Buffer> {
   const margin = opts.marginMm ?? 15;
   const seam = pages > 1 && opts.seamStamp ? seamLayer(pages, opts.seamStamp, margin) : "";
-  const html = wrapHtml(seam + innerBody);
+  const html = wrapHtml(seam, innerBody, scale);
   const page = await browser.newPage();
   try {
     page.setDefaultTimeout(45000);
@@ -370,18 +401,33 @@ async function pickPages(picks: Array<{ pdf: Buffer; pages: number[] }>): Promis
   return Buffer.from(await out.save());
 }
 
-function wrapHtml(body: string): string {
+function wrapHtml(seam: string, body: string, scale = 1): string {
+  /*
+   * 배율은 `zoom` 으로 준다 — 본문 글자만이 아니라 **여백·표·선까지 한꺼번에** 줄어야
+   * 조판이 그대로 유지된 채 담긴다. font-size 만 줄이면 pt 로 못박아 둔 제목·표가
+   * 그대로 남아 균형이 깨진다.
+   *
+   * ⚠ **간인 layer 는 zoom 밖에 둔다** — 간인은 종이 기준 절대 mm 좌표로 찍히는데
+   * (`seamLayer`, lib/pdf-seam.ts) 함께 줄어들면 장 경계에서 어긋난다.
+   * 그래서 본문만 `.fit-scale` 로 감싼다.
+   *
+   * ⚠ `min-height` 도 zoom 을 받으므로 **배율만큼 키워 상쇄**한다 — 안 그러면
+   * 한 장 높이가 같이 줄어 서명란이 종이 중간에 뜬다(`margin-top:auto` 로 바닥에 붙이는 구조).
+   */
+  const zoom = scale === 1 ? "" : `.fit-scale{zoom:${scale};}`;
+  const pageH = (262 / scale).toFixed(1);
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"/>
 <style>
 ${fontFaceCss()}
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;font-family:'NanumGothic',sans-serif;color:#1a1a1a;font-size:10pt;line-height:1.55;}
+${zoom}
 /* 각 문서를 한 페이지 높이의 세로 flex 로 만들어 서명란을 하단에 정렬 */
-.doc-page{display:flex;flex-direction:column;min-height:262mm;}
+.doc-page{display:flex;flex-direction:column;min-height:${pageH}mm;}
 .doc-body{flex:0 0 auto;}
 h1,h2,h3{font-family:'NanumGothic',sans-serif;}
 ${DOC_CSS}
-</style></head><body>${body}</body></html>`;
+</style></head><body>${seam}<div class="fit-scale">${body}</div></body></html>`;
 }
 
 export async function closeBrowser() {

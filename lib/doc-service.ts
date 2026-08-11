@@ -45,6 +45,9 @@ function bilateralPdfOpts(company: { stampSeam?: boolean; stamp?: string | null;
     seamStamp: company.stampSeam ? company.stamp ?? null : null,
     initials: company.pageInitials,
     paginate: true,
+    // 근로계약서는 2장에 맞춰 놓은 서식이다. 조항이 하나 늘 때마다 서명란만 3장째로
+    // 밀려 거의 빈 장이 붙으므로, 넘치면 글자·여백을 줄여 2장에 담는다(lib/pdf.ts).
+    fitPages: 2,
   };
 }
 
