@@ -213,6 +213,32 @@ function resignNoticeDays(e: DocEmployee): number {
   return (e.department ?? "").includes("교수부") ? 60 : 30;
 }
 
+/**
+ * **기간제(계약기간을 정한) 근로계약의 중도해지 통보 기한** — 퇴직 희망일 2개월 전.
+ *
+ * 부서별로 갈리는 `resignNoticeDays()`(의원사직)와 **별개**다. 기간제 계약은 만료로 끝나는
+ * 것이 원칙이고 중도해지는 예외라, 부서와 무관하게 같은 기간을 둔다.
+ * (교수부는 어차피 60일이라 같고, 그 외 부서는 30일 → 2개월로 길어진다.)
+ */
+export const FIXED_TERM_NOTICE_LABEL = "2개월";
+
+/**
+ * 기간제 계약의 계약종료·중도해지 조항.
+ *
+ * 계약기간을 정한 계약은 **만료로 종료함이 원칙**이고, 중도해지는 민법 제661조
+ * (고용기간의 약정이 있는 경우에도 부득이한 사유가 있으면 해지할 수 있다)의
+ * 부득이한 사유가 있을 때 또는 당사자 합의가 있을 때에 한한다.
+ * 학원은 학사일정이 있어 종료 시점을 아무 때나 잡을 수 없으므로 정규·내신 종료일을 원칙으로 둔다.
+ */
+function fixedTermEndClauses(): string[] {
+  return [
+    `본 계약은 <b>계약기간 만료로 종료함을 원칙</b>으로 하며, 당사자는 「민법」 제661조에 정한 부득이한 사유가 있는 경우에 한하여 중도해지할 수 있다.`,
+    `제①항에도 불구하고 당사자가 합의하는 경우 계약을 중도 종료할 수 있다. 이 경우 종료일은 <b>학사일정을 고려하여 협의</b>로 정하되, 원칙적으로 <b>정규 또는 내신 종료일</b>로 한다.`,
+    `제①항·제②항에 따라 계약을 중도 종료하고자 하는 당사자는 <b>퇴직(종료) 희망일의 ${FIXED_TERM_NOTICE_LABEL} 이전</b>에 그 뜻을 서면으로 상대방에게 통지한다. "을"이 사직하고자 하는 경우 같은 기한까지 사직서를 제출한다.`,
+    `"을"은 종료일까지 담당 수업을 수행하고, "갑"이 정한 인수인계 기준에 따라 후임자에게 인계한다.`,
+  ];
+}
+
 /** 시간 표기 — 209 / 4.345 / 172.062 처럼 불필요한 0 없이 */
 function hoursText(h: number): string {
   const s = h.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
@@ -244,6 +270,16 @@ export function contractHtml(args: {
     `"을"의 근로조건이 변경된 경우 새로이 근로계약서를 체결하여 변경된 근로조건을 고지하기로 한다.`,
     `상기 근로계약기간이 종료되는 경우 근로계약은 자동 종료되는 것으로 한다. 다만 계약종료 전 30일 이전에 당사자 간의 합의로 그 기간을 연장할 수 있다.`,
   ];
+  // 제7조 — 계약기간을 정한 계약(기간제)이면 '만료가 원칙, 중도해지는 예외' 를 앞세운다.
+  // 기간의 정함이 없는 계약(정규직)에는 만료도 중도해지도 없으므로 예전 그대로 의원사직만 둔다.
+  const isFixedTerm = !!ct.endDate;
+  const art7Title = isFixedTerm ? "계약의 종료 및 의원사직" : "의원사직";
+  const art7Head: string[] = isFixedTerm
+    ? fixedTermEndClauses()
+    : [
+        `"을"이 사직하고자 할 경우 사직하고자 하는 날의 <b>${resignDays}일 이전</b>에 사직서를 제출하고, 후임자를 선임할 때까지 업무의 인수인계를 비롯하여 성실히 근로한다.`,
+      ];
+
   // 수습 조항 — 신규 계약서에만 포함(갱신 계약은 isProbation=false 로 제외)
   if (ct.isProbation) {
     art1.push(
@@ -420,10 +456,10 @@ export function contractHtml(args: {
     <p class="sub">② "을"이 연차유급휴가를 사용하는 경우 적절한 업무 분장을 위하여 사용 희망일로부터 1주일 전 "갑"에게 사용 사실을 알리고 이에 대한 승인을 득한다.</p>
     <p class="sub">③ "갑" 사업장의 방학, 휴원 등 "갑"이 지정한 휴무일의 경우 해당 일을 연차사용으로 대체함에 동의한다.</p></div>
 
-  <div class="clause"><h3>제 7조 (의원사직)</h3>
-    <p class="sub">① "을"이 사직하고자 할 경우 사직하고자 하는 날의 <b>${resignDays}일 이전</b>에 사직서를 제출하고, 후임자를 선임할 때까지 업무의 인수인계를 비롯하여 성실히 근로한다.</p>
-    <p class="sub">② "을"은 본인이 담당하는 반의 해당 학기 수업이 종료될 때까지 근무를 지속하여야 하며, "갑"이 서면으로 인정하는 불가피한 사유가 없는 한 해당 학기 종료 이전에 사직할 수 없다.</p>
-    <div class="avoid"><p class="sub">③ "을"이 퇴직하는 경우 퇴직 월 임금 및 발생 퇴직금은 익월 임금지급일에 일괄 지급하기로 한다.</p>
+  <div class="clause"><h3>제 7조 (${art7Title})</h3>
+    ${art7Head.map((t, i) => `<p class="sub">${CIRC[i]} ${t}</p>`).join("\n    ")}
+    <p class="sub">${CIRC[art7Head.length]} "을"은 본인이 담당하는 반의 해당 학기 수업이 종료될 때까지 근무를 지속하여야 하며, "갑"이 서면으로 인정하는 불가피한 사유가 없는 한 해당 학기 종료 이전에 사직할 수 없다.</p>
+    <div class="avoid"><p class="sub">${CIRC[art7Head.length + 1]} "을"이 퇴직하는 경우 퇴직 월 임금 및 발생 퇴직금은 익월 임금지급일에 일괄 지급하기로 한다.</p>
     ${inlineSign("동 의 자")}</div></div>
 
   <div class="clause"><h3>제 8조 (기타사항)</h3>
@@ -686,6 +722,81 @@ export function pledgeServiceHtml(args: { employee: DocEmployee; company: DocCom
   </div>`;
 }
 
+/**
+ * **개인정보를 국외에서 처리(위탁·보관)하는 사업자.**
+ *
+ * 인사 시스템이 실제로 개인정보를 보내는 곳만 적는다 — 안 보내는 곳을 적으면
+ * 사실과 다른 고지가 되고, 보내는 곳을 빠뜨리면 고지 의무를 지키지 못한다.
+ * 새 연동을 붙이면 **여기에 함께 적어야 한다**.
+ *
+ * ⚠ 생성형 AI(Claude·ChatGPT 등)는 여기 없다 — 이 앱은 어떤 AI API 도 호출하지 않는다.
+ * 코드를 사람이 AI 의 도움으로 작성한 것과, 앱이 직원 정보를 AI 에 보내는 것은 다른 이야기다.
+ * 다만 **담당자가 직원 정보를 직접 AI 서비스에 입력한다면** 그건 별도의 국외 이전이므로
+ * 그때는 이 표에 추가하고 이용 방침을 따로 정해야 한다.
+ */
+export const OVERSEAS_PROCESSORS: Array<{
+  name: string;
+  country: string;
+  purpose: string;
+  items: string;
+}> = [
+  {
+    name: "Vercel Inc.",
+    country: "미국",
+    purpose: "인사 시스템(웹) 운영·호스팅",
+    items: "시스템 이용 과정에서 처리되는 인사정보 일체",
+  },
+  {
+    name: "Supabase Inc.",
+    country: "미국(데이터베이스 소재 리전에 따름)",
+    purpose: "인사정보 데이터베이스 보관",
+    items: "인사기록·급여·계약 정보(주민등록번호·계좌번호는 암호화 보관)",
+  },
+  {
+    name: "Slack Technologies, LLC",
+    country: "미국",
+    purpose: "연차·보강 신청 및 안내 메시지 발송",
+    items: "성명, 소속, 연차·보강 신청 내역, 잔여 연차",
+  },
+  {
+    name: "Google LLC",
+    country: "미국",
+    purpose: "연차·보강 일정 공유(구글 캘린더)",
+    items: "성명, 휴가·보강 일자",
+  },
+];
+
+/**
+ * 국외 처리(위탁·보관) 안내.
+ *
+ * **동의가 아니라 '고지' 다.** 「개인정보 보호법」 제28조의8 제1항 제3호는 계약의 체결·이행을
+ * 위해 개인정보의 **처리위탁·보관**이 필요한 경우, 같은 조 제2항의 사항을 알리면 별도 동의
+ * 없이 국외 이전을 할 수 있게 한다. 동의를 근거로 삼으면 직원이 동의를 철회했을 때
+ * 그 사람만 슬랙·캘린더에서 빼야 하는데, 그건 실무가 돌아가지 않는다.
+ * 대신 **고지받았다는 확인**을 받아 알린 사실을 남긴다.
+ */
+function overseasNoticeBox(): string {
+  const rows = OVERSEAS_PROCESSORS.map(
+    (p) =>
+      `<tr><td>${esc(p.name)}</td><td>${esc(p.country)}</td><td>${esc(p.purpose)}</td><td>${esc(p.items)}</td></tr>`
+  ).join("");
+  // `avoid` — 상자가 쪽 경계에 걸리면 테두리가 두 쪽으로 잘려 한 항목으로 안 읽힌다.
+  // 통째로 다음 장으로 넘어가는 편이 낫다(동의서는 원래도 서명란까지 두 장이 된다).
+  return `<div class="avoid" style="border:1px solid #999;padding:8px 10px;margin:8px 0;">
+    <div style="font-weight:700;margin-bottom:4px">□ 개인정보의 국외 처리(위탁·보관)에 관한 안내</div>
+    <div class="small" style="margin-bottom:4px">회사는 인사·급여 업무를 전산으로 처리하기 위하여 아래 사업자에게 개인정보의 처리를 위탁하며, 그 과정에서 개인정보가 국외에 보관될 수 있습니다. 「개인정보 보호법」 제28조의8 제1항 제3호에 따라 아래와 같이 알려드립니다.</div>
+    <table class="kv" style="margin:0;font-size:11px">
+      <thead><tr><th>이전받는 자</th><th>국가</th><th>이용 목적</th><th>이전 항목</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="small" style="margin-top:4px">· <b>이전 시기·방법</b>: 인사 시스템 이용 시 정보통신망을 통하여 수시로 이전<br>
+    · <b>보유·이용 기간</b>: 위탁계약 종료 시 또는 회사의 개인정보 보유기간 종료 시까지<br>
+    · <b>거부 방법·효과</b>: 회사에 서면으로 요구하여 거부할 수 있으나, 이 경우 전산 인사·급여 처리가 제한되어 급여명세서 교부·연차 신청 등 일부 업무를 수기로 처리하게 됩니다.<br>
+    · 이 항목은 <b>동의를 받는 것이 아니라 알려드리는 것</b>이며, 위 사항은 「개인정보 보호법」 제28조의8 제2항에 따른 고지사항입니다.</div>
+    <div class="small" style="margin-top:4px">※ 위 사항을 고지받아 확인하였습니다. ( 확인 : ______ )</div>
+  </div>`;
+}
+
 /* ======================= 개인정보 수집·이용·제공 동의서 ======================= */
 export function consentPrivacyHtml(args: { employee: DocEmployee; company: DocCompany; date?: Date }): string {
   const { employee: e, company: c } = args;
@@ -712,6 +823,7 @@ export function consentPrivacyHtml(args: { employee: DocEmployee; company: DocCo
     <div style="font-weight:700;margin-bottom:4px">□ 고유식별정보의 처리에 관한 동의</div>
     <div class="small">회사가 본인의 고유식별정보(주민등록번호, 운전면허번호, 외국인등록번호, 여권번호)를 「개인정보보호법」 제24조에 따라 수집·이용·제공 등 처리하는 데 동의합니다. ( 동의 : ______ )</div>
   </div>
+  ${overseasNoticeBox()}
   <div class="doc-foot">
     <div class="date-center">${ymdKo(date)}</div>
     <div class="sign-area">
