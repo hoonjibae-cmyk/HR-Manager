@@ -11,6 +11,7 @@ import {
 import { Pill } from "@/components/ui";
 import { resignStatusOf, resignBadgeLabel, resignedSummary } from "@/lib/payroll-roster";
 import { isEstimatedHourly } from "@/lib/payroll";
+import { openPdfTab, closePdfTab, deliverPdf } from "@/lib/open-pdf";
 import {
   useTableSort,
   useStoredState,
@@ -429,16 +430,25 @@ export default function PayrollClient({ today }: { today: string }) {
     }
   }
 
-  function openPayslip(id: number) {
-    fetch("/api/documents/payslip", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ payrollId: id }),
-    }).then(async (res) => {
-      if (!res.ok) return alert("생성 실패: " + (await res.text()));
-      const blob = await res.blob();
-      window.open(URL.createObjectURL(blob), "_blank");
-    });
+  /** 명세서 PDF — 탭은 **누르는 순간** 연다(await 뒤면 팝업 차단. lib/open-pdf.ts 참고) */
+  async function openPayslip(id: number) {
+    const win = openPdfTab("급여명세서");
+    try {
+      const res = await fetch("/api/documents/payslip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payrollId: id }),
+      });
+      if (!res.ok) {
+        closePdfTab(win);
+        alert("생성 실패: " + (await res.text()));
+        return;
+      }
+      await deliverPdf(win, res, "급여명세서");
+    } catch (e: any) {
+      closePdfTab(win);
+      alert("생성 실패: " + (e?.message ?? "네트워크 오류"));
+    }
   }
 
   const setInput = (id: number, k: string, v: any) =>
