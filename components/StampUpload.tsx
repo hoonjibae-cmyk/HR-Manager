@@ -187,6 +187,12 @@ export default function StampUpload({
             배경을 지운(누끼) <b>PNG</b> 를 올려 주세요 — 도장이 이름 위에 겹쳐 찍히므로 흰 배경이
             남아 있으면 글자를 덮습니다. 큰 사진은 알아서 줄여 저장합니다.
           </p>
+          {/* 찍히는 크기는 이미지의 여백에 좌우된다 — 사람이 알고 올려야 자로 재서 맞출 수 있다 */}
+          <p className="text-[11px] text-slate-400 max-w-xs">
+            문서에 찍히는 크기는 <b>도장 둘레의 여백까지 포함해</b> 맞춰집니다. 지금은 실물 인감
+            <b> 지름 18mm</b> 에 맞춰 두었으니, <b>여백을 더 바짝 자른 이미지</b>로 바꾸면 그만큼
+            크게 찍힙니다. 바꾼 뒤에는 계약서를 한 장 뽑아 자로 재 보고, 다르면 알려 주세요.
+          </p>
           {warn && <p className="text-xs text-amber-600 max-w-xs">⚠️ {warn}</p>}
           {err && <p className="text-xs text-red-600">{err}</p>}
         </div>

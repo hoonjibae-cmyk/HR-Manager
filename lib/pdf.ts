@@ -1,7 +1,15 @@
 import puppeteer, { type Browser } from "puppeteer-core";
 import { existsSync, readdirSync } from "fs";
 import { fontFaceCss, footerFontCss } from "./fonts";
-import { countPdfPages, seamLayer, footerTemplate } from "./pdf-seam";
+import {
+  countPdfPages,
+  seamLayer,
+  footerTemplate,
+  STAMP_SIZE_MM,
+  STAMP_COMPACT_MM,
+  SEAM_SIZE_MM,
+  SEAM_VISIBLE_MM,
+} from "./pdf-seam";
 
 // 서버리스(Vercel/AWS Lambda) 환경 여부
 const onServerless =
@@ -483,13 +491,20 @@ table.kv.sched{table-layout:fixed;}
 .sign-row{display:flex;justify-content:space-between;margin:8px 0;}
 .seal{color:#c0392b;font-weight:700;}
 /* 법인 인감 — 앵커가 0×0 이라 줄 높이를 밀지 않는다. 실물 도장처럼 이름 위에 살짝 겹쳐 찍힌다.
-   자리를 차지하면 2페이지로 맞춰 둔 계약서가 3페이지로 늘어난다. */
+   자리를 차지하면 2페이지로 맞춰 둔 계약서가 3페이지로 늘어난다.
+   ⚠ 크기를 키워도 **찍히는 자리(중심)는 그대로**여야 한다 — left/top 이 아니라 중심 좌표를
+   기준으로 잡는 이유다. 예전처럼 모서리 기준으로 두면 지름을 키울 때마다 도장이 오른쪽·
+   아래로 흘러 이름과 주소 잔글씨를 덮는다. 중심은 실제 계약서에 맞춰 둔 값이다. */
 .stamp-anchor{position:relative;display:inline-block;width:0;height:0;vertical-align:baseline;}
-.stamp-anchor .stamp-img{position:absolute;left:-3mm;top:0;transform:translateY(-55%);
-  width:20mm;height:20mm;object-fit:contain;}
+.stamp-anchor .stamp-img{position:absolute;top:0;object-fit:contain;
+  width:${STAMP_SIZE_MM}mm;height:${STAMP_SIZE_MM}mm;
+  left:calc(7mm - ${STAMP_SIZE_MM / 2}mm);
+  transform:translateY(calc(-1mm - ${STAMP_SIZE_MM / 2}mm));}
 /* 증명서 발급인 블록 — 상호와 대표이사 사이에 걸치게 위로 올린다.
-   기본값(-55%)이면 도장이 아래로 흘러 바로 밑의 주소·전화 잔글씨를 덮는다. */
-.doc-foot .stamp-anchor .stamp-img{left:1mm;transform:translateY(-78%);}
+   본문 기본 위치면 도장이 아래로 흘러 바로 밑의 주소·전화 잔글씨를 덮는다. */
+.doc-foot .stamp-anchor .stamp-img{
+  left:calc(11mm - ${STAMP_SIZE_MM / 2}mm);
+  transform:translateY(calc(-5.6mm - ${STAMP_SIZE_MM / 2}mm));}
 .date-center{text-align:center;margin:14px 0 6px;font-size:11pt;letter-spacing:0.05em;}
 table.pay{width:100%;border-collapse:collapse;margin-top:8px;}
 table.pay th,table.pay td{border:1px solid #cbd5e1;padding:6px 9px;font-size:9.6pt;}
@@ -544,17 +559,19 @@ table.kv{page-break-inside:avoid;break-inside:avoid;}
 .compact table.kv th,.compact table.kv td{padding:2.5px 6px;font-size:8.4pt;}
 .compact table.kv th{width:92px;}
 .compact .inline-sign{font-size:8.4pt;margin:0 0 2px;}
-.compact .stamp-anchor .stamp-img{width:17mm;height:17mm;}
+.compact .stamp-anchor .stamp-img{width:${STAMP_COMPACT_MM}mm;height:${STAMP_COMPACT_MM}mm;
+  left:calc(7mm - ${STAMP_COMPACT_MM / 2}mm);transform:translateY(calc(-1mm - ${STAMP_COMPACT_MM / 2}mm));}
 /* 간인 — 장 경계마다 도장을 반씩. 절반만 보이게 잘라 두 장을 나란히 놓으면 하나로 이어진다.
    본문 흐름 밖(절대배치)이라 장수를 늘리지 않는다. */
 .seam-layer{position:absolute;top:0;left:0;width:0;height:0;}
 /* 보이는 폭은 8mm — 종이 가장자리를 접어 찍으면 접힌 자리가 도장의 가운데를 먹으므로
    실제로도 양쪽에 초승달처럼 일부만 남는다. 절반(10mm)을 그대로 얹으면 본문을 그만큼 더 덮는다. */
-.seam{position:absolute;display:block;width:8mm;height:20mm;overflow:hidden;}
-.seam img{position:absolute;top:0;width:20mm;height:20mm;object-fit:contain;}
+.seam{position:absolute;display:block;width:${SEAM_VISIBLE_MM}mm;height:${SEAM_SIZE_MM}mm;overflow:hidden;}
+.seam img{position:absolute;top:0;width:${SEAM_SIZE_MM}mm;height:${SEAM_SIZE_MM}mm;object-fit:contain;}
 .seam-a img{left:0;}      /* 앞장 오른쪽 끝 — 도장의 왼쪽 자락 */
 .seam-b{left:0;}          /* 뒷장 왼쪽 끝 */
-.seam-b img{left:-12mm;}  /* — 오른쪽 자락 */
+/* 오른쪽 자락 — 지름에서 보이는 폭을 뺀 만큼 왼쪽으로 민다 */
+.seam-b img{left:-${SEAM_SIZE_MM - SEAM_VISIBLE_MM}mm;}
 .compact .hosub{margin:1.5px 0 1.5px 28px;}
 .compact .footnote{font-size:7.9pt;margin:1px 0 1px 13px;}
 .compact .muted{font-size:8.2pt;}
