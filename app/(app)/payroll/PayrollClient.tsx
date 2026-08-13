@@ -12,6 +12,7 @@ import { Pill } from "@/components/ui";
 import { resignStatusOf, resignBadgeLabel, resignedSummary } from "@/lib/payroll-roster";
 import { isEstimatedHourly } from "@/lib/payroll";
 import { openPdfTab, closePdfTab, deliverPdf } from "@/lib/open-pdf";
+import { payoutNotice, type PayoutSuggestion } from "@/lib/leave-payout";
 import {
   useTableSort,
   useStoredState,
@@ -176,6 +177,9 @@ export default function PayrollClient({ today }: { today: string }) {
   const [openDedId, setOpenDedId] = useState<number | null>(null);
   const [unlockRec, setUnlockRec] = useState<Rec | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  /** 그 달에 연차기간이 끝나는 직원 — 미사용 연차수당을 넣을지 사람이 정한다 */
+  const [payout, setPayout] = useState<PayoutSuggestion[]>([]);
+  const [payoutOpen, setPayoutOpen] = useState(false);
   const [tsResult, setTsResult] = useState<any>(null);
   const [incResult, setIncResult] = useState<any>(null);
   // 이름 검색은 기억하지 않는다 — 그때그때 한 사람 찾는 동작이지 기본값이 아니다
@@ -196,6 +200,11 @@ export default function PayrollClient({ today }: { today: string }) {
     });
     setInputs(map);
     setLoading(false);
+    // 연차 원장을 훑는 조회라 급여 목록과 **따로** 부른다 — 실패해도 급여 화면은 그대로 뜬다
+    fetch(`/api/payroll/leave-expiry?year=${year}&month=${month}`)
+      .then((r) => (r.ok ? r.json() : { suggestions: [] }))
+      .then((j) => setPayout(j.suggestions ?? []))
+      .catch(() => setPayout([]));
   }, [year, month]);
 
   useEffect(() => {
@@ -570,6 +579,19 @@ export default function PayrollClient({ today }: { today: string }) {
               title="세후 실지급액을 은행 파일이체(대량이체)에 올릴 수 있는 엑셀로 받습니다"
             >
               {busy === "bank" ? "만드는 중…" : "🏦 은행 이체 파일"}
+            </button>
+            <button
+              className="btn-outline"
+              onClick={() => setPayoutOpen(true)}
+              disabled={!!busy}
+              title="이 달에 연차기간이 끝나는 직원의 미사용 연차수당을 확인하고 반영합니다"
+            >
+              🍃 연차수당 상세
+              {payout.some((p) => !p.done) && (
+                <span className="ml-1 rounded-full bg-emerald-100 px-1.5 text-[10px] font-bold text-emerald-700">
+                  {payout.filter((p) => !p.done).length}
+                </span>
+              )}
             </button>
             <button className="btn-outline" onClick={sendEmails} disabled={!!busy}>
               {busy === "email" ? "발송 중…" : "명세서 이메일 발송"}
@@ -1232,6 +1254,18 @@ export default function PayrollClient({ today }: { today: string }) {
           }}
         />
       )}
+      {payoutOpen && (
+        <LeavePayoutModal
+          year={year}
+          month={month}
+          list={payout}
+          onClose={() => setPayoutOpen(false)}
+          onDone={async () => {
+            setPayoutOpen(false);
+            await load();
+          }}
+        />
+      )}
       {addOpen && (
         <AddEmployeeModal
           year={year}
@@ -1730,5 +1764,179 @@ function InlineInput({
         onChange={(e) => onChange(e.target.value)}
       />
     </label>
+  );
+}
+
+/**
+ * 연차수당 상세 — **이 달에 연차기간이 끝나는 직원**과 미사용 일수를 모아 보여 준다.
+ *
+ * 급여 표에 열을 더하지 않고 따로 둔 이유: 연차기간 종료월은 입사일에 따라 사람마다 달라
+ * 한 달에 많아야 두어 명이다. 47명짜리 표에 그 두 명을 위한 칸을 상시로 두면
+ * 늘 비어 있는 열이 하나 생기고, 정작 볼 사람은 스크롤해서 찾아야 한다.
+ *
+ * ⚠ **자동으로 넣지 않는다.** 미사용 연차를 수당으로 줄지, 이월할지, 사용촉진(§61)을
+ * 했는지는 회사가 정할 일이다. 금액까지 계산해 보여 주고 **넣을지는 사람이 고른다**.
+ */
+function LeavePayoutModal({
+  year,
+  month,
+  list,
+  onClose,
+  onDone,
+}: {
+  year: number;
+  month: number;
+  list: PayoutSuggestion[];
+  onClose: () => void;
+  onDone: () => Promise<void>;
+}) {
+  const todo = list.filter((s) => !s.done);
+  const [picked, setPicked] = useState<number[]>(todo.map((s) => s.employeeId));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const toggle = (id: number) =>
+    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const chosen = list.filter((s) => picked.includes(s.employeeId));
+  const totalDays = Math.round(chosen.reduce((a, s) => a + s.suggestDays, 0) * 10) / 10;
+  const totalAmount = chosen.reduce((a, s) => a + s.suggestAmount, 0);
+
+  async function apply() {
+    if (!chosen.length) return;
+    setSaving(true);
+    setErr("");
+    try {
+      const res = await fetch("/api/payroll/leave-expiry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          year,
+          month,
+          // 이미 넣어 둔 일수가 있으면 그만큼 더한 값이 최종값이다
+          items: chosen.map((s) => ({ employeeId: s.employeeId, days: s.remaining })),
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "반영 실패");
+      if (j.skippedSent?.length)
+        alert(`발송 완료라 건너뛴 직원: ${j.skippedSent.join(", ")}\n잠금을 해제한 뒤 다시 시도하세요.`);
+      await onDone();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="card w-full max-w-3xl p-5 bg-white flex flex-col max-h-[85vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="font-bold text-slate-800 mb-1">
+          🍃 연차수당 상세 — {year}년 {month}월
+        </h3>
+        <p className="text-xs text-slate-500 mb-3">
+          이 달에 <b>연차기간이 끝나는</b> 직원입니다. 기간이 끝나면 남은 연차는 소멸하므로
+          (근로기준법 §60⑦) 수당으로 정산하려면 <b>이 달 급여</b>에 실어야 합니다.
+        </p>
+
+        {list.length === 0 ? (
+          <div className="text-center text-slate-400 py-10 text-sm">
+            이 달에 연차기간이 끝나는 직원이 없습니다.
+            <div className="text-xs mt-1 text-slate-400">
+              연차기간은 <b>입사일 기준 1년 단위</b>라 사람마다 종료월이 다릅니다.
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 space-y-1 mb-3">
+              <div>
+                · <b>자동으로 넣지 않습니다.</b> 수당으로 정산할지, 다음 기간으로 이월할지,
+                사용촉진(§61)을 했는지는 회사가 정할 일입니다.
+              </div>
+              <div>
+                · 금액은 <b>미사용 일수 × 통상시급 × 8시간</b>으로, 급여명세서에 찍히는 식과 같습니다.
+              </div>
+              <div>
+                · 잔여는 <b>그 달 말일 기준</b>입니다. 남은 기간에 연차를 더 쓰면 줄어드니,
+                기간이 끝난 뒤 반영하는 편이 정확합니다.
+              </div>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-auto border border-slate-200 rounded">
+              <table className="w-full text-sm">
+                <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:bg-slate-50 [&_th]:z-10 [&_th]:shadow-[inset_0_-1px_0_#e2e8f0]">
+                  <tr className="text-slate-500 text-xs">
+                    <th className="px-2 py-2 w-8"></th>
+                    <th className="px-2 py-2 text-left">직원</th>
+                    <th className="px-2 py-2 text-left">사용기한</th>
+                    <th className="px-2 py-2 text-right">잔여</th>
+                    <th className="px-2 py-2 text-right">이미 반영</th>
+                    <th className="px-2 py-2 text-right">추가 반영</th>
+                    <th className="px-2 py-2 text-right">예상 수당</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map((s) => (
+                    <tr
+                      key={s.employeeId}
+                      className={`border-t border-slate-100 ${s.done ? "text-slate-400" : ""}`}
+                    >
+                      <td className="px-2 py-2">
+                        <input
+                          type="checkbox"
+                          checked={picked.includes(s.employeeId)}
+                          onChange={() => toggle(s.employeeId)}
+                        />
+                      </td>
+                      <td className="px-2 py-2 font-semibold">
+                        {s.name}
+                        {s.done && (
+                          <span className="ml-1.5 pill bg-emerald-50 text-emerald-700 text-[10px]">
+                            반영 완료
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 tnum text-slate-500">{s.expiry}</td>
+                      <td className="px-2 py-2 text-right tnum">{s.remaining}일</td>
+                      <td className="px-2 py-2 text-right tnum text-slate-400">
+                        {s.alreadyDays ? `${s.alreadyDays}일` : "-"}
+                      </td>
+                      <td className="px-2 py-2 text-right tnum font-semibold">
+                        {s.suggestDays ? `${s.suggestDays}일` : "-"}
+                      </td>
+                      <td className="px-2 py-2 text-right tnum font-semibold text-brand-600">
+                        {s.suggestAmount ? `${won(s.suggestAmount)}원` : "-"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {err && <div className="text-xs text-rose-600 mt-2">{err}</div>}
+
+            <div className="flex items-center justify-end gap-2 mt-3">
+              <span className="text-xs text-slate-500 mr-auto">
+                {chosen.length
+                  ? `${chosen.length}명 · ${totalDays}일 · ${won(totalAmount)}원`
+                  : "반영할 직원을 고르세요"}
+              </span>
+              <button className="btn-outline" onClick={onClose} disabled={saving}>
+                닫기
+              </button>
+              <button className="btn-primary" onClick={apply} disabled={saving || !chosen.length}>
+                {saving ? "반영 중…" : "급여에 반영"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
