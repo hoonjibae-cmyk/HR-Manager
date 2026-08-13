@@ -313,6 +313,17 @@ model HrNotifySetting {
   birthdayMinute    Int       @default(0)
   birthdayLastRunAt DateTime?
 
+  // 운영진 일일 안내 — 오늘 휴가 · 오늘 보강
+  // 위의 두 알림과 **받는 곳이 다르다**(경영지원 부서 ↔ 운영진 채널). 그래서 채널을 따로 둔다.
+  dailyEnabled Boolean @default(true)
+  /// 운영진 채널 ID. **비면 보내지 않는다** — 전 직원 일정이라 DM 으로 흩뿌릴 성격이 아니다
+  dailyChannel String? @default("C0AP5EWJR71")
+  dailyHour    Int     @default(14)
+  dailyMinute  Int     @default(0)
+  /// 휴가·보강을 **따로 새긴다** — 한쪽 발송이 실패해도 다른 쪽이 막히지 않게
+  dailyLeaveLastRunAt  DateTime?
+  dailyMakeupLastRunAt DateTime?
+
   updatedAt DateTime @updatedAt
 }
 

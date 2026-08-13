@@ -3,12 +3,17 @@ import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
 import { logActivity } from "@/lib/activity";
 import { getNotifySetting, previewHrNotices, runHrNotices } from "@/lib/hr-notify-service";
+import { runDailyBriefs } from "@/lib/daily-brief-service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const NUM = ["contractLeadDays", "contractHour", "contractMinute", "birthdayLeadDays", "birthdayHour", "birthdayMinute"] as const;
-const BOOL = ["contractEnabled", "birthdayEnabled"] as const;
+const NUM = [
+  "contractLeadDays", "contractHour", "contractMinute",
+  "birthdayLeadDays", "birthdayHour", "birthdayMinute",
+  "dailyHour", "dailyMinute",
+] as const;
+const BOOL = ["contractEnabled", "birthdayEnabled", "dailyEnabled"] as const;
 
 /** 설정 + **지금 조건이면 무엇이 나갈지** 미리보기를 함께 돌려준다 */
 export async function GET() {
@@ -28,6 +33,8 @@ export async function PATCH(req: Request) {
     data.targetDepartment = b.targetDepartment.trim();
   // 빈 문자열은 '채널 안 씀'(= 부서 DM) 이라는 뜻이라 null 로 저장한다
   if (typeof b.channel === "string") data.channel = b.channel.trim() || null;
+  // 운영진 채널 — 비면 일일 안내를 보내지 않는다(DM 으로 흩뿌릴 성격이 아니다)
+  if (typeof b.dailyChannel === "string") data.dailyChannel = b.dailyChannel.trim() || null;
 
   // 시각·일수는 있을 수 없는 값을 막는다 — 24시로 저장되면 그날 알림이 통째로 안 나간다
   const clamp = (k: string, lo: number, hi: number) => {
@@ -35,7 +42,9 @@ export async function PATCH(req: Request) {
   };
   clamp("contractHour", 0, 23);
   clamp("birthdayHour", 0, 23);
+  clamp("dailyHour", 0, 23);
   clamp("contractMinute", 0, 59);
+  clamp("dailyMinute", 0, 59);
   clamp("birthdayMinute", 0, 59);
   clamp("contractLeadDays", 0, 365);
   clamp("birthdayLeadDays", 0, 30);
@@ -53,6 +62,10 @@ export async function PATCH(req: Request) {
  */
 export async function POST(req: Request) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const which = new URL(req.url).searchParams.get("which");
+  // 일일 안내는 **낼 것이 없으면 안 보내는 것이 정상 동작**이라, 확인용으로 눌렀을 때도
+  // 억지로 보내지 않고 '없어서 안 보냈다' 를 그대로 돌려준다.
+  if (which === "daily") return NextResponse.json(await runDailyBriefs(new Date(), { force: true }));
   const out = await runHrNotices(new Date(), { force: true });
   return NextResponse.json(out);
 }

@@ -14,6 +14,10 @@ export interface NotifySettingRow {
   birthdayLeadDays: number;
   birthdayHour: number;
   birthdayMinute: number;
+  dailyEnabled: boolean;
+  dailyChannel: string | null;
+  dailyHour: number;
+  dailyMinute: number;
 }
 
 export interface NotifyPreview {
@@ -284,6 +288,68 @@ export default function HrNotifyPanel({
               {p.birthdayLeadDays === 0 ? "오늘" : `${p.birthdayLeadDays}일 뒤`} 생일인 직원이 없습니다.
             </span>
           )}
+        </div>
+      </div>
+
+      {/* 운영진 일일 안내 — 받는 곳이 위 둘과 다르다(경영지원 부서 ↔ 운영진 채널) */}
+      <div className="border-t border-slate-100 mt-3 pt-3">
+        <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+          <input
+            type="checkbox"
+            checked={p.dailyEnabled}
+            onChange={(e) => set("dailyEnabled", e.target.checked)}
+          />
+          운영진 일일 안내 — 오늘 휴가 · 오늘 보강
+        </label>
+        <div className="grid sm:grid-cols-2 gap-3 mt-2">
+          <label className="text-xs">
+            <span className="text-slate-500">운영진 채널 ID</span>
+            <input
+              className="input py-1 text-sm mt-0.5"
+              placeholder="C0AP5EWJR71"
+              value={p.dailyChannel ?? ""}
+              onChange={(e) => set("dailyChannel", e.target.value)}
+            />
+          </label>
+          {timeField("보낼 시각", "dailyHour", "dailyMinute")}
+        </div>
+        <p className="text-[11px] text-slate-400 leading-relaxed mt-2">
+          <b>휴가와 보강을 각각 따로</b> 올립니다 — 챙기는 사람도 할 일도 달라 한 통에 담으면
+          스레드에서 한쪽만 이야기하기 어렵습니다. <b>낼 것이 없는 날은 보내지 않습니다</b> —
+          매일 &ldquo;오늘은 없습니다&rdquo; 가 오면 정작 있는 날의 알림까지 묻힙니다.
+          휴가는 연차·반차뿐 아니라 <b>대휴·병가·경조·평일 휴무</b>도 함께 냅니다(그날 자리에 없는 것은 같습니다).
+          <b> 승인 대기</b>인 건은 아래에 따로 모아 표시합니다.
+          {!p.dailyChannel?.trim() && (
+            <span className="block text-amber-600 mt-1">
+              ⚠️ 채널 ID 가 비어 있어 아무 데도 나가지 않습니다.
+            </span>
+          )}
+        </p>
+        <div className="mt-2">
+          <button
+            className="btn btn-outline text-xs"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setMsg("");
+              setErr("");
+              try {
+                const r = await fetch("/api/settings/notify?which=daily", { method: "POST" });
+                const j = await r.json();
+                if (!r.ok) throw new Error(j.error || "실패");
+                const one = (x: any) =>
+                  x?.error ? `오류(${x.error})` : x?.sent ? `${x.count}건 보냄` : (x?.reason ?? "안 보냄");
+                setMsg(`오늘 휴가: ${one(j.leave)} · 오늘 보강: ${one(j.makeup)}`);
+                router.refresh();
+              } catch (e: any) {
+                setErr(e.message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            지금 보내기 (오늘 것)
+          </button>
         </div>
       </div>
 

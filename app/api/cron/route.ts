@@ -4,6 +4,7 @@ import { runMakeupConfirmReminders } from "@/lib/makeup-service";
 import { holidayStatus, holidayApiConfigured, syncHolidays } from "@/lib/holiday-service";
 import { runHrNotices } from "@/lib/hr-notify-service";
 import { syncDayOffs } from "@/lib/dayoff-service";
+import { runDailyBriefs } from "@/lib/daily-brief-service";
 
 export const dynamic = "force-dynamic";
 // Vercel Pro: 함수 최대 실행시간 300초 (인원이 많아도 한 번에 발송 가능)
@@ -80,7 +81,15 @@ async function handle(req: Request) {
     dayOffSync = await syncDayOffs(new Date()).catch((e) => ({ error: String(e?.message ?? e) }));
   }
 
-  return NextResponse.json({ ...result, makeupReminders, holidaySync, hrNotices, dayOffSync });
+  // 운영진 일일 안내 — 오늘 휴가 · 오늘 보강. 설정 시각(기본 14:00 KST)을 지나야 나가고,
+  // **낼 것이 없으면 보내지 않는다**(매일 "없습니다" 가 오면 있는 날의 알림까지 묻힌다).
+  // 두 갈래를 따로 새겨 한쪽 발송이 실패해도 다른 쪽이 막히지 않는다.
+  let dailyBriefs: any = null;
+  if (!dryRun) {
+    dailyBriefs = await runDailyBriefs(new Date()).catch((e) => ({ error: String(e?.message ?? e) }));
+  }
+
+  return NextResponse.json({ ...result, makeupReminders, holidaySync, hrNotices, dayOffSync, dailyBriefs });
 }
 
 export async function GET(req: Request) {
