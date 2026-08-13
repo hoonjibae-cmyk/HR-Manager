@@ -170,8 +170,14 @@ export default function LeaveCalendar({
       </div>
 
       {/* 달력 — 남은 높이를 채우고 안에서만 스크롤한다 (표 보기와 같은 규칙).
-          `auto-rows-fr` 로 주(週) 줄이 남은 높이를 **고르게 나눠 갖는다** — 안 그러면 달마다
-          5줄·6줄로 갈리면서 카드 아래에 흰 공백이 남는다. 좁아지면 최소 높이에서 스크롤된다. */}
+          주(週) 줄이 남은 높이를 **고르게 나눠 갖되 92px 아래로는 줄지 않는다**.
+
+          ⚠ 예전엔 `auto-rows-fr` + 칸의 `min-h-[92px]` 였는데 **그게 어긋났다** —
+          `fr` 은 컨테이너 높이만 보고 줄 높이를 정하므로(창이 짧으면 70px) 칸이 자기 줄을
+          22px 씩 넘쳐 **아랫줄을 덮었다**. 날짜 숫자가 칸 밖으로 밀리고 경계선이 숫자를
+          가로지르며, '오늘' 테두리가 두 줄에 걸쳐 그려졌다(겪었다).
+          최소 높이는 **줄(track)에만** 두고 칸은 줄을 그대로 채우게 한다 —
+          두 군데에 적으면 언젠가 또 갈라진다. */}
       <div className="card flex flex-col flex-1 min-h-0 overflow-hidden">
         <div className="grid grid-cols-7 bg-slate-50 border-b border-slate-100 shrink-0">
           {WEEK.map((w, i) => (
@@ -185,7 +191,7 @@ export default function LeaveCalendar({
             </div>
           ))}
         </div>
-        <div className="grid grid-cols-7 auto-rows-fr flex-1 min-h-0 overflow-auto">
+        <div className="grid grid-cols-7 auto-rows-[minmax(92px,1fr)] flex-1 min-h-0 overflow-auto">
           {cells.map((d, i) => {
             const list = d ? byDate.get(d) ?? [] : [];
             const dow = i % 7;
@@ -193,7 +199,7 @@ export default function LeaveCalendar({
             return (
               <div
                 key={i}
-                className={`min-h-[92px] border-b border-r border-slate-100 p-1.5 ${
+                className={`border-b border-r border-slate-100 p-1.5 ${
                   !d ? "bg-slate-50/60" : d === todayYmd ? TODAY_CELL : ""
                 }`}
               >

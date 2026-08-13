@@ -105,6 +105,10 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   칸에 옅은 배경 + **안쪽** 테두리(`ring-inset` — 바깥 ring 은 격자를 흔든다), 날짜 숫자에 채운 동그라미.
   - **오늘 날짜는 서버에서 구해 넘긴다**(`kstTodayYmd`, lib/format.ts). 클라이언트에서 `Date.now()` 로
     구하면 서버가 그린 HTML 과 달라져 하이드레이션이 어긋난다(자정 언저리에 실제로 갈린다).
+  - ⚠ **달력 칸의 최소 높이는 칸이 아니라 줄(grid track)에 준다** — `auto-rows-fr` 는 컨테이너
+    높이만 보고 줄 높이를 정하므로, 칸에 `min-h-*` 를 걸면 창이 짧을 때 칸이 자기 줄을 넘쳐
+    **아랫줄을 덮는다**(날짜 숫자가 칸 밖으로 밀리고 '오늘' 테두리가 두 줄에 걸친다. 겪었다).
+    `auto-rows-[minmax(92px,1fr)]` 로 줄에만 주고 칸은 줄을 그대로 채우게 한다.
   - ⚠ **Tailwind 클래스 문자열을 `lib/` 에 두지 않는다.** `content` 가 `app/**`·`components/**` 만
     훑어서(tailwind.config.ts) `lib/` 에 적으면 클래스가 아예 생성되지 않고 **조용히 아무 효과도
     나지 않는다**(겪었다 — 칸 배경·테두리가 통째로 빠졌다).
