@@ -12,6 +12,11 @@ export const APP_VERSION: string = pkg.version;
 /**
  * 배포된 커밋 — Vercel 이 넣어 주는 값. 로컬에서는 비어 있다.
  * 같은 버전으로 여러 번 배포할 수 있으므로 '어느 커밋인지' 는 이쪽이 정확하다.
+ *
+ * ⚠️ **서버에서만 읽을 수 있다.** Next.js 는 `NEXT_PUBLIC_` 으로 시작하지 않는 환경변수를
+ * 브라우저 번들에 넣지 않으므로, 클라이언트 컴포넌트에서 이걸 부르면 서버는 해시를 그리고
+ * 브라우저는 못 그려 **하이드레이션이 어긋난다**(겪었다 — 사이드바가 조용히 이 상태였다).
+ * 그래서 화면은 `versionLabel()` 을 **서버에서 구해 prop 으로 내려받아** 쓴다.
  */
 export const COMMIT_SHA: string | null =
   process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA ?? null;

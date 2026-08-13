@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { versionLabel } from "@/lib/version";
 
 const NAV = [
   { href: "/dashboard", label: "대시보드", icon: "▣" },
@@ -16,7 +15,18 @@ const NAV = [
   { href: "/settings", label: "설정", icon: "⚙" },
 ];
 
-export default function Sidebar({ logo, companyName }: { logo?: string | null; companyName?: string }) {
+export default function Sidebar({
+  logo,
+  companyName,
+  version,
+  commit,
+}: {
+  logo?: string | null;
+  companyName?: string;
+  /** 서버에서 구한 `versionLabel()` — 클라이언트에서 부르면 하이드레이션이 어긋난다(lib/version.ts) */
+  version: string;
+  commit?: string | null;
+}) {
   const path = usePathname();
   return (
     <aside className="w-60 shrink-0 bg-white border-r border-slate-200 flex flex-col">
@@ -55,8 +65,17 @@ export default function Sidebar({ logo, companyName }: { logo?: string | null; c
             로그아웃 →
           </button>
         </form>
-        <div className="px-3 pt-2 text-[10px] text-slate-300">
-          주식회사 유쌤에듀 · {versionLabel()}
+        {/* 배포 버전 — **읽히게** 둔다. 예전엔 10px slate-300 이라 사실상 안 보여서
+            "고쳐 올렸는데 화면이 그대로다" 일 때 정작 확인할 수가 없었다.
+            커밋 해시는 툴팁으로 전부 보여 준다(같은 버전으로 여러 번 배포할 수 있다). */}
+        <div className="px-3 pt-2 space-y-0.5">
+          <div className="text-[10px] text-slate-400">{companyName ?? "주식회사 유쌤에듀"}</div>
+          <div
+            className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600 tnum"
+            title={commit ? `배포 커밋 ${commit}` : "로컬 실행 (배포 커밋 정보 없음)"}
+          >
+            {version}
+          </div>
         </div>
       </div>
     </aside>

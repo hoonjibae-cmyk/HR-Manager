@@ -3,7 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export default function LoginForm({ logo }: { logo: string | null }) {
+export default function LoginForm({
+  logo,
+  version,
+  commit,
+}: {
+  logo: string | null;
+  /** 서버에서 구한 `versionLabel()` — 클라이언트에서 부르면 하이드레이션이 어긋난다(lib/version.ts) */
+  version: string;
+  commit?: string | null;
+}) {
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
@@ -57,6 +66,13 @@ export default function LoginForm({ logo }: { logo: string | null }) {
         </form>
         <p className="text-[11px] text-slate-400 mt-6 text-center">
           기본 비밀번호는 <code>.env</code>의 ADMIN_PASSWORD 입니다.
+        </p>
+        {/* 로그인 전에도 버전이 보여야 한다 — 배포가 올라갔는지 확인하려고 로그인부터 할 일은 없다 */}
+        <p
+          className="text-[11px] text-slate-400 mt-2 text-center tnum"
+          title={commit ? `배포 커밋 ${commit}` : "로컬 실행 (배포 커밋 정보 없음)"}
+        >
+          {version}
         </p>
       </div>
     </div>
