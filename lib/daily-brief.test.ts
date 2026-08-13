@@ -13,6 +13,10 @@ import {
   hhmm,
   DEFAULT_DAILY_CHANNEL,
   DEFAULT_DAILY_TIMING,
+  skipReasonOf,
+  skipNotice,
+  isSchoolBreakTitle,
+  SCHOOL_BREAK_KEYWORD,
   type BriefSession,
 } from "./daily-brief";
 import type { LeaveDay } from "./leave-calendar";
@@ -203,5 +207,63 @@ describe("두 갈래는 서로를 모른다", () => {
   it("보강이 있어도 휴가 안내는 비면 null", () => {
     expect(makeupBriefText([sess()], TODAY, CAT)).not.toBeNull();
     expect(leaveBriefText([], TODAY)).toBeNull();
+  });
+});
+
+
+// 학원이 안 도는 날 알림이 오면 '안 봐도 되는 알림' 이 되어 평일 알림까지 무뎌진다.
+describe("보내지 않는 날 — 토·일·공휴일·학원방학", () => {
+  const MON = "2026-08-10";
+  const SAT = "2026-08-15";
+  const SUN = "2026-08-16";
+
+  it("평일이고 아무것도 안 걸리면 보낸다 (null)", () => {
+    expect(skipReasonOf(MON)).toBeNull();
+  });
+
+  it("토요일·일요일은 막는다", () => {
+    expect(skipReasonOf(SAT)).toBe("WEEKEND");
+    expect(skipReasonOf(SUN)).toBe("WEEKEND");
+  });
+
+  it("공휴일은 막는다", () => {
+    expect(skipReasonOf(MON, { holidays: [MON] })).toBe("HOLIDAY");
+  });
+
+  it("학원방학은 막는다", () => {
+    expect(skipReasonOf(MON, { breakDates: [MON] })).toBe("SCHOOL_BREAK");
+  });
+
+  it("다른 날 공휴일·방학은 오늘을 막지 않는다", () => {
+    expect(skipReasonOf(MON, { holidays: ["2026-08-11"], breakDates: ["2026-08-12"] })).toBeNull();
+  });
+
+  // 모르는 것을 방학으로 단정해 거르면 멀쩡한 평일 알림이 통째로 사라진다
+  it("**학사일정을 못 읽으면(빈 배열) 막지 않는다**", () => {
+    expect(skipReasonOf(MON, { holidays: [], breakDates: [] })).toBeNull();
+    expect(skipReasonOf(MON, {})).toBeNull();
+  });
+
+  it("주말이 공휴일이기도 하면 주말로 적는다 (둘 다 막는 건 같다)", () => {
+    expect(skipReasonOf(SAT, { holidays: [SAT] })).toBe("WEEKEND");
+  });
+
+  it("건너뛴 이유를 사람 말로 적는다", () => {
+    expect(skipNotice(SAT, "WEEKEND")).toContain("8월 15일 (토)");
+    expect(skipNotice(SAT, "WEEKEND")).toContain("주말");
+    expect(skipNotice(MON, "SCHOOL_BREAK")).toContain("학원방학");
+  });
+});
+
+describe("학사일정 제목에서 학원방학 가려내기", () => {
+  it("키워드가 들어 있으면 잡는다 — 표기가 사람 손에 달려 있다", () => {
+    expect(SCHOOL_BREAK_KEYWORD).toBe("학원방학");
+    for (const t of ["학원방학", "7월 학원방학", "학원방학 시작", "[학원방학] 8/1~8/10", "학원 방학"])
+      expect(isSchoolBreakTitle(t)).toBe(true);
+  });
+
+  it("다른 일정은 잡지 않는다", () => {
+    for (const t of ["여름 특강", "개학", "중간고사", "학부모 상담주간", "방학특강 접수", null, undefined, ""])
+      expect(isSchoolBreakTitle(t as any)).toBe(false);
   });
 });

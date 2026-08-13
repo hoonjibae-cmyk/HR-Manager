@@ -383,6 +383,28 @@ export async function listLeaveCalendarEvents(timeMin: string, timeMax: string) 
   return listEvents(process.env.GOOGLE_CALENDAR_ID || "", timeMin, timeMax);
 }
 
+/**
+ * **학사일정 캘린더** — 학원방학·개학처럼 학원 전체가 도는지 마는지를 담은 달력.
+ * 연차·보강 캘린더와 **별개**라 없을 때 그쪽으로 대체하지 않는다(성격이 아예 다르다).
+ */
+export function schoolCalendarId(): string {
+  return (process.env.GOOGLE_SCHOOL_CALENDAR_ID || "").trim();
+}
+export function schoolCalendarConfigured(): boolean {
+  return gcalConfigured() && !!schoolCalendarId();
+}
+
+/**
+ * 학사일정 조회. 캘린더를 안 붙였으면 `null` — **빈 배열이 아니다.**
+ * 빈 배열은 '일정이 하나도 없다(= 방학이 아니다)' 는 뜻이고, `null` 은 '모른다' 다.
+ * 부르는 쪽이 이 둘을 갈라 봐야 모르는 날을 방학으로 단정하지 않는다.
+ */
+export async function listSchoolCalendarEvents(timeMin: string, timeMax: string) {
+  const id = schoolCalendarId();
+  if (!id) return null;
+  return listEvents(id, timeMin, timeMax);
+}
+
 async function deleteEvent(calendarId: string, eventId: string): Promise<boolean> {
   const token = await accessToken();
   if (!token || !eventId || !calendarId) return false;

@@ -12,9 +12,50 @@ import { getNotifySetting } from "./hr-notify-service";
 import { buildLeaveCalendar } from "./leave-calendar";
 import { listHolidays } from "./holiday-service";
 import { listDayOffs } from "./dayoff-service";
-import { leaveBriefText, makeupBriefText, isBriefable } from "./daily-brief";
+import { listSchoolCalendarEvents } from "./gcal";
+import { eventDates } from "./dayoff";
+import {
+  leaveBriefText,
+  makeupBriefText,
+  isBriefable,
+  skipReasonOf,
+  skipNotice,
+  isSchoolBreakTitle,
+  type SkipReason,
+} from "./daily-brief";
 
 const ymdUtc = (d: Date) => d.toISOString().slice(0, 10);
+
+/**
+ * **오늘이 학원방학인가** — 학사일정 캘린더에서 「학원방학」이 들어간 일정을 찾는다.
+ *
+ * 못 읽으면(캘린더 미설정·조회 실패) **빈 배열을 돌려준다** — 모르는 날을 방학으로 단정해
+ * 조용히 거르면 멀쩡한 평일 알림이 통째로 사라진다. 안 보내야 할 날 한 번 더 오는 쪽이 덜 나쁘다.
+ */
+async function schoolBreakDates(today: string): Promise<string[]> {
+  // 여러 날짜리 일정이 오늘을 덮을 수 있으므로 앞뒤로 넉넉히 본다
+  const from = new Date(`${today}T00:00:00Z`);
+  const events = await listSchoolCalendarEvents(
+    new Date(from.getTime() - 60 * 86400000).toISOString(),
+    new Date(from.getTime() + 2 * 86400000).toISOString()
+  ).catch(() => null);
+  if (!events) return [];
+  return events
+    .filter((e: any) => isSchoolBreakTitle(e.summary))
+    .flatMap((e: any) => eventDates(e));
+}
+
+/**
+ * 오늘 아예 안 보내는 날인가 — 토·일·공휴일·학원방학.
+ * 두 갈래(휴가·보강)가 **같은 판정**을 쓴다.
+ */
+export async function dailyBriefSkip(today: string): Promise<SkipReason | null> {
+  const [holidays, breaks] = await Promise.all([
+    listHolidays().catch(() => [] as any[]),
+    schoolBreakDates(today),
+  ]);
+  return skipReasonOf(today, { holidays: holidays.map((h: any) => h.date), breakDates: breaks });
+}
 
 function timing(s: any, lastRunAt: Date | null): NotifyTiming {
   return {
@@ -48,6 +89,14 @@ export async function runDailyLeaveBrief(
   if (!due) return { ran: false, reason };
 
   const today = kstToday(now);
+  // **토·일·공휴일·학원방학에는 아예 보내지 않는다.** 낼 것이 있고 없고보다 앞선다 —
+  // 학원이 안 도는 날 알림이 오면 '안 봐도 되는 알림' 이 되어 평일 알림까지 무뎌진다.
+  const skip = await dailyBriefSkip(today);
+  if (skip) {
+    if (!opts.dryRun)
+      await prisma.hrNotifySetting.update({ where: { id: 1 }, data: { dailyLeaveLastRunAt: now } });
+    return { ran: true, count: 0, skipped: skip, reason: skipNotice(today, skip) };
+  }
   const from = new Date(`${today}T00:00:00Z`);
   const to = new Date(`${today}T23:59:59Z`);
 
@@ -130,6 +179,12 @@ export async function runDailyMakeupBrief(
   if (!due) return { ran: false, reason };
 
   const today = kstToday(now);
+  const skip = await dailyBriefSkip(today);
+  if (skip) {
+    if (!opts.dryRun)
+      await prisma.hrNotifySetting.update({ where: { id: 1 }, data: { dailyMakeupLastRunAt: now } });
+    return { ran: true, count: 0, skipped: skip, reason: skipNotice(today, skip) };
+  }
   const rows = await prisma.makeupSession.findMany({
     // planStart 는 KST 벽시계를 UTC 필드에 담은 값이라 그날 00:00~23:59 로 자르면 된다
     where: { planStart: { gte: new Date(`${today}T00:00:00Z`), lte: new Date(`${today}T23:59:59Z`) } },

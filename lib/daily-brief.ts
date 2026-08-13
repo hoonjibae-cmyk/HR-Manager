@@ -22,6 +22,53 @@ export const DEFAULT_DAILY_TIMING = { enabled: true, hour: 14, minute: 0 };
 
 const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
 
+/* ───────────────── 보내지 않는 날 ───────────────── */
+
+/**
+ * **학사일정에서 이 말이 들어간 일정은 학원이 쉬는 기간**으로 본다.
+ * 「학원방학」·「7월 학원방학」·「학원방학 시작」 모두 잡히게 부분일치로 본다 —
+ * 제목 표기가 사람 손에 달려 있어 정확히 일치를 요구하면 조용히 안 걸린다.
+ */
+export const SCHOOL_BREAK_KEYWORD = "학원방학";
+
+export function isSchoolBreakTitle(title: string | null | undefined): boolean {
+  return (title ?? "").replace(/\s+/g, "").includes(SCHOOL_BREAK_KEYWORD);
+}
+
+export type SkipReason = "WEEKEND" | "HOLIDAY" | "SCHOOL_BREAK";
+
+export const SKIP_LABEL: Record<SkipReason, string> = {
+  WEEKEND: "주말",
+  HOLIDAY: "공휴일",
+  SCHOOL_BREAK: "학원방학",
+};
+
+/**
+ * **아예 보내지 않는 날인가.** 낼 것이 있고 없고보다 앞선다.
+ *
+ * 토·일·공휴일·학원방학에는 학원이 돌아가지 않으므로 운영진이 그날 챙길 일이 없다.
+ * 그런 날 알림이 오면 '안 봐도 되는 알림' 이 되어, 정작 평일 알림까지 무뎌진다.
+ *
+ * ⚠ **학사일정을 못 읽었을 때는 막지 않는다** — 부르는 쪽이 `breakDates` 를 빈 배열로 넘긴다.
+ * 모르는 것을 방학으로 단정해 조용히 거르면 멀쩡한 평일 알림이 통째로 사라진다.
+ * 안 보내야 할 날 한 번 더 오는 쪽이 덜 나쁘다.
+ */
+export function skipReasonOf(
+  dateYmd: string,
+  opts: { holidays?: string[]; breakDates?: string[] } = {}
+): SkipReason | null {
+  const dow = new Date(`${dateYmd}T00:00:00Z`).getUTCDay();
+  if (dow === 0 || dow === 6) return "WEEKEND";
+  if ((opts.holidays ?? []).includes(dateYmd)) return "HOLIDAY";
+  if ((opts.breakDates ?? []).includes(dateYmd)) return "SCHOOL_BREAK";
+  return null;
+}
+
+/** 건너뛴 이유 한 줄 — 작업 이력·설정 화면에 그대로 쓴다 */
+export function skipNotice(dateYmd: string, reason: SkipReason): string {
+  return `${dayLabel(dateYmd)}은 ${SKIP_LABEL[reason]}이라 운영진 안내를 보내지 않습니다.`;
+}
+
 /** `2026-08-12` → `8월 12일 (수)` */
 export function dayLabel(dateYmd: string): string {
   const d = new Date(`${dateYmd}T00:00:00Z`);

@@ -267,6 +267,7 @@ SLACK_APPROVERS="U01ADMIN1,U01ADMIN2" # 승인 권한자 (비우면 채널 누�
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | `{ "type": "service_account", ... }` (파일 내용 전체) |
 | `GOOGLE_CALENDAR_ID` | `....@group.calendar.google.com` (휴가 캘린더) |
 | `GOOGLE_MAKEUP_CALENDAR_ID` | `....@group.calendar.google.com` (**보강캘린더** — 휴가와 별개) |
+| `GOOGLE_SCHOOL_CALENDAR_ID` | `....@group.calendar.google.com` (**학사일정** — 「학원방학」 판정용, 선택) |
 
 **방법 B — 두 값을 따로**
 ```env
@@ -353,6 +354,7 @@ npx prisma db push
 | Key | Value | 없으면 |
 |---|---|---|
 | `GOOGLE_MAKEUP_CALENDAR_ID` | 3-B-2 의 6번에서 복사한 보강캘린더 ID | 보강 일정만 캘린더에 안 올라감 (나머지는 정상) |
+| `GOOGLE_SCHOOL_CALENDAR_ID` | 학사일정 캘린더 ID (선택) | 학원방학에도 운영진 일일 안내가 나감 (토·일·공휴일 차단은 그대로) |
 | `SLACK_MAKEUP_CHANNEL` | 보강 등록 내역을 공유할 채널 ID | 등록 내역이 신청자 DM 으로만 감 |
 
 > 채널 ID 찾는 법: 슬랙에서 `#보강-신청` 채널 이름을 클릭 → 창 맨 아래 **채널 ID**

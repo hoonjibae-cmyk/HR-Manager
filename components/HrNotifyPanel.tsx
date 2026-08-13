@@ -319,6 +319,12 @@ export default function HrNotifyPanel({
           매일 &ldquo;오늘은 없습니다&rdquo; 가 오면 정작 있는 날의 알림까지 묻힙니다.
           휴가는 연차·반차뿐 아니라 <b>대휴·병가·경조·평일 휴무</b>도 함께 냅니다(그날 자리에 없는 것은 같습니다).
           <b> 승인 대기</b>인 건은 아래에 따로 모아 표시합니다.
+          <span className="block mt-1">
+            <b>토·일·공휴일·학원방학에는 아예 나가지 않습니다</b> — 학원이 안 도는 날 알림이 오면
+            평일 알림까지 무뎌집니다. 방학은 <b>학사일정 캘린더</b>에서 제목에 「학원방학」이 든
+            일정으로 판정합니다(<code>GOOGLE_SCHOOL_CALENDAR_ID</code>). 캘린더를 못 읽으면
+            <b> 막지 않고 보냅니다</b> — 모르는 날을 방학으로 단정해 거르면 멀쩡한 평일 알림이 사라집니다.
+          </span>
           {!p.dailyChannel?.trim() && (
             <span className="block text-amber-600 mt-1">
               ⚠️ 채널 ID 가 비어 있어 아무 데도 나가지 않습니다.
