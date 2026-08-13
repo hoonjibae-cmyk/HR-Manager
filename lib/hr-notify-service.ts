@@ -7,10 +7,12 @@ import { prisma } from "./db";
 import { postMessage, slackConfigured } from "./slack";
 import { logActivity } from "./activity";
 import { CONTRACT_STAGE_LABEL } from "./constants";
+import { listHolidays } from "./holiday-service";
 import {
   notifyDue,
   contractsToAnnounce,
   birthdaysOn,
+  announceWindow,
   contractAlertText,
   birthdayAlertText,
   recipientWarning,
@@ -201,13 +203,28 @@ export async function runBirthdayNotice(
 
   // 생년월일은 문자열이라 DB 에서 월·일로 거를 수 없다 — 재직자만 읽어 메모리에서 가린다
   // (수십 명 규모라 이 편이 단순하고, 표기가 여러 가지인 것도 여기서 함께 흡수한다).
-  const rows = await prisma.employee.findMany({
-    where: { active: true, birth: { not: null } },
-    select: { id: true, name: true, department: true, position: true, birth: true },
-  });
-  const alerts = birthdaysOn(rows as any, now, s.birthdayLeadDays);
+  //
+  // **공휴일 표를 함께 읽는다** — 생일이 토·일·공휴일이면 그 전 마지막 평일에 알린다.
+  // 못 읽으면 빈 표로 간다: 주말 판정은 그대로 되고 공휴일만 평일로 잡힐 뿐이라,
+  // 알림이 쉬는 날 한 번 더 가는 정도에서 그친다(여기서 멈추면 축하가 통째로 사라진다).
+  const [rows, holidays] = await Promise.all([
+    prisma.employee.findMany({
+      where: { active: true, birth: { not: null } },
+      select: { id: true, name: true, department: true, position: true, birth: true },
+    }),
+    listHolidays().catch(() => [] as Array<{ date: string }>),
+  ]);
+  const holidayYmds = holidays.map((h: any) => h.date);
+  const window = announceWindow(kstToday(now), holidayYmds);
+  const alerts = birthdaysOn(rows as any, now, s.birthdayLeadDays, holidayYmds);
 
-  if (opts.dryRun) return { ran: false, dryRun: true, reason, count: alerts.length, alerts };
+  if (opts.dryRun)
+    return { ran: false, dryRun: true, reason, count: alerts.length, alerts, window };
+  if (!window.length) {
+    // 오늘 몫은 이미 지난 평일에 나갔다 — 새기고 조용히 끝낸다
+    await prisma.hrNotifySetting.update({ where: { id: 1 }, data: { birthdayLastRunAt: now } });
+    return { ran: true, count: 0, reason: "주말·공휴일 — 그 전 마지막 평일에 이미 안내" };
+  }
   if (!alerts.length) {
     await prisma.hrNotifySetting.update({ where: { id: 1 }, data: { birthdayLastRunAt: now } });
     return { ran: true, count: 0, reason: "오늘 생일인 직원 없음" };

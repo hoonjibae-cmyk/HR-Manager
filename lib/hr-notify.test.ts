@@ -4,6 +4,8 @@ import {
   contractsToAnnounce,
   birthdaysOn,
   birthMonthDay,
+  announceWindow,
+  isWorkday,
   contractAlertText,
   birthdayAlertText,
   recipientWarning,
@@ -141,14 +143,19 @@ describe("생일", () => {
     ...o,
   });
 
+  // 2026-08-10 은 월요일 · 08-14 금 · 08-15 토 · 08-16 일 · 08-17 월
+  const on = (rows: BirthdayRow[], when: string, lead = 0, hols: string[] = []) =>
+    birthdaysOn(rows, kst(when), lead, hols);
+
   it("오늘이 생일인 사람만", () => {
-    const out = birthdaysOn([b(), b({ id: 2, birth: "1991-08-11", name: "다른이" })], kst("2026-08-10T12:00"));
+    const out = on([b(), b({ id: 2, birth: "1991-08-11", name: "다른이" })], "2026-08-10T12:00");
     expect(out.map((x) => x.name)).toEqual(["이지우"]);
     expect(out[0].age).toBe(36);
+    expect(out[0].shifted).toBe(false);
   });
 
   it("연도를 몰라도 월·일만 맞으면 낸다 (나이는 비운다)", () => {
-    const out = birthdaysOn([b({ birth: "900810" })], kst("2026-08-10T12:00"));
+    const out = on([b({ birth: "900810" })], "2026-08-10T12:00");
     expect(out).toHaveLength(1);
     expect(out[0].age).toBeNull();
   });
@@ -163,32 +170,120 @@ describe("생일", () => {
   it("읽을 수 없으면 조용히 건너뛴다 (엉뚱한 날 축하하지 않는다)", () => {
     expect(birthMonthDay("")).toBeNull();
     expect(birthMonthDay("몰라요")).toBeNull();
-    expect(birthdaysOn([b({ birth: null })], kst("2026-08-10T12:00"))).toHaveLength(0);
+    expect(on([b({ birth: null })], "2026-08-10T12:00")).toHaveLength(0);
   });
 
   it("미리 알림(leadDays)을 주면 그날 생일인 사람을 낸다", () => {
-    const out = birthdaysOn([b({ birth: "1990-08-13" })], kst("2026-08-10T12:00"), 3);
+    const out = on([b({ birth: "1990-08-13" })], "2026-08-10T12:00", 3);
     expect(out).toHaveLength(1);
     expect(out[0].date).toBe("2026-08-13");
   });
 
   it("2월 29일생은 평년에 2월 28일로 본다 — 3월 1일로 미루면 생일이 지난 뒤에 축하하게 된다", () => {
     const feb29 = b({ birth: "1996-02-29" });
-    // 2027 은 평년
-    expect(birthdaysOn([feb29], kst("2027-02-28T12:00"))).toHaveLength(1);
-    expect(birthdaysOn([feb29], kst("2027-03-01T12:00"))).toHaveLength(0);
-    // 윤년에는 제 날짜에
-    expect(birthdaysOn([feb29], kst("2028-02-28T12:00"))).toHaveLength(0);
-    expect(birthdaysOn([feb29], kst("2028-02-29T12:00"))).toHaveLength(1);
+    // 2027-02-28 은 **일요일**이라 그 전 마지막 평일인 2/26(금)에 나간다
+    const fri = on([feb29], "2027-02-26T12:00");
+    expect(fri).toHaveLength(1);
+    expect(fri[0].date).toBe("2027-02-28");
+    expect(fri[0].shifted).toBe(true);
+    expect(on([feb29], "2027-03-01T12:00")).toHaveLength(0);
+    // 윤년에는 제 날짜에 (2028-02-29 는 화요일)
+    expect(on([feb29], "2028-02-28T12:00")).toHaveLength(0);
+    expect(on([feb29], "2028-02-29T12:00")).toHaveLength(1);
   });
 
   it("KST 로 본다 — UTC 로 보면 자정 무렵에 하루 어긋난다", () => {
     // KST 2026-08-10 00:30 = UTC 2026-08-09 15:30
-    expect(birthdaysOn([b()], kst("2026-08-10T00:30"))).toHaveLength(1);
+    expect(on([b()], "2026-08-10T00:30")).toHaveLength(1);
   });
 
   it("아무도 없으면 빈 목록", () => {
-    expect(birthdaysOn([b({ birth: "1990-01-01" })], kst("2026-08-10T12:00"))).toEqual([]);
+    expect(on([b({ birth: "1990-01-01" })], "2026-08-10T12:00")).toEqual([]);
+  });
+});
+
+/*
+ * 생일이 쉬는 날이면 **그 전 마지막 평일**에 알린다.
+ * 지나고 나서 하는 축하는 안 하느니만 못하고, 쉬는 날 슬랙은 아무도 안 읽는다.
+ */
+describe("주말·공휴일 생일은 그 전 마지막 평일에", () => {
+  const b = (birth: string, name = "이지우"): BirthdayRow => ({
+    id: 1,
+    name,
+    department: "경영지원",
+    position: "매니저",
+    birth,
+  });
+  const on = (rows: BirthdayRow[], when: string, hols: string[] = []) =>
+    birthdaysOn(rows, kst(when), 0, hols);
+
+  it("근무일 판정 — 토·일·공휴일이 아니면 근무일", () => {
+    const h = new Set(["2026-08-17"]);
+    expect(isWorkday("2026-08-14", h)).toBe(true); // 금
+    expect(isWorkday("2026-08-15", h)).toBe(false); // 토
+    expect(isWorkday("2026-08-16", h)).toBe(false); // 일
+    expect(isWorkday("2026-08-17", h)).toBe(false); // 월이지만 공휴일
+  });
+
+  it("금요일에 서면 금·토·일을 함께 챙긴다", () => {
+    expect(announceWindow("2026-08-14", [])).toEqual(["2026-08-14", "2026-08-15", "2026-08-16"]);
+  });
+
+  it("연휴가 길면 그만큼 늘어난다 (월요일까지 공휴일이면 금~월)", () => {
+    expect(announceWindow("2026-08-14", ["2026-08-17"])).toEqual([
+      "2026-08-14",
+      "2026-08-15",
+      "2026-08-16",
+      "2026-08-17",
+    ]);
+  });
+
+  // 토요일에 뒤를 돌아보며 '금요일이 마지막 평일' 이라고 판정하면 금요일 몫이 또 나간다
+  it("**오늘이 쉬는 날이면 아무것도 내지 않는다** — 그 몫은 이미 금요일에 나갔다", () => {
+    expect(announceWindow("2026-08-15", [])).toEqual([]);
+    expect(announceWindow("2026-08-16", [])).toEqual([]);
+    expect(on([b("1990-08-15")], "2026-08-15T12:00")).toHaveLength(0);
+    expect(on([b("1990-08-16")], "2026-08-16T12:00")).toHaveLength(0);
+  });
+
+  it("토요일 생일은 금요일에 나가고 날짜는 실제 생일로 적는다", () => {
+    const out = on([b("1990-08-15")], "2026-08-14T12:00");
+    expect(out).toHaveLength(1);
+    expect(out[0].date).toBe("2026-08-15");
+    expect(out[0].shifted).toBe(true);
+    expect(out[0].age).toBe(36);
+  });
+
+  it("공휴일 생일도 그 전 마지막 평일에", () => {
+    const out = on([b("1990-08-17")], "2026-08-14T12:00", ["2026-08-17"]);
+    expect(out[0].date).toBe("2026-08-17");
+    expect(out[0].shifted).toBe(true);
+    // 공휴일 표를 안 넘기면 월요일이 평일로 잡혀 금요일에는 안 나온다
+    expect(on([b("1990-08-17")], "2026-08-14T12:00")).toHaveLength(0);
+  });
+
+  it("당일 생일과 앞당긴 생일이 한 통에 함께 실린다", () => {
+    const out = on([b("1990-08-15", "토요일생"), b("1990-08-14", "금요일생")], "2026-08-14T12:00");
+    expect(out.map((x) => [x.name, x.shifted])).toEqual([
+      ["금요일생", false],
+      ["토요일생", true],
+    ]);
+  });
+
+  it("문구 — 앞당긴 사람이 있으면 날짜와 이유를 적는다", () => {
+    const out = on([b("1990-08-15", "토요일생"), b("1990-08-14", "금요일생")], "2026-08-14T12:00");
+    const { text } = birthdayAlertText(out);
+    expect(text).toContain("2026년 8월 15일 (토)");
+    expect(text).toContain("쉬는 날이라 미리 알립니다");
+    expect(text).toContain("그 전 마지막 평일인 오늘");
+    // '오늘이 생일' 이라고 적으면 받은 사람이 그날 축하해 버린다
+    expect(text).not.toContain("오늘이 생일인 직원");
+  });
+
+  it("문구 — 모두 당일이면 예전 그대로 짧게", () => {
+    const { text } = birthdayAlertText(on([b("1990-08-14")], "2026-08-14T12:00"));
+    expect(text).toContain("오늘이 생일인 직원");
+    expect(text).not.toContain("🗓");
   });
 });
 
@@ -240,7 +335,14 @@ describe("문구", () => {
   });
 
   it("생일 알림은 짧다 — 할 일을 길게 붙이면 축하가 업무 지시로 읽힌다", () => {
-    const out = birthdayAlertText(birthdaysOn([{ id: 1, name: "이지우", department: "경영지원", position: "매니저", birth: "1990-08-10" }], kst("2026-08-10T12:00")));
+    const out = birthdayAlertText(
+      birthdaysOn(
+        [{ id: 1, name: "이지우", department: "경영지원", position: "매니저", birth: "1990-08-10" }],
+        kst("2026-08-10T12:00"),
+        0,
+        []
+      )
+    );
     expect(out.text).toContain("오늘이 생일인 직원");
     expect(out.text).toContain("이지우");
     expect(out.text).toContain("만 36세");

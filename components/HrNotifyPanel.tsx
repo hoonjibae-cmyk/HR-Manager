@@ -22,7 +22,8 @@ export interface NotifySettingRow {
 
 export interface NotifyPreview {
   contract: { count?: number; alerts?: any[] };
-  birthday: { count?: number; alerts?: any[] };
+  /** `window` = 오늘 함께 챙기는 날들. 비어 있으면 오늘이 주말·공휴일이라 아무것도 안 나간다 */
+  birthday: { count?: number; alerts?: any[]; window?: string[] };
   recipients: { total: number; userIds: string[]; warning: string | null };
   slack: boolean;
 }
@@ -275,13 +276,23 @@ export default function HrNotifyPanel({
         </div>
         <p className="text-[11px] text-slate-400 leading-relaxed mt-2">
           지나면 뜻이 없는 알림이라 <b>그날만</b> 봅니다 — 놓친 날을 따라잡지 않습니다.
+          생일이 <b>토·일·공휴일</b>이면 <b>그 전 마지막 평일</b>에 미리 보냅니다(연휴면 연휴분을
+          한 통에 모아 보냅니다). 그래서 <b>쉬는 날에는 알림이 나가지 않습니다</b>.
           직원 정보의 <b>생년월일</b>이 비어 있으면 그 사람은 빠집니다.
         </p>
         <div className="mt-2 text-xs">
           {birthdayCount > 0 ? (
             <span className="text-slate-700">
               지금 보내면 <b>{birthdayCount}명</b> —{" "}
-              {(pv.birthday.alerts ?? []).map((a: any) => a.name).join(", ")}
+              {(pv.birthday.alerts ?? [])
+                .map((a: any) => (a.shifted ? `${a.name}(${a.date} 생일)` : a.name))
+                .join(", ")}
+            </span>
+          ) : (pv.birthday.window ?? []).length === 0 ? (
+            // 창이 비었다 = 오늘이 쉬는 날이다. '생일인 직원이 없다' 로 적으면
+            // 왜 안 나가는지 오해한다 — 그 몫은 이미 지난 평일에 나갔다.
+            <span className="text-slate-400">
+              오늘은 <b>주말·공휴일</b>이라 보내지 않습니다 — 그 전 마지막 평일에 이미 안내했습니다.
             </span>
           ) : (
             <span className="text-slate-400">

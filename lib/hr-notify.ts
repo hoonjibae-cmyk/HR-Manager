@@ -92,6 +92,38 @@ export function daysUntil(target: string, today: string): number {
   return Math.round((new Date(`${target}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / DAY);
 }
 
+/** 그날이 근무일인가 — 토·일·공휴일이 아니면 근무일 */
+export function isWorkday(ymd: string, holidays: Set<string>): boolean {
+  const dow = new Date(`${ymd}T00:00:00Z`).getUTCDay();
+  return dow !== 0 && dow !== 6 && !holidays.has(ymd);
+}
+
+/**
+ * **오늘 함께 안내할 날들** — 오늘 + 뒤이어 붙은 비근무일(다음 근무일 직전까지).
+ *
+ * 생일이 토·일·공휴일이면 **그 전 마지막 평일**에 알린다. 그 규칙을 뒤집어 보면
+ * "오늘이 마지막 평일인 날들" 이 곧 이 창이다 — 금요일에 서면 금·토·일이 함께 잡히고,
+ * 광복절이 토요일이면 금·토·일에 더해 대체공휴일인 월요일까지 잡힌다.
+ *
+ * **오늘이 비근무일이면 빈 배열**이다 — 그날 몫은 이미 지난 금요일에 나갔다.
+ * 뒤로 걸어가며 "내가 마지막 평일인가" 를 묻지 않고 앞으로 걷는 이유가 이것이다.
+ * 뒤로 걸으면 토요일에 크론이 돌 때 금요일 몫을 한 번 더 보내게 된다.
+ *
+ * 연휴가 아무리 길어도 멈추도록 상한(14일)을 둔다 — 공휴일 표가 잘못 채워져 있어도
+ * 무한히 걷지 않는다.
+ */
+export function announceWindow(today: string, holidays: string[]): string[] {
+  const set = new Set(holidays);
+  if (!isWorkday(today, set)) return [];
+  const out = [today];
+  for (let i = 1; i <= 14; i++) {
+    const d = addDays(today, i);
+    if (isWorkday(d, set)) break;
+    out.push(d);
+  }
+  return out;
+}
+
 /* ───────────── 계약 만료 예고 ───────────── */
 
 export interface ContractRow {
@@ -150,10 +182,15 @@ export interface BirthdayRow {
 }
 
 export interface BirthdayAlert extends BirthdayRow {
-  /** 축하할 날 (오늘 또는 leadDays 뒤) */
+  /** 축하할 날 = 그 사람의 실제 생일 (leadDays 를 반영한 날) */
   date: string;
   /** 만 나이 — 생년을 모르면 null */
   age: number | null;
+  /**
+   * 생일이 토·일·공휴일이라 **앞당겨** 알리는가.
+   * 문구가 "오늘이 생일" 이라고 적으면 안 되는 날이라 표시가 필요하다.
+   */
+  shifted: boolean;
 }
 
 /** `1990-03-15` · `900315` · `1990.03.15` 을 모두 `MM-DD` 로 */
@@ -181,32 +218,66 @@ function birthYear(birth: string | null | undefined): number | null {
   return y >= 1900 && y <= 2100 ? y : null;
 }
 
+const leapYear = (yy: number) => (yy % 4 === 0 && yy % 100 !== 0) || yy % 400 === 0;
+
 /**
- * 오늘(또는 `leadDays` 뒤)이 생일인 사람.
+ * 그 날짜가 챙겨야 할 `MM-DD` 들.
  *
  * **2월 29일생은 평년에 2월 28일로 본다** — 3월 1일로 미루면 생일이 지난 뒤에 축하하게 된다.
  * 어차피 관행이 갈리는 자리라, 늦는 쪽보다 하루 이른 쪽을 골랐다.
  */
-export function birthdaysOn(rows: BirthdayRow[], now: Date, leadDays = 0): BirthdayAlert[] {
-  const date = addDays(kstToday(now), Math.max(0, leadDays));
+function monthDaysFor(date: string): string[] {
   const [y, m, d] = date.split("-").map(Number);
-  const isFeb28 = m === 2 && d === 28;
-  const leap = (yy: number) => (yy % 4 === 0 && yy % 100 !== 0) || yy % 400 === 0;
   const md = `${pad(m)}-${pad(d)}`;
+  if (m === 2 && d === 28 && !leapYear(y)) return [md, "02-29"];
+  return [md];
+}
+
+/**
+ * **오늘 알려야 할 생일** — 오늘이 생일인 사람 + 생일이 토·일·공휴일이라 앞당겨 알릴 사람.
+ *
+ * 생일이 주말·공휴일이면 **그 전 마지막 평일**에 알린다. 지나고 나서 하는 축하는 안 하느니만
+ * 못하고, 쉬는 날 슬랙으로 축하해 봐야 아무도 안 읽는다. 그래서 늦추지 않고 **앞당긴다**.
+ *
+ * 구현은 뒤로 걷지 않고 `announceWindow()` 로 **앞으로** 본다 — "오늘이 마지막 평일인 날들"
+ * 을 모아 그 날짜의 생일을 함께 낸다. 뒤로 걸으면 토요일 크론이 금요일 몫을 다시 보낸다.
+ *
+ * `leadDays` 는 창 전체를 그만큼 뒤로 민다 — 알리는 날이 앞당겨지는 것이지 '며칠 전에
+ * 알린다' 는 설정이 무시되는 것이 아니다.
+ *
+ * ⚠ **공휴일 표를 반드시 넘긴다**(기본값을 두지 않은 이유). 안 넘기면 공휴일 생일이
+ * 평일로 잡혀 쉬는 날 알림이 나가고, 그 사실이 조용히 묻힌다.
+ */
+export function birthdaysOn(
+  rows: BirthdayRow[],
+  now: Date,
+  leadDays: number,
+  holidays: string[]
+): BirthdayAlert[] {
+  const lead = Math.max(0, leadDays);
+  // 창은 '알리는 날' 기준이고, 챙기는 생일은 거기서 leadDays 뒤다
+  const targets = announceWindow(kstToday(now), holidays).map((d) => addDays(d, lead));
+  if (!targets.length) return [];
+
+  // MM-DD → 그 생일이 실제로 있는 날. 앞선 날이 이긴다(같은 MM-DD 가 창에 두 번 들 일은 없다)
+  const byMd = new Map<string, string>();
+  for (const t of targets) for (const md of monthDaysFor(t)) if (!byMd.has(md)) byMd.set(md, t);
 
   return rows
-    .filter((e) => {
-      const b = birthMonthDay(e.birth);
-      if (!b) return false;
-      if (b === md) return true;
-      // 평년의 2월 28일에는 2월 29일생도 함께 본다
-      return isFeb28 && !leap(y) && b === "02-29";
-    })
     .map((e) => {
+      const b = birthMonthDay(e.birth);
+      const date = b ? byMd.get(b) : undefined;
+      if (!date) return null;
       const by = birthYear(e.birth);
-      return { ...e, date, age: by ? y - by : null };
+      return {
+        ...e,
+        date,
+        age: by ? Number(date.slice(0, 4)) - by : null,
+        shifted: date !== targets[0],
+      };
     })
-    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    .filter((x): x is BirthdayAlert => x !== null)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name, "ko"));
 }
 
 /* ───────────── 슬랙 문구 ───────────── */
@@ -264,20 +335,37 @@ export function contractAlertText(
   return { text, blocks };
 }
 
-/** 생일 안내 문구 — 짧게. 여기에 할 일을 길게 붙이면 축하가 업무 지시로 읽힌다 */
+/**
+ * 생일 안내 문구 — 짧게. 여기에 할 일을 길게 붙이면 축하가 업무 지시로 읽힌다.
+ *
+ * **앞당겨 알리는 사람이 섞이면 날짜를 적는다.** 주말 생일을 금요일에 알리면서 "오늘이
+ * 생일" 이라고 쓰면 틀린 말이 되고, 받은 사람이 그날 축하해 버린다. 왜 미리 오는지도
+ * 한 줄 붙인다 — 안 적으면 알림이 하루 일찍 잘못 온 것으로 읽힌다.
+ */
 export function birthdayAlertText(
   alerts: BirthdayAlert[],
   opts: { today?: boolean } = {}
 ): { text: string; blocks: any[] } {
+  const mixed = alerts.some((e) => e.shifted) || alerts.some((e) => e.date !== alerts[0]?.date);
   const when = opts.today === false ? dateLabel(alerts[0]?.date ?? "") : "오늘";
-  const head = `🎂 *${when}이 생일인 직원* — ${alerts.length}명`;
-  const lines = alerts.map((e) => `• ${who(e)}${e.age != null ? ` · 만 ${e.age}세` : ""}`);
-  const text = [head, "", ...lines].join("\n");
+  const head = mixed
+    ? `🎂 *생일 안내* — ${alerts.length}명`
+    : `🎂 *${when}이 생일인 직원* — ${alerts.length}명`;
+  const lines = alerts.map(
+    (e) =>
+      `• ${who(e)}${e.age != null ? ` · 만 ${e.age}세` : ""}` +
+      (mixed ? `\n   🗓 ${dateLabel(e.date)}${e.shifted ? " — 쉬는 날이라 미리 알립니다" : ""}` : "")
+  );
+  const tail = alerts.some((e) => e.shifted)
+    ? "생일이 주말·공휴일인 분은 그 전 마지막 평일인 오늘 함께 안내합니다."
+    : null;
+  const text = [head, "", ...lines, ...(tail ? ["", tail] : [])].join("\n");
   return {
     text,
     blocks: [
       { type: "section", text: { type: "mrkdwn", text: head } },
       { type: "section", text: { type: "mrkdwn", text: lines.join("\n") } },
+      ...(tail ? [{ type: "context", elements: [{ type: "mrkdwn", text: tail }] }] : []),
     ],
   };
 }
