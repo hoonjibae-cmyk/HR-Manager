@@ -200,6 +200,18 @@ describe("개인정보 국외 처리 고지", () => {
     expect(t).toContain("Notion Labs, Inc.");
   });
 
+  // 급여명세서 PDF 가 메일로 나가므로 **메일 발송처도 국외 이전**이고, 이전 항목에 급여 내역이
+  // 들어간다. 지금 SMTP_HOST 는 지메일이라 Google LLC 한 줄에 함께 적었다 —
+  // **메일 업체를 바꾸면 여기도 고쳐야 한다**(환경변수라 코드가 안 바뀌어 조용히 어긋난다).
+  it("**메일 발송처와 그리로 나가는 급여 내역을 적는다**", () => {
+    const g = OVERSEAS_PROCESSORS.find((p) => p.name === "Google LLC")!;
+    expect(g.purpose).toContain("이메일 발송");
+    expect(g.items).toContain("급여");
+    const t = html();
+    expect(t).toContain("지메일");
+    expect(t).toContain("급여명세서에 기재된 급여·공제 내역");
+  });
+
   // 이 앱은 어떤 AI API 도 호출하지 않는다. 안 보내는 곳을 적으면 사실과 다른 고지가 된다.
   it("**생성형 AI 사업자는 적지 않는다** — 앱이 그쪽으로 개인정보를 보내지 않는다", () => {
     const t = html();
