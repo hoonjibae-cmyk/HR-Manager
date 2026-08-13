@@ -273,7 +273,7 @@ function ScheduleCard({ schedule, status, onSave }: any) {
           </select>
         </F>
         {f.frequency === "MONTHLY" ? (
-          <F l="매월 n일 (말일 초과 시 말일)"><input type="number" min={1} max={31} className="input" value={f.dayOfMonth} onChange={(e) => set("dayOfMonth", e.target.value)} /></F>
+          <F l="매월 n일 (쉬는 날이면 앞당김)"><input type="number" min={1} max={31} className="input" value={f.dayOfMonth} onChange={(e) => set("dayOfMonth", e.target.value)} /></F>
         ) : (
           <F l="요일">
             <select className="input" value={f.dayOfWeek} onChange={(e) => set("dayOfWeek", e.target.value)}>
@@ -303,6 +303,16 @@ function ScheduleCard({ schedule, status, onSave }: any) {
           · 지급일이 <b>익월 7일</b>이라면 <b>매월 7일 · 전월분</b>으로 설정하세요. (7월 급여 → 8월 7일 발송)
         </div>
         <div>· 위에 지정한 <b>시각(KST 정시)</b> 에 발송됩니다. 서버가 매시 정각에 점검합니다.</div>
+        <div>
+          · 발송일이 <b>토·일·공휴일</b>이면 <b>그 전 마지막 평일</b>에 나갑니다 (7일이 토요일이면
+          6일 금요일). 늦추지 않는 이유는 지급일을 미루면 지연 지급이 되기 때문입니다.
+          <b>지정일이 말일을 넘으면</b> 먼저 말일로 맞춘 뒤 같은 규칙을 적용합니다.
+          아래 <b>다음 예정</b>이 실제로 나갈 날짜입니다.
+        </div>
+        <div>
+          · <b>공휴일 표가 채워져 있어야</b> 공휴일을 피합니다(설정 → 공휴일). 표가 비면 주말만
+          피하고 공휴일에는 그대로 나갑니다.
+        </div>
         <div>· 급여 기록이 아직 없으면 발송 직전에 자동으로 급여를 산정합니다. 이메일 주소가 없는 직원은 제외되고 실패로 기록됩니다.</div>
       </div>
 

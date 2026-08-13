@@ -27,6 +27,48 @@ export interface HolidayItem {
   name: string;
 }
 
+/* ───────────── 근무일 판정 (표를 쓰는 쪽이 모두 이 함수를 쓴다) ───────────── */
+
+/**
+ * 그날이 **근무일**인가 — 토·일·공휴일이 아니면 근무일.
+ *
+ * 생일 알림·급여명세서 예약 발송이 「쉬는 날이면 그 전 마지막 평일로」 를 함께 쓴다.
+ * **판정을 각자 두면 언젠가 갈라진다** — 한쪽만 공휴일을 보고 다른 쪽은 주말만 보는 식이 된다.
+ */
+export function isWorkday(ymd: string, holidays: Set<string> | string[]): boolean {
+  const set = holidays instanceof Set ? holidays : new Set(holidays);
+  const dow = new Date(`${ymd}T00:00:00Z`).getUTCDay();
+  return dow !== 0 && dow !== 6 && !set.has(ymd);
+}
+
+const A_DAY = 86400000;
+const shiftYmd = (ymd: string, n: number) =>
+  new Date(new Date(`${ymd}T00:00:00Z`).getTime() + n * A_DAY).toISOString().slice(0, 10);
+
+/**
+ * `ymd` 이하의 **마지막 근무일**. 그날이 이미 근무일이면 그대로 돌려준다.
+ *
+ * `notBefore` 보다 앞으로는 가지 않는다 — **달을 넘어가면 안 되는 자리가 있다**.
+ * 급여명세서는 '지금이 몇 월인가' 로 대상 월을 정하므로(`targetYearMonth`), 1일 발송분이
+ * 지난달 말일로 밀리면 **한 달 전 명세서를 보내게 된다**. 거기까지 밀릴 만큼 연휴가 길면
+ * 옮기지 않는 편(=`null`)이 낫고, 부르는 쪽이 원래 날짜를 그대로 쓴다.
+ */
+export function lastWorkdayOnOrBefore(
+  ymd: string,
+  holidays: Set<string> | string[],
+  opts: { notBefore?: string } = {}
+): string | null {
+  const set = holidays instanceof Set ? holidays : new Set(holidays);
+  let cur = ymd;
+  // 연휴가 아무리 길어도 멈춘다 — 표가 잘못 채워져 있어도 무한히 걷지 않는다
+  for (let i = 0; i <= 14; i++) {
+    if (opts.notBefore && cur < opts.notBefore) return null;
+    if (isWorkday(cur, set)) return cur;
+    cur = shiftYmd(cur, -1);
+  }
+  return null;
+}
+
 /**
  * 인증키 다듬기 — **포털이 키를 두 벌로 주는데 어느 쪽을 넣어도 되게** 한다.
  *

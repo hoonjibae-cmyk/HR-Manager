@@ -13,6 +13,8 @@ import { prisma } from "./db";
 import { sendPayslipsForMonth } from "./email";
 import { runPayrollMonth } from "./payroll-service";
 import { postMessage, slackConfigured } from "./slack";
+import { lastWorkdayOnOrBefore } from "./holidays";
+import { listHolidays } from "./holiday-service";
 
 export const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -59,6 +61,36 @@ export function effectiveDayOfMonth(year: number, month: number, dayOfMonth: num
   return Math.min(Math.max(dayOfMonth, 1), daysInMonth(year, month));
 }
 
+const p2 = (n: number) => String(n).padStart(2, "0");
+const ymdOf = (y: number, m: number, d: number) => `${y}-${p2(m)}-${p2(d)}`;
+
+/**
+ * **발송일이 토·일·공휴일이면 그 전 마지막 평일로 당긴다.**
+ *
+ * 급여명세서는 근로기준법 §48 의 교부 의무를 지키는 문서이고 임금 지급일과 함께 움직인다.
+ * 쉬는 날 보내면 문의할 곳이 없어 하루 이틀 묵히게 되고, 은행 이체와도 어긋난다.
+ * **늦추지 않고 당기는 것**은 지급일을 미루면 지연 지급이 되기 때문이다.
+ *
+ * ⚠ **달을 넘어가지 않는다**(`notBefore` = 그 달 1일). 대상 월을 '지금이 몇 월인가' 로
+ * 정하므로(`targetYearMonth`) 1일 발송분이 지난달 말일로 밀리면 **한 달 전 명세서**를 보낸다.
+ * 그만큼 연휴가 길면 옮기지 않고 원래 날짜에 보낸다 — 엉뚱한 달을 보내는 것보다 낫다.
+ *
+ * ⚠ **MONTHLY 에만 적용한다.** WEEKLY 는 사람이 요일을 골라 둔 것이라 토요일 발송을
+ * 금요일로 당기면 고른 값을 조용히 뒤집는 셈이 된다(급여명세서는 원래 MONTHLY 다).
+ */
+export function payoutDayOfMonth(
+  year: number,
+  month: number,
+  dayOfMonth: number,
+  holidays: string[] = []
+): number {
+  const target = effectiveDayOfMonth(year, month, dayOfMonth);
+  const moved = lastWorkdayOnOrBefore(ymdOf(year, month, target), holidays, {
+    notBefore: ymdOf(year, month, 1),
+  });
+  return moved ? Number(moved.slice(8, 10)) : target;
+}
+
 export interface ScheduleLike {
   enabled: boolean;
   frequency: string; // MONTHLY | WEEKLY
@@ -77,13 +109,18 @@ export function targetYearMonth(now: Date, offset: number) {
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 };
 }
 
-/** 지금 발송 조건을 충족하는지 (순수 판단 — DB 접근 없음) */
+/**
+ * 지금 발송 조건을 충족하는지 (순수 판단 — DB 접근 없음).
+ *
+ * ⚠ `opts.holidays` 는 **반드시 넘긴다**(기본값을 두지 않았다). 안 넘기면 공휴일이
+ * 평일로 잡혀 쉬는 날 명세서가 나가고, 그 사실이 조용히 묻힌다.
+ */
 export function scheduleDue(
   sched: ScheduleLike,
   now: Date,
-  opts: { force?: boolean; ignoreClock?: boolean } = {}
+  opts: { force?: boolean; ignoreClock?: boolean; holidays: string[] }
 ): { due: boolean; reason: string } {
-  const { force = false, ignoreClock = false } = opts;
+  const { force = false, ignoreClock = false, holidays } = opts;
   if (force) return { due: true, reason: "강제 실행" };
   if (!sched.enabled) return { due: false, reason: "자동발송 비활성" };
 
@@ -93,8 +130,17 @@ export function scheduleDue(
     return { due: false, reason: "오늘 이미 실행됨" };
 
   if (sched.frequency === "MONTHLY") {
-    const target = effectiveDayOfMonth(k.year, k.month, sched.dayOfMonth);
-    if (k.day !== target) return { due: false, reason: `날짜 불일치 (매월 ${target}일)` };
+    const plain = effectiveDayOfMonth(k.year, k.month, sched.dayOfMonth);
+    const target = payoutDayOfMonth(k.year, k.month, sched.dayOfMonth, holidays);
+    if (k.day !== target)
+      return {
+        due: false,
+        // 당겨진 달에는 **왜 그날인지**를 함께 적는다 — 로그만 보고 설정이 틀렸다고 오해한다
+        reason:
+          target === plain
+            ? `날짜 불일치 (매월 ${plain}일)`
+            : `날짜 불일치 (매월 ${plain}일 → 쉬는 날이라 이달은 ${target}일)`,
+      };
   } else if (sched.frequency === "WEEKLY") {
     if (k.dow !== sched.dayOfWeek) return { due: false, reason: "요일 불일치" };
   }
@@ -112,8 +158,17 @@ export function scheduleDue(
   return { due: true, reason: "조건 충족" };
 }
 
-/** 다음 발송 예정 시각 (UTC Date). 비활성이면 null. */
-export function computeNextRun(sched: ScheduleLike, from: Date = new Date()): Date | null {
+/**
+ * 다음 발송 예정 시각 (UTC Date). 비활성이면 null.
+ *
+ * **여기도 당겨진 날짜로 답해야 한다** — 화면과 슬랙이 '다음 예정: 8월 7일' 이라고 적어 두고
+ * 실제로는 5일에 나가면, 담당자가 6일에 급여를 고치고 있게 된다.
+ */
+export function computeNextRun(
+  sched: ScheduleLike,
+  holidays: string[],
+  from: Date = new Date()
+): Date | null {
   if (!sched.enabled) return null;
   const k = kstParts(from);
   const nowMin = k.hour * 60 + k.minute;
@@ -140,7 +195,7 @@ export function computeNextRun(sched: ScheduleLike, from: Date = new Date()): Da
     const base = new Date(Date.UTC(k.year, k.month - 1 + addMonth, 1));
     const y = base.getUTCFullYear();
     const m = base.getUTCMonth() + 1;
-    const day = effectiveDayOfMonth(y, m, sched.dayOfMonth);
+    const day = payoutDayOfMonth(y, m, sched.dayOfMonth, holidays);
     if (addMonth === 0) {
       if (day < k.day) continue;
       if (day === k.day && nowMin >= schedMin) continue;
@@ -174,7 +229,14 @@ export async function runDueSchedules(
   const sched = await prisma.emailSchedule.findFirst();
   if (!sched) return { ran: false, reason: "예약 설정 없음" };
 
-  const { due, reason } = scheduleDue(sched, now, opts);
+  // 발송일이 토·일·공휴일이면 그 전 마지막 평일로 당긴다.
+  // **못 읽으면 빈 표로 간다** — 주말 판정은 그대로 되고 공휴일만 놓칠 뿐이라 명세서가
+  // 하루 늦거나 쉬는 날 나가는 정도에서 그친다. 여기서 멈추면 그 달 발송이 통째로 사라진다.
+  const holidays = (await listHolidays().catch(() => [] as Array<{ date: string }>)).map(
+    (h) => h.date
+  );
+
+  const { due, reason } = scheduleDue(sched, now, { ...opts, holidays });
   if (!due) return { ran: false, reason };
 
   const { year, month } = opts.override ?? targetYearMonth(now, sched.targetMonthOffset);
@@ -193,7 +255,7 @@ export async function runDueSchedules(
 
   const result = await sendPayslipsForMonth(year, month);
 
-  const nextRunAt = computeNextRun(sched, new Date(now.getTime() + 60_000));
+  const nextRunAt = computeNextRun(sched, holidays, new Date(now.getTime() + 60_000));
   await prisma.emailSchedule.update({
     where: { id: sched.id },
     data: { lastRunAt: now, nextRunAt },

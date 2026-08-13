@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { targetYearMonth, computeNextRun, formatKst } from "@/lib/scheduler";
+import { listHolidays } from "@/lib/holiday-service";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,9 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const sched = await prisma.emailSchedule.findFirst();
 
-  const next = sched ? computeNextRun(sched) : null;
+  // 발송일이 토·일·공휴일이면 그 전 마지막 평일로 당겨진다 — 대상 월도 그 날짜로 잡는다
+  const hols = (await listHolidays().catch(() => [] as Array<{ date: string }>)).map((h) => h.date);
+  const next = sched ? computeNextRun(sched, hols) : null;
   let year = Number(searchParams.get("year"));
   let month = Number(searchParams.get("month"));
   if (!year || !month) {

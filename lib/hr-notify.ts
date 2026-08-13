@@ -13,6 +13,10 @@
 // 시각 판단은 모두 한국시간(KST) 기준 — `lib/scheduler.ts` 의 `kstParts` 를 쓴다.
 
 import { kstParts, sameKstDay, type KstParts } from "./scheduler";
+// 근무일 판정은 **급여명세서 예약 발송과 같은 함수**를 쓴다 — 각자 두면 언젠가 갈라진다
+import { isWorkday } from "./holidays";
+
+export { isWorkday };
 
 /* ───────────── 설정 ───────────── */
 
@@ -90,12 +94,6 @@ export function addDays(ymd: string, n: number): string {
 /** 남은 일수 (오늘=0, 내일=1) */
 export function daysUntil(target: string, today: string): number {
   return Math.round((new Date(`${target}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / DAY);
-}
-
-/** 그날이 근무일인가 — 토·일·공휴일이 아니면 근무일 */
-export function isWorkday(ymd: string, holidays: Set<string>): boolean {
-  const dow = new Date(`${ymd}T00:00:00Z`).getUTCDay();
-  return dow !== 0 && dow !== 6 && !holidays.has(ymd);
 }
 
 /**

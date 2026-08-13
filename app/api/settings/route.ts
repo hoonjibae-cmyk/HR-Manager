@@ -3,6 +3,7 @@ import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { invalidateTaxCache } from "@/lib/repo";
 import { computeNextRun, formatKst } from "@/lib/scheduler";
+import { listHolidays } from "@/lib/holiday-service";
 import { gcalConfigured, makeupCalendarConfigured } from "@/lib/gcal";
 import { logActivity } from "@/lib/activity";
 import { encryptionEnabled } from "@/lib/crypto";
@@ -11,13 +12,15 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const [company, rates, schedule, emailLogs] = await Promise.all([
+  const [company, rates, schedule, emailLogs, holidays] = await Promise.all([
     prisma.company.findFirst({ where: { id: 1 } }),
     prisma.insuranceRate.findFirst({ where: { isActive: true }, orderBy: { year: "desc" } }),
     prisma.emailSchedule.findFirst(),
     prisma.emailLog.findMany({ orderBy: { createdAt: "desc" }, take: 15 }),
+    // 발송일이 쉬는 날이면 앞당겨지므로 '다음 예정' 도 그 날짜로 답해야 한다
+    listHolidays().catch(() => [] as Array<{ date: string }>),
   ]);
-  const next = schedule ? computeNextRun(schedule) : null;
+  const next = schedule ? computeNextRun(schedule, holidays.map((h) => h.date)) : null;
   return NextResponse.json({
     company,
     rates,
@@ -129,8 +132,9 @@ export async function PATCH(req: Request) {
     const saved = existing
       ? await prisma.emailSchedule.update({ where: { id: existing.id }, data: payload })
       : await prisma.emailSchedule.create({ data: payload });
-    // 다음 발송 예정 시각 저장 (KST 기준)
-    const nextRunAt = computeNextRun(saved);
+    // 다음 발송 예정 시각 저장 (KST 기준. 쉬는 날이면 그 전 마지막 평일로 당겨진다)
+    const hols = (await listHolidays().catch(() => [] as Array<{ date: string }>)).map((h) => h.date);
+    const nextRunAt = computeNextRun(saved, hols);
     const s = await prisma.emailSchedule.update({
       where: { id: saved.id },
       data: { nextRunAt },
