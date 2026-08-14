@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { formatSize, fileIcon } from "@/lib/contract-file";
 import { chunkCount, chunkRange, checkFileSize, progressLabel } from "@/lib/upload-chunk";
 
-export interface ContractFileRow {
+export interface AttachedFileRow {
   id: number;
   name: string;
   mime: string;
@@ -16,21 +16,29 @@ export interface ContractFileRow {
 }
 
 /**
- * 계약 카드 안의 **서명본 스캔 첨부**.
+ * **첨부 파일함** — 계약 카드의 서명본 스캔과 직원 카드의 인사서류함이 함께 쓴다.
  *
- * 시스템이 뽑는 *계약서 발급* 과 나란히 서지만 뜻이 다르다 — 발급본은 지금 조건으로 새로
- * 만드는 서식이라 조건을 고치면 따라 바뀌고, 스캔본은 실제로 서명·날인해 주고받은 원본이라
- * 그대로 남는다. **분쟁 때 근거가 되는 쪽은 스캔본**이라 그 사실을 화면에도 적는다.
+ * 붙는 자리마다 따로 만들면 한쪽만 고쳐져 언젠가 갈라진다. 다른 것은 `beginUrl`(자리 잡는
+ * 주소)과 문구뿐이고, 조각 나눠 보내기·진행률·삭제는 똑같다.
  *
  * 열기는 `<a target="_blank">` 로 한다 — `window.open` 을 `await` 뒤에서 부르면 팝업
  * 차단에 걸리므로(lib/open-pdf.ts), 애초에 주소가 정해져 있는 링크는 링크로 둔다.
  */
-export default function ContractFiles({
-  contractId,
+export default function AttachmentBox({
+  beginUrl,
   files,
+  title,
+  emptyHint,
+  compact = true,
 }: {
-  contractId: number;
-  files: ContractFileRow[];
+  /** 업로드 자리를 잡는 주소 — `/api/contracts/{id}/files` 또는 `/api/employees/{id}/files` */
+  beginUrl: string;
+  files: AttachedFileRow[];
+  title: string;
+  /** 첨부가 없을 때 적는 안내 */
+  emptyHint: React.ReactNode;
+  /** 계약 카드 안에 들어갈 때는 작게(true), 독립 카드로 설 때는 크게(false) */
+  compact?: boolean;
 }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
@@ -70,7 +78,7 @@ export default function ContractFiles({
     for (const f of files) {
       let uploadId = "";
       try {
-        const init = await fetch(`/api/contracts/${contractId}/files`, {
+        const init = await fetch(beginUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name: f.name, size: f.size }),
@@ -83,7 +91,7 @@ export default function ContractFiles({
         for (let i = 0; i < total; i++) {
           const { start, end } = chunkRange(i, f.size);
           setProgress(progressLabel(start, f.size, f.name));
-          const res = await fetch(`/api/contract-files/upload/${uploadId}?index=${i}`, {
+          const res = await fetch(`/api/attachments/upload/${uploadId}?index=${i}`, {
             method: "PUT",
             headers: { "Content-Type": "application/octet-stream" },
             body: f.slice(start, end),
@@ -96,7 +104,7 @@ export default function ContractFiles({
         failures.push(`${f.name} — ${e.message}`);
         // 올리다 만 자리를 치운다 — 두면 목록에는 안 보이지만 DB 에 쌓인다
         if (uploadId)
-          await fetch(`/api/contract-files/upload/${uploadId}`, { method: "DELETE" }).catch(() => {});
+          await fetch(`/api/attachments/upload/${uploadId}`, { method: "DELETE" }).catch(() => {});
       }
     }
 
@@ -107,56 +115,58 @@ export default function ContractFiles({
     router.refresh();
   }
 
-  async function remove(f: ContractFileRow) {
+  async function remove(f: AttachedFileRow) {
     if (
       !confirm(
-        `‘${f.name}’ 을(를) 지웁니다.\n\n서명본 스캔은 되돌릴 수 없습니다 — 종이 원본을 다시 스캔해야 합니다.`
+        `‘${f.name}’ 을(를) 지웁니다.\n\n되돌릴 수 없습니다 — 원본을 다시 올려야 합니다.`
       )
     )
       return;
     setBusy(true);
-    const res = await fetch(`/api/contract-files/${f.id}`, { method: "DELETE" }).catch(() => null);
+    const res = await fetch(`/api/attachments/${f.id}`, { method: "DELETE" }).catch(() => null);
     setBusy(false);
     if (!res?.ok) return setErr("삭제하지 못했습니다.");
     router.refresh();
   }
 
   return (
-    <div className="mt-2 pt-2 border-t border-slate-100">
+    <div className={compact ? "mt-2 pt-2 border-t border-slate-100" : ""}>
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold text-slate-500">
-          서명본 스캔
-          {files.length > 0 && <span className="text-slate-400 font-normal"> · {files.length}건</span>}
+        <span className={compact ? "text-[11px] font-semibold text-slate-500" : "font-bold text-slate-800"}>
+          {title}
+          {files.length > 0 && (
+            <span className={compact ? "text-slate-400 font-normal" : "text-slate-400 font-normal text-sm"}>
+              {" "}· {files.length}건
+            </span>
+          )}
         </span>
         <button
           type="button"
-          className="text-[11px] text-brand-600 font-semibold hover:underline disabled:text-slate-300"
+          className={`${compact ? "text-[11px]" : "text-xs"} text-brand-600 font-semibold hover:underline disabled:text-slate-300`}
           disabled={busy}
           onClick={() => input.current?.click()}
         >
-          {busy ? "올리는 중…" : "＋ 스캔본 첨부"}
+          {busy ? "올리는 중…" : "＋ 파일 올리기"}
         </button>
         <input
           ref={input}
           type="file"
           multiple
-          accept="application/pdf,image/jpeg,image/png,image/webp"
           className="hidden"
           onChange={(e) => upload(e.target.files)}
         />
       </div>
 
       {files.length === 0 ? (
-        <p className="text-[11px] text-slate-400 mt-1">
-          서명·날인한 원본을 올려 두세요. 위 <b>계약서 발급</b>은 지금 조건으로 새로 뽑는 서식이라
-          조건을 고치면 함께 바뀌지만, 스캔본은 그대로 남습니다.
+        <p className={`${compact ? "text-[11px]" : "text-xs"} text-slate-400 mt-1 leading-relaxed`}>
+          {emptyHint}
         </p>
       ) : (
         <ul className="mt-1 space-y-0.5">
           {files.map((f) => (
             <li key={f.id} className="flex items-center gap-2 text-xs group">
               <a
-                href={`/api/contract-files/${f.id}`}
+                href={`/api/attachments/${f.id}`}
                 target="_blank"
                 rel="noreferrer"
                 className="text-slate-700 hover:text-brand-600 hover:underline truncate"
@@ -168,7 +178,7 @@ export default function ContractFiles({
                 {formatSize(f.size)} · {f.uploadedAt}
               </span>
               <a
-                href={`/api/contract-files/${f.id}?download=1`}
+                href={`/api/attachments/${f.id}?download=1`}
                 className="text-[10px] text-slate-400 hover:text-brand-600 shrink-0 ml-auto"
                 title="내려받기"
               >

@@ -23,7 +23,7 @@ import {
   effectiveContractStatus,
 } from "@/lib/contracts";
 import ContractIssueNotice from "@/components/ContractIssueNotice";
-import ContractFiles from "@/components/ContractFiles";
+import AttachmentBox from "@/components/AttachmentBox";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +46,12 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
       },
       payrolls: { orderBy: [{ year: "desc" }, { month: "desc" }], take: 6 },
       documents: { orderBy: { createdAt: "desc" }, take: 6 },
+      // 직원 서류함 — ⚠ 본문(`data`)은 싣지 않는다(한 화면에 수십 MB 가 딸려 온다)
+      attachedFiles: {
+        where: { complete: true },
+        select: { id: true, name: true, mime: true, size: true, note: true, uploadedAt: true },
+        orderBy: { uploadedAt: "asc" },
+      },
     },
   });
   if (!emp) notFound();
@@ -386,9 +392,16 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                       fileCount={c.files.length}
                     />
                   </div>
-                  <ContractFiles
-                    contractId={c.id}
+                  <AttachmentBox
+                    beginUrl={`/api/contracts/${c.id}/files`}
+                    title="서명본 스캔"
                     files={c.files.map((f) => ({ ...f, uploadedAt: ymd(f.uploadedAt) }))}
+                    emptyHint={
+                      <>
+                        서명·날인한 원본을 올려 두세요. 위 <b>계약서 발급</b>은 지금 조건으로 새로
+                        뽑는 서식이라 조건을 고치면 함께 바뀌지만, 스캔본은 그대로 남습니다.
+                      </>
+                    }
                   />
                 </li>
               ))}
@@ -442,6 +455,28 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
               </ul>
             </div>
           )}
+
+          {/* 인사서류함 — 계약과 무관한 서류를 아무 형식이나 담아 둔다.
+              계약 서명본과 **같은 업로드 기계**를 쓴다(조각내 올리기). */}
+          <div className="card p-5">
+            <AttachmentBox
+              beginUrl={`/api/employees/${id}/files`}
+              title="인사서류함"
+              compact={false}
+              files={emp.attachedFiles.map((f) => ({ ...f, uploadedAt: ymd(f.uploadedAt) }))}
+              emptyHint={
+                <>
+                  서명받은 동의서·서약서, 자격증·통장 사본처럼 <b>이 직원에 관한 서류</b>를
+                  형식 상관없이 올려 두세요. 계약서 서명본은 왼쪽 <b>계약 이력</b>의 해당 계약에
+                  붙이면 어느 계약의 원본인지 함께 남습니다.
+                </>
+              }
+            />
+            <p className="text-[11px] text-slate-400 mt-3 leading-relaxed">
+              파일당 50MB · 큰 파일은 자동으로 나눠 올라갑니다. PDF·JPG·PNG·WEBP 는 눌러서 바로
+              열리고, 그 밖의 형식(hwp·docx 등)은 내려받아 봅니다.
+            </p>
+          </div>
         </div>
       </div>
     </div>

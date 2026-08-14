@@ -8,6 +8,8 @@ import { describe, it, expect } from "vitest";
 import {
   sniffMime,
   checkFormat,
+  isViewable,
+  UNKNOWN_MIME,
   formatSize,
   extensionOf,
   safeName,
@@ -45,15 +47,15 @@ describe("형식 판정 — 확장자가 아니라 파일 앞머리로", () => {
   });
 
   // 이름만 pdf 로 바꿔 올리면 서버가 application/pdf 로 되돌려주게 된다
-  it("**이름을 믿지 않는다** — 확장자가 pdf 여도 내용이 아니면 거절", () => {
+  it("**이름을 믿지 않는다** — 확장자가 pdf 여도 내용이 아니면 pdf 로 담지 않는다", () => {
     const r = checkFormat(pad(ascii("PK")), "근로계약서.pdf");
     expect(r.ok).toBe(false);
-    expect(r.error).toContain("PDF");
+    expect(r.mime).toBeUndefined();
   });
 });
 
-describe("받아 줄 형식인가 (크기는 여기서 보지 않는다 — upload-chunk.ts 담당)", () => {
-  it("PDF 는 받는다", () => {
+describe("화면에서 열 수 있는 형식인가 (크기는 upload-chunk.ts 담당)", () => {
+  it("PDF 는 열 수 있다", () => {
     expect(checkFormat(PDF, "계약서.pdf")).toMatchObject({ ok: true, mime: "application/pdf" });
   });
 
@@ -61,12 +63,25 @@ describe("받아 줄 형식인가 (크기는 여기서 보지 않는다 — uplo
     expect(checkFormat(new Uint8Array(0)).ok).toBe(false);
   });
 
-  // 아이폰 기본 촬영 형식이라 실제로 자주 올라온다. 그냥 '형식 오류' 로 막으면 방법을 모른다
-  it("**HEIC 는 따로 가려내 바꾸는 법을 적는다**", () => {
-    const r = checkFormat(HEIC, "IMG_0001.HEIC");
-    expect(r.ok).toBe(false);
-    expect(r.error).toContain("JPEG");
-    expect(r.error).toContain("아이폰");
+  /*
+   * ⚠ **못 가려도 거절하지 않는다.** 인사서류는 hwp·docx 처럼 앞머리로 못 가리는 형식이
+   * 흔하고, 담당자가 가진 파일이 그것뿐일 수 있다. 저장은 하되 열 때 내려받게 한다.
+   */
+  it("**모르는 형식도 거절하지 않는다** — 저장은 하고 내려받게 한다", () => {
+    const r = checkFormat(pad(ascii("PK")), "동의서.docx");
+    expect(r.ok).toBe(false); // '화면에서 못 연다' 는 뜻이지 '못 올린다' 가 아니다
+    expect(r.error).toContain("내려받아");
+  });
+
+  it("HEIC 도 같은 취급 — 브라우저가 못 여니 내려받기로", () => {
+    expect(checkFormat(HEIC, "IMG_0001.HEIC").ok).toBe(false);
+  });
+
+  it("inline 으로 내보낼 형식만 isViewable 이 참", () => {
+    expect(isViewable("application/pdf")).toBe(true);
+    expect(isViewable("image/png")).toBe(true);
+    expect(isViewable(UNKNOWN_MIME)).toBe(false);
+    expect(isViewable("text/html")).toBe(false);
   });
 });
 
@@ -93,7 +108,13 @@ describe("파일 이름", () => {
   });
 
   it("이름이 비면 기본 이름을 준다", () => {
-    expect(safeName("   ", "application/pdf")).toBe("계약서스캔.pdf");
+    expect(safeName("   ", "application/pdf")).toBe("첨부파일.pdf");
+  });
+
+  // 모르는 형식에 확장자를 지어내면 hwp 가 .jpg 로 저장된다
+  it("**모르는 형식은 확장자를 지어내지 않는다**", () => {
+    expect(safeName("동의서.hwp", UNKNOWN_MIME)).toBe("동의서.hwp");
+    expect(safeName("확장자없음", UNKNOWN_MIME)).toBe("확장자없음");
   });
 });
 
@@ -118,12 +139,13 @@ describe("표시", () => {
     expect(formatSize(1536 * 1024)).toBe("1.5MB");
   });
 
-  it("PDF 와 사진을 아이콘으로 가른다", () => {
+  it("PDF·사진·그 밖의 문서를 아이콘으로 가른다", () => {
     expect(fileIcon("application/pdf")).not.toBe(fileIcon("image/png"));
+    expect(fileIcon(UNKNOWN_MIME)).not.toBe(fileIcon("application/pdf"));
   });
 
   it("첨부가 없으면 요약도 없다 (빈 줄을 만들지 않는다)", () => {
     expect(attachmentSummary([])).toBeNull();
-    expect(attachmentSummary([{ size: 1024 }, { size: 1024 }])).toBe("스캔본 2건 · 2KB");
+    expect(attachmentSummary([{ size: 1024 }, { size: 1024 }])).toBe("2건 · 2KB");
   });
 });
