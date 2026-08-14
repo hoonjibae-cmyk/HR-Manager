@@ -280,24 +280,42 @@ model ContractFile {
   /// 저장한 형식 — 확장자가 아니라 **파일 앞머리로 가린 것**(lib/contract-file.ts)
   mime String
   size Int
-
-  /// 어디에 담겼는가 — `DB`(bytea) | `DRIVE`(구글 드라이브).
-  /// **한 줄씩 다를 수 있다**: 드라이브를 붙이기 전에 올린 파일과 드라이브가 잠깐 안 될 때
-  /// 받아 둔 파일이 DB 로 남아야 하기 때문이다. 옮기기 전까지 두 방식이 섞여 산다.
-  storage String @default("DB")
-
-  /// `storage = DB` 일 때의 본문
+  /// 파일 본문. 조각을 다 받아 이어 붙이기 전까지는 비어 있다
   data Bytes?
-  /// `storage = DRIVE` 일 때의 파일 id · 드라이브에서 바로 열어 보는 주소
-  driveFileId  String?
-  driveWebLink String?
 
   /// 메모 — "원본 보관함 3번" 처럼 종이 원본이 어디 있는지 적는 자리
   note String?
 
+  /// 조각을 다 받아 이어 붙였는가. **완성된 것만 화면에 낸다** —
+  /// 반쯤 올라간 파일이 목록에 뜨면 열었을 때 깨진 문서가 나온다.
+  complete Boolean @default(true)
+  /// 업로드 한 건을 가리키는 열쇠 (브라우저가 조각마다 들고 온다)
+  uploadId String? @unique
+
   uploadedAt DateTime @default(now())
 
+  chunks ContractFileChunk[]
+
   @@index([contractId])
+  @@index([complete])
+}
+
+/// 올리는 중인 파일의 **조각**.
+///
+/// 이어 붙이려고 잠깐 쌓아 두는 자리다. 다 받으면 한 번에 이어 `ContractFile.data` 에 넣고
+/// 여기서는 지운다 — 조각마다 `data = data || 조각` 으로 덧붙이면 Postgres 가 그 행을 매번
+/// 통째로 다시 쓰기 때문에 파일이 클수록 쓰기량이 제곱으로 는다.
+model ContractFileChunk {
+  id     Int          @id @default(autoincrement())
+  fileId Int
+  file   ContractFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  /// 조각 번호 (0부터)
+  index Int
+  data  Bytes
+
+  @@unique([fileId, index])
+  @@index([fileId])
 }
 
 /// 평일 휴무 — **연차가 아니다.**

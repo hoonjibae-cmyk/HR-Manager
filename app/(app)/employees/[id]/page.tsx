@@ -37,10 +37,9 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         // ⚠ 스캔본 **본문(`data`)은 싣지 않는다** — 계약 6건에 수 MB 씩이면 화면이 통째로 느려진다
         include: {
           files: {
-            select: {
-              id: true, name: true, mime: true, size: true, note: true,
-              uploadedAt: true, storage: true, driveWebLink: true,
-            },
+            // 올리다 만 파일은 목록에 내지 않는다 (열면 깨진 문서가 나온다)
+            where: { complete: true },
+            select: { id: true, name: true, mime: true, size: true, note: true, uploadedAt: true },
             orderBy: { uploadedAt: "asc" },
           },
         },

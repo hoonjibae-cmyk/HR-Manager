@@ -1,40 +1,28 @@
 /**
- * 계약서 **서명본 스캔** 첨부 — 목록·업로드.
+ * 계약서 **서명본 스캔** 첨부 — 목록·업로드 시작.
  *
- * 판정(형식·크기·이름)은 `lib/contract-file.ts`(순수 함수, 테스트 있음)에 있고
- * 여기서는 읽고 저장하고 기록만 한다.
+ * 업로드는 **조각내 올린다**(`lib/upload-chunk.ts`). Vercel 서버리스 함수의 요청 본문 상한이
+ * 4.5MB 라 600dpi 컬러 스캔은 한 번에 보낼 수가 없고, 그대로 보내면 함수에 닿기도 전에
+ * 플랫폼이 잘라 화면에 아무 단서도 남지 않는다.
  *
- * 파일 본문 조회·삭제는 `/api/contract-files/[fileId]` 가 맡는다 — 계약 밑에 두면
- * 파일 하나를 열 때마다 계약 번호를 함께 알아야 해서 링크가 길어진다.
+ *   ① `POST .../files`            — 자리를 잡고 `uploadId` 를 받는다 (이 파일)
+ *   ② `PUT /api/contract-files/upload/[uploadId]?index=N` — 조각을 하나씩 보낸다
+ *   ③ 마지막 조각이 닿으면 서버가 이어 붙이고 `complete=true` 로 올린다
+ *
+ * 판정(형식·크기·이름)은 `lib/contract-file.ts`(순수 함수, 테스트 있음)에 있다.
  */
 
 import { NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { logActivity } from "@/lib/activity";
-import { checkUpload, safeName, formatSize } from "@/lib/contract-file";
-import {
-  driveConfigured,
-  uploadToDrive,
-  employeeFolderName,
-  driveFileName,
-} from "@/lib/gdrive";
+import { safeName } from "@/lib/contract-file";
+import { checkFileSize, chunkCount, CHUNK_SIZE } from "@/lib/upload-chunk";
 
 export const dynamic = "force-dynamic";
-// 스캔본은 수 MB 라 업로드가 기본 시간 안에 안 끝나는 회선이 있다
-export const maxDuration = 60;
 
-/** 목록 — **본문(`data`)은 절대 싣지 않는다**. 한 번 그리는 데 수 MB 가 딸려 온다 */
-const META = {
-  id: true,
-  name: true,
-  mime: true,
-  size: true,
-  note: true,
-  uploadedAt: true,
-  storage: true,
-  driveWebLink: true,
-};
+/** 목록 — **본문(`data`)은 절대 싣지 않는다**. 한 번 그리는 데 수십 MB 가 딸려 온다 */
+const META = { id: true, name: true, mime: true, size: true, note: true, uploadedAt: true };
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -42,13 +30,20 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   if (!contractId) return NextResponse.json({ error: "계약을 찾을 수 없습니다." }, { status: 400 });
 
   const files = await prisma.contractFile.findMany({
-    where: { contractId },
+    // **완성된 것만** 낸다 — 올리다 만 파일이 목록에 뜨면 열었을 때 깨진 문서가 나온다
+    where: { contractId, complete: true },
     select: META,
     orderBy: { uploadedAt: "asc" },
   });
   return NextResponse.json({ ok: true, files });
 }
 
+/**
+ * 업로드 시작 — 자리만 잡고 `uploadId` 를 돌려준다.
+ *
+ * 형식(매직 넘버)은 여기서 못 가린다. 아직 본문이 한 바이트도 안 왔기 때문이다 —
+ * **첫 조각이 닿을 때 가려서 아니면 그 자리에서 지운다**(조각 API 참조).
+ */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const contractId = Number(params.id);
@@ -56,91 +51,50 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const contract = await prisma.contract.findUnique({
     where: { id: contractId },
-    select: {
-      id: true,
-      employeeId: true,
-      startDate: true,
-      employee: { select: { name: true, empNo: true } },
-    },
+    select: { id: true },
   });
   if (!contract) return NextResponse.json({ error: "계약을 찾을 수 없습니다." }, { status: 404 });
 
-  const form = await req.formData().catch(() => null);
-  if (!form) return NextResponse.json({ error: "파일을 읽지 못했습니다." }, { status: 400 });
+  const body = await req.json().catch(() => null);
+  if (!body) return NextResponse.json({ error: "요청을 읽지 못했습니다." }, { status: 400 });
 
-  // 여러 장을 한 번에 고를 수 있다 — 계약서·별지·확인서가 따로 스캔돼 오는 일이 잦다
-  const picked = form.getAll("file").filter((f): f is File => f instanceof File);
-  if (!picked.length) return NextResponse.json({ error: "파일이 없습니다." }, { status: 400 });
-  const note = String(form.get("note") ?? "").trim() || null;
+  const size = Number(body.size);
+  const rawName = String(body.name ?? "");
+  const note = String(body.note ?? "").trim() || null;
 
-  const saved: Array<{ id: number; name: string; size: number; storage: string }> = [];
-  const failed: string[] = [];
-  /**
-   * 드라이브가 설정돼 있는데 실패했을 때의 사유.
-   *
-   * **실패해도 DB 로 받아 둔다** — 여기서 거절하면 담당자는 스캔본을 아예 보관하지 못한다.
-   * 대신 조용히 넘어가지 않고 무슨 일이 있었는지 화면에 돌려준다(안 그러면 드라이브에
-   * 파일이 없는 이유를 아무도 모른 채 몇 달이 지난다).
+  const sizeCheck = checkFileSize(size, rawName);
+  if (!sizeCheck.ok) return NextResponse.json({ error: sizeCheck.error }, { status: 400 });
+
+  /*
+   * 올리다 만 흔적을 치운다. 브라우저를 닫거나 회선이 끊기면 조각만 남는데, 그대로 두면
+   * DB 에 쓰레기가 쌓인다. **한 시간을 넘긴 미완성분만** 지운다 — 지금 올리는 중인 것을
+   * 건드리면 안 된다(조각은 cascade 로 함께 사라진다).
    */
-  let driveFallback: string | null = null;
-  const useDrive = driveConfigured();
-  const folderName = employeeFolderName({
-    empNo: contract.employee?.empNo,
-    name: contract.employee?.name ?? String(contract.employeeId),
+  await prisma.contractFile
+    .deleteMany({
+      where: { contractId, complete: false, uploadedAt: { lt: new Date(Date.now() - 3600_000) } },
+    })
+    .catch(() => {});
+
+  const uploadId = randomUUID();
+  const row = await prisma.contractFile.create({
+    data: {
+      contractId,
+      name: safeName(rawName, "application/pdf"), // 형식은 첫 조각에서 가려 다시 맞춘다
+      mime: "application/octet-stream",
+      size,
+      note,
+      complete: false,
+      uploadId,
+    },
+    select: { id: true },
   });
-  const startYmd = contract.startDate.toISOString().slice(0, 10);
 
-  for (const f of picked) {
-    const bytes = new Uint8Array(await f.arrayBuffer());
-    const check = checkUpload(bytes, f.name);
-    if (!check.ok || !check.mime) {
-      failed.push(`${f.name || "(이름 없음)"} — ${check.error}`);
-      continue;
-    }
-    const name = safeName(f.name, check.mime);
-
-    let store: any = { storage: "DB", data: Buffer.from(bytes) };
-    if (useDrive) {
-      const up = await uploadToDrive({
-        name: driveFileName(startYmd, name),
-        mime: check.mime,
-        bytes,
-        folderName,
-      });
-      if (up.ok) {
-        store = { storage: "DRIVE", driveFileId: up.fileId, driveWebLink: up.webViewLink ?? null };
-      } else {
-        driveFallback = up.error ?? "구글 드라이브에 올리지 못했습니다.";
-      }
-    }
-
-    const row = await prisma.contractFile.create({
-      data: { contractId, name, mime: check.mime, size: bytes.byteLength, note, ...store },
-      select: { id: true, name: true, size: true, storage: true },
-    });
-    saved.push(row);
-  }
-
-  // **한 장도 못 올렸으면 실패로 답한다** — 화면이 성공으로 읽고 목록만 비어 있으면
-  // 무엇이 잘못됐는지 알 수가 없다.
-  if (!saved.length)
-    return NextResponse.json({ error: failed.join("\n") || "저장하지 못했습니다." }, { status: 400 });
-
-  await logActivity({
-    action: "CONTRACT_FILE_ADD",
-    employeeId: contract.employeeId,
-    target: contract.employee?.name ?? String(contract.employeeId),
-    summary:
-      `계약(#${contractId})에 서명본 스캔 ${saved.length}건을 첨부했습니다 — ` +
-      saved.map((s) => `${s.name}(${formatSize(s.size)}·${s.storage})`).join(", ") +
-      (driveFallback ? " ※ 드라이브 업로드 실패로 DB 에 보관했습니다." : ""),
-    meta: { contractId, files: saved, failed, driveFallback },
-  }).catch(() => {});
-
-  const files = await prisma.contractFile.findMany({
-    where: { contractId },
-    select: META,
-    orderBy: { uploadedAt: "asc" },
+  return NextResponse.json({
+    ok: true,
+    uploadId,
+    fileId: row.id,
+    chunkSize: CHUNK_SIZE,
+    chunks: chunkCount(size),
   });
-  return NextResponse.json({ ok: true, added: saved.length, failed, driveFallback, files });
 }

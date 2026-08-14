@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatSize, fileIcon, MAX_UPLOAD_BYTES } from "@/lib/contract-file";
+import { formatSize, fileIcon } from "@/lib/contract-file";
+import { chunkCount, chunkRange, checkFileSize, progressLabel } from "@/lib/upload-chunk";
 
 export interface ContractFileRow {
   id: number;
@@ -12,10 +13,6 @@ export interface ContractFileRow {
   note: string | null;
   /** YYYY-MM-DD — 서버에서 문자열로 내려준다(하이드레이션이 어긋나지 않게) */
   uploadedAt: string;
-  /** DB | DRIVE — 어디에 담겼는지. 두 방식이 섞여 산다 */
-  storage?: string;
-  /** 구글 드라이브에서 바로 열어 보는 주소 (드라이브 보관분만) */
-  driveWebLink?: string | null;
 }
 
 /**
@@ -39,40 +36,74 @@ export default function ContractFiles({
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  /** 올리는 중 표시 — 큰 파일은 수십 초라, 없으면 멈춘 줄 알고 새로고침한다 */
+  const [progress, setProgress] = useState("");
 
+  /**
+   * **조각내 올린다.**
+   *
+   * Vercel 서버리스 함수의 요청 본문 상한이 4.5MB 라, 큰 스캔본을 한 번에 보내면
+   * 함수에 닿기도 전에 플랫폼이 잘라 버리고 화면에는 아무 단서도 남지 않는다.
+   * 그래서 `자리 잡기 → 조각 보내기 → (마지막 조각에서 서버가 이어 붙임)` 으로 나눈다.
+   *
+   * 파일이 여러 개면 **한 번에 하나씩** 보낸다 — 동시에 던지면 서버리스 함수가 그만큼
+   * 한꺼번에 뜨고, 진행률도 뒤엉켜 무엇이 얼마나 갔는지 알 수 없게 된다.
+   */
   async function upload(list: FileList | null) {
     if (!list?.length) return;
     setErr("");
+    const files = Array.from(list);
 
-    // **보내기 전에 크기를 먼저 본다** — Vercel 서버리스는 4.5MB 를 넘는 요청 본문을
-    // 함수에 닿기도 전에 잘라 버려서, 그대로 보내면 화면에는 알 수 없는 오류만 남는다.
-    const big = Array.from(list).filter((f) => f.size > MAX_UPLOAD_BYTES);
-    if (big.length) {
-      setErr(
-        `${big.map((f) => `${f.name}(${formatSize(f.size)})`).join(", ")} — 파일당 ` +
-          `${formatSize(MAX_UPLOAD_BYTES)} 까지만 올릴 수 있습니다. 스캔 해상도를 200~300dpi 로 ` +
-          `낮추거나 흑백으로 다시 스캔해 보세요.`
-      );
-      if (input.current) input.current.value = "";
-      return;
+    // 보내기 전에 크기부터 본다 — 다 보내고 나서 거절하면 시간만 버린다
+    for (const f of files) {
+      const c = checkFileSize(f.size, f.name);
+      if (!c.ok) {
+        setErr(c.error!);
+        if (input.current) input.current.value = "";
+        return;
+      }
     }
 
-    const fd = new FormData();
-    for (const f of Array.from(list)) fd.append("file", f);
     setBusy(true);
-    const res = await fetch(`/api/contracts/${contractId}/files`, { method: "POST", body: fd }).catch(
-      () => null
-    );
+    const failures: string[] = [];
+
+    for (const f of files) {
+      let uploadId = "";
+      try {
+        const init = await fetch(`/api/contracts/${contractId}/files`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: f.name, size: f.size }),
+        });
+        const ij = await init.json().catch(() => ({}) as any);
+        if (!init.ok) throw new Error(ij.error || "업로드를 시작하지 못했습니다.");
+        uploadId = ij.uploadId;
+
+        const total = chunkCount(f.size);
+        for (let i = 0; i < total; i++) {
+          const { start, end } = chunkRange(i, f.size);
+          setProgress(progressLabel(start, f.size, f.name));
+          const res = await fetch(`/api/contract-files/upload/${uploadId}?index=${i}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/octet-stream" },
+            body: f.slice(start, end),
+          });
+          const j = await res.json().catch(() => ({}) as any);
+          if (!res.ok) throw new Error(j.error || `${i + 1}번째 조각을 보내지 못했습니다.`);
+        }
+        setProgress(progressLabel(f.size, f.size, f.name));
+      } catch (e: any) {
+        failures.push(`${f.name} — ${e.message}`);
+        // 올리다 만 자리를 치운다 — 두면 목록에는 안 보이지만 DB 에 쌓인다
+        if (uploadId)
+          await fetch(`/api/contract-files/upload/${uploadId}`, { method: "DELETE" }).catch(() => {});
+      }
+    }
+
     setBusy(false);
+    setProgress("");
     if (input.current) input.current.value = "";
-    if (!res) return setErr("업로드에 실패했습니다. 연결을 확인해 주세요.");
-    const j = await res.json().catch(() => ({}) as any);
-    if (!res.ok) return setErr(j.error || "업로드에 실패했습니다.");
-    // 일부만 걸러졌으면 무엇이 왜 빠졌는지 남긴다 (조용히 빠지면 올린 줄 안다)
-    if (j.failed?.length) setErr(j.failed.join("\n"));
-    // 드라이브가 켜져 있는데 실패한 경우 — 파일은 DB 에 받아 뒀지만 그 사실을 알려 준다
-    else if (j.driveFallback)
-      setErr(`구글 드라이브에 올리지 못해 DB 에 보관했습니다.\n${j.driveFallback}`);
+    if (failures.length) setErr(failures.join("\n"));
     router.refresh();
   }
 
@@ -136,30 +167,6 @@ export default function ContractFiles({
               <span className="text-[10px] text-slate-400 tnum shrink-0">
                 {formatSize(f.size)} · {f.uploadedAt}
               </span>
-              {/* 어디에 담겼는지 — 드라이브로 옮기는 중에는 두 방식이 섞여 살아서,
-                  이 표시가 없으면 무엇이 드라이브에 있는지 알 수가 없다 */}
-              {f.storage === "DRIVE" ? (
-                f.driveWebLink ? (
-                  <a
-                    href={f.driveWebLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="pill bg-emerald-50 text-emerald-700 text-[9px] shrink-0 hover:underline"
-                    title="구글 드라이브에서 열기"
-                  >
-                    Drive ↗
-                  </a>
-                ) : (
-                  <span className="pill bg-emerald-50 text-emerald-700 text-[9px] shrink-0">Drive</span>
-                )
-              ) : (
-                <span
-                  className="pill bg-slate-100 text-slate-500 text-[9px] shrink-0"
-                  title="이 파일은 DB 에 보관돼 있습니다"
-                >
-                  DB
-                </span>
-              )}
               <a
                 href={`/api/contract-files/${f.id}?download=1`}
                 className="text-[10px] text-slate-400 hover:text-brand-600 shrink-0 ml-auto"
@@ -181,6 +188,11 @@ export default function ContractFiles({
         </ul>
       )}
 
+      {progress && (
+        <p className="text-[11px] text-brand-600 mt-1 tnum" aria-live="polite">
+          {progress}
+        </p>
+      )}
       {err && <p className="text-[11px] text-rose-600 mt-1 whitespace-pre-line">{err}</p>}
     </div>
   );
