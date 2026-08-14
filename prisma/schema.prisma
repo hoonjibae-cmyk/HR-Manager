@@ -255,7 +255,38 @@ model Contract {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  files ContractFile[]
+
   @@index([employeeId])
+}
+
+/// 계약서 **서명본 스캔**.
+///
+/// 시스템이 뽑는 계약서(`genContract`)와 **다른 물건**이다. 그쪽은 지금 조건으로 새로 만드는
+/// 서식이라 조건을 고치면 따라 바뀌지만, 이쪽은 실제로 서명·날인해 주고받은 **원본**이라
+/// 그대로 남아 있어야 한다(분쟁 시 증거가 되는 쪽은 이것이다).
+///
+/// **파일을 DB 에 담는다** — 서버리스에는 쓸 수 있는 파일 경로가 없다(로고·인감과 같은 사정).
+/// 다만 로고·인감의 data URI 와 달리 **bytea(Bytes)** 로 넣는다: base64 는 덩치가 1/3 늘고
+/// 스캔본은 장당 수백 KB 라 그 차이가 그대로 DB 용량이 된다.
+/// ⚠ **목록 조회에서 `data` 를 select 하지 않는다** — 계약 이력을 한 번 그리는 데 수 MB 가 딸려 온다.
+model ContractFile {
+  id         Int      @id @default(autoincrement())
+  contractId Int
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  /// 올린 파일 이름 (한글 그대로. 내보낼 때 RFC 5987 로 감싼다)
+  name String
+  /// 저장한 형식 — 확장자가 아니라 **파일 앞머리로 가린 것**(lib/contract-file.ts)
+  mime String
+  size Int
+  data Bytes
+  /// 메모 — "원본 보관함 3번" 처럼 종이 원본이 어디 있는지 적는 자리
+  note String?
+
+  uploadedAt DateTime @default(now())
+
+  @@index([contractId])
 }
 
 /// 평일 휴무 — **연차가 아니다.**

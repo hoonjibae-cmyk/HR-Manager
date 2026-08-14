@@ -34,9 +34,12 @@ export interface ContractSnapshot {
 export default function ContractEditForm({
   contract,
   deletable,
+  fileCount = 0,
 }: {
   contract: ContractSnapshot;
   deletable: boolean;
+  /** 이 계약에 붙은 서명본 스캔 수 — 삭제 경고에 적는다 */
+  fileCount?: number;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -94,7 +97,17 @@ export default function ContractEditForm({
   }
 
   async function remove() {
-    if (!confirm("이 계약을 삭제합니다.\n직전 계약의 기간이 늘어나 빈틈을 메웁니다. 계속할까요?")) return;
+    // 계약을 지우면 딸린 서명본 스캔도 함께 사라진다(cascade). 종이 원본을 다시 스캔하지 않으면
+    // 복구되지 않으므로 **몇 건이 함께 지워지는지 먼저 적는다**.
+    const scanWarn = fileCount
+      ? `\n\n⚠ 첨부된 서명본 스캔 ${fileCount}건도 함께 삭제되며 되돌릴 수 없습니다.`
+      : "";
+    if (
+      !confirm(
+        `이 계약을 삭제합니다.\n직전 계약의 기간이 늘어나 빈틈을 메웁니다.${scanWarn}\n\n계속할까요?`
+      )
+    )
+      return;
     setSaving(true);
     const res = await fetch(`/api/contracts/${contract.id}`, { method: "DELETE" });
     const j = await res.json().catch(() => ({}));

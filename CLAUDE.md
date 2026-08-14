@@ -28,6 +28,30 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   없고 재배포 없이 화면에서 바꿔야 하기 때문. 설정 화면(`components/LogoUpload.tsx`)이 브라우저에서
   긴 변 320px 로 줄여 올리므로 원본 png 를 그대로 골라도 된다. 문서 머리글은 `logoImg(company)`,
   화면은 사이드바·로그인에서 쓴다. 없으면 회사명만 나온다.
+- **계약서 서명본 스캔**: `ContractFile` — 계약 이력 카드 안에 실제로 **서명·날인해 주고받은 원본**을
+  붙여 둔다(`lib/contract-file.ts` 순수 함수·테스트 있음, `components/ContractFiles.tsx`,
+  `POST/GET /api/contracts/[id]/files`, `GET/DELETE /api/contract-files/[fileId]`).
+  **계약서 발급(`genContract`)과 다른 물건이다** — 발급본은 지금 조건으로 새로 뽑는 서식이라
+  조건을 고치면 따라 바뀌지만, 스캔본은 그대로 남아야 한다. 분쟁 때 근거가 되는 쪽은 스캔본이다.
+  - **파일을 DB 에 담는다**(로고·인감과 같은 사정 — 서버리스에 쓸 수 있는 경로가 없다).
+    다만 data URI 문자열이 아니라 **bytea(`Bytes`)** 다: base64 는 덩치가 1/3 늘고 스캔본은
+    장당 수백 KB 라 그 차이가 그대로 DB 용량이 된다.
+  - ⚠ **목록 조회에서 `data` 를 select 하지 않는다** — 직원 상세는 계약을 6건씩 그리므로
+    본문까지 딸려 오면 한 화면에 수십 MB 가 오간다. 화면·API 모두 메타데이터만 읽는다.
+  - ⚠ **파일당 4MB**(`MAX_UPLOAD_BYTES`). **Vercel 서버리스의 요청 본문 상한이 4.5MB** 라
+    그보다 크면 함수에 닿기도 전에 플랫폼이 자른다(화면에는 아무 단서도 안 남는다).
+    그래서 **브라우저에서 먼저 재고** 넘으면 *해상도를 낮추라*·*나눠 올리라*까지 적어 준다.
+  - **형식은 확장자가 아니라 파일 앞머리(매직 넘버)로 가린다**(`sniffMime`) — 저장한 형식을
+    그대로 `Content-Type` 으로 돌려주므로, 이름만 `.pdf` 인 파일을 받아 두면 브라우저에
+    엉뚱한 것을 pdf 라고 건네주게 된다. **HEIC 는 따로 가려내 바꾸는 법을 적는다**(아이폰
+    기본 촬영 형식이라 실제로 자주 올라오는데 브라우저가 못 여는 곳이 많다).
+  - 파일명은 **한글 그대로 두고** 내보낼 때 `filename*`(RFC 5987)로 감싼다. 제어문자를 털어
+    내는 이유는 이름이 그대로 `Content-Disposition` 에 실려 **줄바꿈이 헤더를 쪼개기** 때문이다.
+  - 응답에 `Cache-Control: private, no-store` 와 `X-Content-Type-Options: nosniff` 를 붙인다 —
+    개인정보가 담긴 문서라 공용 캐시에 남기지 않는다.
+  - **계약을 지우면 스캔본도 함께 사라진다**(cascade). 종이를 다시 스캔하지 않으면 복구되지
+    않으므로 계약 삭제 확인창이 **몇 건이 함께 지워지는지** 먼저 적는다. 첨부·삭제는
+    `AuditLog`(`CONTRACT_FILE_ADD`/`_DELETE`)에 남긴다.
 - **법인 인감(직인)**: `Company.stamp` — 로고와 같은 data URI 방식(`components/StampUpload.tsx`,
   `POST/DELETE /api/settings/stamp`, 검증은 `lib/company-image.ts` 를 로고와 공유).
   찍히는 곳은 **회사가 날인하는 자리뿐**이다: 계약서 "갑" 의 대표자(`signDuo`)와 재직·경력증명서의
@@ -896,6 +920,10 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - **법인 인감 등록·교체** → 설정 → *법인 인감(직인)* 에 누끼(배경 제거)된 PNG 를 올린다.
   크기·위치를 바꾸려면 `lib/pdf.ts` 의 `.stamp-anchor .stamp-img`.
 - **직원 보수조건 변경** → 직원 상세 → 계약 이력 → *조건 수정*(오타 정정) 또는 *신규 계약 작성*(변경 발효일 지정).
+- **서명한 계약서 원본 보관** → 직원 상세 → 계약 이력의 해당 카드 → *＋ 스캔본 첨부*.
+  PDF·JPG·PNG·WEBP, **파일당 4MB**까지. 여러 장을 한 번에 고를 수 있다(계약서·별지가 따로
+  스캔돼 오는 일이 잦다). 파일 이름을 누르면 새 탭에서 열리고 `↓` 로 내려받는다.
+  너무 크면 스캔 해상도를 200~300dpi 로 낮추거나 흑백으로 다시 뽑는다.
 - **포괄임금 약정시간 입력** → 계약 폼(신규 계약 작성 / 조건 수정)의 *포괄임금 약정시간* 접이식 영역.
   시간만 넣으면 기본급·시간외·야간 금액이 자동 분해되어 계약서 제4조와 명세서에 함께 반영된다.
 - **급여 항목 추가** → `lib/payroll.ts`(계산) + `schema.prisma`(PayrollRecord) + `lib/documents-pay.ts`(명세서 표시).

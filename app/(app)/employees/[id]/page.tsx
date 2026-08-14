@@ -23,6 +23,7 @@ import {
   effectiveContractStatus,
 } from "@/lib/contracts";
 import ContractIssueNotice from "@/components/ContractIssueNotice";
+import ContractFiles from "@/components/ContractFiles";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,16 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
   const emp = await prisma.employee.findUnique({
     where: { id },
     include: {
-      contracts: { orderBy: { startDate: "desc" } },
+      contracts: {
+        orderBy: { startDate: "desc" },
+        // ⚠ 스캔본 **본문(`data`)은 싣지 않는다** — 계약 6건에 수 MB 씩이면 화면이 통째로 느려진다
+        include: {
+          files: {
+            select: { id: true, name: true, mime: true, size: true, note: true, uploadedAt: true },
+            orderBy: { uploadedAt: "asc" },
+          },
+        },
+      },
       payrolls: { orderBy: [{ year: "desc" }, { month: "desc" }], take: 6 },
       documents: { orderBy: { createdAt: "desc" }, take: 6 },
     },
@@ -371,8 +381,13 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                         note: c.note ?? "",
                       }}
                       deletable={emp.contracts.length > 1}
+                      fileCount={c.files.length}
                     />
                   </div>
+                  <ContractFiles
+                    contractId={c.id}
+                    files={c.files.map((f) => ({ ...f, uploadedAt: ymd(f.uploadedAt) }))}
+                  />
                 </li>
               ))}
               {emp.contracts.length === 0 && (
