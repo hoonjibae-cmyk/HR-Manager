@@ -84,6 +84,25 @@ export default function SettingsClient() {
     );
   }
 
+  /**
+   * 구글 드라이브 연결 진단.
+   * 시험 업로드까지 실제로 해 보므로, 여기서 통과하면 실제 첨부도 된다.
+   */
+  async function testDrive() {
+    const res = await fetch("/api/gdrive/test", { method: "POST" });
+    const j = await res.json().catch(() => ({}));
+    const lines = (j.steps ?? []).map(
+      (st: any) => `${st.ok ? "✅" : "❌"} ${st.name}${st.detail ? ` — ${st.detail}` : ""}`
+    );
+    alert(
+      (j.ok
+        ? `구글 드라이브 연결 성공\n폴더: ${j.folderName ?? ""}\n계약서 스캔본이 드라이브에 저장됩니다.\n\n`
+        : "구글 드라이브 연결 실패 — 스캔본은 DB 에 보관됩니다\n\n") +
+      lines.join("\n") +
+      (j.hint ? `\n\n${j.hint}` : "")
+    );
+  }
+
   async function copyManifest() {
     const res = await fetch("/api/slack/manifest");
     if (!res.ok) return alert("매니페스트를 불러오지 못했습니다.");
@@ -124,6 +143,7 @@ export default function SettingsClient() {
         onPostLauncher={postLauncher}
         onCopyManifest={copyManifest}
         onTestGcal={testGcal}
+        onTestDrive={testDrive}
         onCheckSchema={checkSchema}
       />
     </div>
@@ -448,7 +468,7 @@ function SlackUrls() {
   );
 }
 
-function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyManifest, onTestGcal, onCheckSchema }: any) {
+function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyManifest, onTestGcal, onTestDrive, onCheckSchema }: any) {
   const envHint = g.serverless
     ? "Vercel → Settings → Environment Variables 에 추가 후 재배포"
     : ".env 파일에 추가 후 서버 재시작";
@@ -496,6 +516,15 @@ function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyM
           }
         />
         <Status
+          label="구글 드라이브 (계약서 스캔본)"
+          ok={g.gdrive}
+          hint={
+            g.gdrive
+              ? "서명본 스캔이 드라이브에 저장됩니다 — 아래 연결 테스트로 확인하세요"
+              : "GOOGLE_DRIVE_CONTRACT_FOLDER_ID 없음 — 스캔본은 DB 에 보관됩니다 (선택)"
+          }
+        />
+        <Status
           label="예약 발송 실행"
           ok={g.scheduler}
           hint={
@@ -524,6 +553,9 @@ function IntegrationCard({ integrations: g, onTestEmail, onPostLauncher, onCopyM
         </button>
         <button className="btn-outline" onClick={onTestGcal}>
           구글 캘린더 연결 테스트
+        </button>
+        <button className="btn-outline" onClick={onTestDrive}>
+          구글 드라이브 연결 테스트
         </button>
         <button className="btn-outline" onClick={onCheckSchema}>
           DB 스키마 점검

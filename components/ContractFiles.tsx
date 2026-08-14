@@ -12,6 +12,10 @@ export interface ContractFileRow {
   note: string | null;
   /** YYYY-MM-DD — 서버에서 문자열로 내려준다(하이드레이션이 어긋나지 않게) */
   uploadedAt: string;
+  /** DB | DRIVE — 어디에 담겼는지. 두 방식이 섞여 산다 */
+  storage?: string;
+  /** 구글 드라이브에서 바로 열어 보는 주소 (드라이브 보관분만) */
+  driveWebLink?: string | null;
 }
 
 /**
@@ -66,6 +70,9 @@ export default function ContractFiles({
     if (!res.ok) return setErr(j.error || "업로드에 실패했습니다.");
     // 일부만 걸러졌으면 무엇이 왜 빠졌는지 남긴다 (조용히 빠지면 올린 줄 안다)
     if (j.failed?.length) setErr(j.failed.join("\n"));
+    // 드라이브가 켜져 있는데 실패한 경우 — 파일은 DB 에 받아 뒀지만 그 사실을 알려 준다
+    else if (j.driveFallback)
+      setErr(`구글 드라이브에 올리지 못해 DB 에 보관했습니다.\n${j.driveFallback}`);
     router.refresh();
   }
 
@@ -129,6 +136,30 @@ export default function ContractFiles({
               <span className="text-[10px] text-slate-400 tnum shrink-0">
                 {formatSize(f.size)} · {f.uploadedAt}
               </span>
+              {/* 어디에 담겼는지 — 드라이브로 옮기는 중에는 두 방식이 섞여 살아서,
+                  이 표시가 없으면 무엇이 드라이브에 있는지 알 수가 없다 */}
+              {f.storage === "DRIVE" ? (
+                f.driveWebLink ? (
+                  <a
+                    href={f.driveWebLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="pill bg-emerald-50 text-emerald-700 text-[9px] shrink-0 hover:underline"
+                    title="구글 드라이브에서 열기"
+                  >
+                    Drive ↗
+                  </a>
+                ) : (
+                  <span className="pill bg-emerald-50 text-emerald-700 text-[9px] shrink-0">Drive</span>
+                )
+              ) : (
+                <span
+                  className="pill bg-slate-100 text-slate-500 text-[9px] shrink-0"
+                  title="이 파일은 DB 에 보관돼 있습니다"
+                >
+                  DB
+                </span>
+              )}
               <a
                 href={`/api/contract-files/${f.id}?download=1`}
                 className="text-[10px] text-slate-400 hover:text-brand-600 shrink-0 ml-auto"

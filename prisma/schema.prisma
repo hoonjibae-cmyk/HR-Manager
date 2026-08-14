@@ -280,7 +280,18 @@ model ContractFile {
   /// 저장한 형식 — 확장자가 아니라 **파일 앞머리로 가린 것**(lib/contract-file.ts)
   mime String
   size Int
-  data Bytes
+
+  /// 어디에 담겼는가 — `DB`(bytea) | `DRIVE`(구글 드라이브).
+  /// **한 줄씩 다를 수 있다**: 드라이브를 붙이기 전에 올린 파일과 드라이브가 잠깐 안 될 때
+  /// 받아 둔 파일이 DB 로 남아야 하기 때문이다. 옮기기 전까지 두 방식이 섞여 산다.
+  storage String @default("DB")
+
+  /// `storage = DB` 일 때의 본문
+  data Bytes?
+  /// `storage = DRIVE` 일 때의 파일 id · 드라이브에서 바로 열어 보는 주소
+  driveFileId  String?
+  driveWebLink String?
+
   /// 메모 — "원본 보관함 3번" 처럼 종이 원본이 어디 있는지 적는 자리
   note String?
 

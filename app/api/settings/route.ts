@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { invalidateTaxCache } from "@/lib/repo";
 import { computeNextRun, formatKst } from "@/lib/scheduler";
 import { listHolidays } from "@/lib/holiday-service";
+import { driveConfigured } from "@/lib/gdrive";
 import { gcalConfigured, makeupCalendarConfigured } from "@/lib/gcal";
 import { logActivity } from "@/lib/activity";
 import { encryptionEnabled } from "@/lib/crypto";
@@ -56,6 +57,8 @@ export async function GET() {
       // 키 파일 통째로(GOOGLE_SERVICE_ACCOUNT_JSON) 넣은 경우도 인정해야 하므로 엔진 판정을 그대로 쓴다
       gcal: gcalConfigured(),
       gcalMakeup: makeupCalendarConfigured(),
+      // 계약서 서명본 스캔의 저장소 — 없으면 DB 에 보관한다(기능이 죽지는 않는다)
+      gdrive: driveConfigured(),
       makeupChannel: !!process.env.SLACK_MAKEUP_CHANNEL,
       // 서버리스(Vercel)에서는 내부 스케줄러가 아니라 Vercel Cron 이 실행 주체
       serverless: !!process.env.VERCEL,

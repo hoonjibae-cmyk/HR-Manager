@@ -212,6 +212,14 @@ describe("개인정보 국외 처리 고지", () => {
     expect(t).toContain("급여명세서에 기재된 급여·공제 내역");
   });
 
+  // 계약서 스캔본을 드라이브에 보관하면 그 사실도 고지해야 한다 — 앱이 실제로 보내는 것만 적는다
+  it("**계약서 서명본을 드라이브에 보관하는 것도 적는다**", () => {
+    const g = OVERSEAS_PROCESSORS.find((p) => p.name === "Google LLC")!;
+    expect(g.purpose).toContain("근로계약서 서명본");
+    expect(g.items).toContain("근로계약서 서명본에 기재된 인적사항");
+    expect(html()).toContain("근로계약서 서명본");
+  });
+
   // 이 앱은 어떤 AI API 도 호출하지 않는다. 안 보내는 곳을 적으면 사실과 다른 고지가 된다.
   it("**생성형 AI 사업자는 적지 않는다** — 앱이 그쪽으로 개인정보를 보내지 않는다", () => {
     const t = html();
