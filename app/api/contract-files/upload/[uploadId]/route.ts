@@ -12,7 +12,7 @@ import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
-import { checkUpload, safeName, formatSize } from "@/lib/contract-file";
+import { checkFormat, safeName, formatSize } from "@/lib/contract-file";
 import { checkChunk, isLastChunk, chunkCount } from "@/lib/upload-chunk";
 
 export const dynamic = "force-dynamic";
@@ -25,8 +25,10 @@ export async function PUT(req: Request, { params }: { params: { uploadId: string
   const uploadId = String(params.uploadId ?? "");
   const index = Number(new URL(req.url).searchParams.get("index"));
 
-  const file = await prisma.contractFile.findUnique({
-    where: { uploadId },
+  // uploadId 에 유니크를 걸지 않았으므로(스키마 주석 참조) findFirst 로 찾는다.
+  // 아직 올리는 중인 것만 본다 — 완성된 행의 uploadId 는 비워 두므로 걸릴 일이 없다.
+  const file = await prisma.contractFile.findFirst({
+    where: { uploadId, complete: false },
     select: {
       id: true,
       name: true,
@@ -49,7 +51,7 @@ export async function PUT(req: Request, { params }: { params: { uploadId: string
    * 아니면 자리(행)와 조각을 그 자리에서 지운다 — 쓰레기를 남기지 않는다.
    */
   if (index === 0) {
-    const check = checkUpload(bytes, file.name);
+    const check = checkFormat(bytes, file.name);
     if (!check.ok || !check.mime) {
       await prisma.contractFile.delete({ where: { id: file.id } }).catch(() => {});
       return NextResponse.json({ error: check.error }, { status: 400 });
@@ -118,8 +120,8 @@ export async function PUT(req: Request, { params }: { params: { uploadId: string
 /** 올리다 그만둘 때 — 자리와 조각을 치운다 */
 export async function DELETE(_req: Request, { params }: { params: { uploadId: string } }) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const row = await prisma.contractFile.findUnique({
-    where: { uploadId: String(params.uploadId ?? "") },
+  const row = await prisma.contractFile.findFirst({
+    where: { uploadId: String(params.uploadId ?? ""), complete: false },
     select: { id: true, complete: true },
   });
   // 완성된 파일은 이 경로로 지우지 않는다 (그건 삭제 버튼이 할 일이다)

@@ -17,8 +17,6 @@
  * 플랫폼이 잘라 버린다(무슨 일이 났는지 화면에 안 남는다). 그래서 **우리가 먼저 막고**
  * 무엇을 하면 되는지 적어 준다. 넉넉히 4MB 로 둔다.
  */
-export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
-
 /** 받아 주는 형식 — 브라우저가 그대로 열어 볼 수 있는 것만 */
 export const ALLOWED_MIME = [
   "application/pdf",
@@ -62,22 +60,14 @@ export function sniffMime(bytes: Uint8Array): AllowedMime | "heic" | null {
 }
 
 /**
- * 올려도 되는 파일인가.
+ * **받아 줄 형식인가** — 파일의 **앞머리만** 보면 되므로 첫 조각으로 판정한다.
  *
  * **거절할 때는 무엇을 하면 되는지 함께 적는다** — "형식이 올바르지 않습니다" 만 뜨면
  * 담당자가 할 수 있는 일이 없다. 스캔본은 사무기기에서 나오는 파일이라
- * 형식·크기를 바꾸는 방법을 모르는 쪽이 보통이다.
+ * 형식을 바꾸는 방법을 모르는 쪽이 보통이다.
  */
-export function checkUpload(bytes: Uint8Array, name = ""): UploadCheck {
+export function checkFormat(bytes: Uint8Array, name = ""): UploadCheck {
   if (!bytes.length) return { ok: false, error: "빈 파일입니다." };
-  if (bytes.length > MAX_UPLOAD_BYTES)
-    return {
-      ok: false,
-      error:
-        `파일이 너무 큽니다 (${formatSize(bytes.length)} · 최대 ${formatSize(MAX_UPLOAD_BYTES)}). ` +
-        `스캔 해상도를 200~300dpi 로 낮추거나 흑백으로 다시 스캔하면 대개 줄어듭니다. ` +
-        `여러 장이면 나눠서 올려도 됩니다.`,
-    };
 
   const kind = sniffMime(bytes);
   if (kind === "heic")

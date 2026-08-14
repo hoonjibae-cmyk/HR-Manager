@@ -48,6 +48,9 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
     - **이어 붙이기는 DB 안에서 한 번에** 한다(`string_agg(... ORDER BY index)`).
       조각마다 `data = data || 조각` 으로 덧붙이면 Postgres 가 그 행을 매번 통째로 다시 써서
       쓰기량이 제곱으로 늘고, 서버 메모리로 끌어와 합치면 수십 MB 를 함수에 올리게 된다.
+    - **`uploadId` 에 유니크를 걸지 않는다** — `randomUUID()` 라 부딪칠 일이 없는데, 유니크 제약
+      **추가**는 `prisma db push` 가 'data loss' 경고로 띄우고 `db-deploy.mjs` 가 거기서 배포를
+      멈춘다(겪었다 — 안전장치는 그대로 두는 게 맞으니 스키마 쪽을 고쳤다). `findFirst` + 인덱스로 충분하다.
     - **조각 수가 모자라면 이어 붙이지 않는다** — 그대로 붙이면 **열리지 않는 파일이 조용히 저장된다**.
     - **형식은 첫 조각에서 가린다**(앞머리가 거기 있다). 아니면 그 자리에서 자리째 지워
       나머지 수십 MB 를 헛되이 올리지 않는다.

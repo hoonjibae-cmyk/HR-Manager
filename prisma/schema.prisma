@@ -289,8 +289,11 @@ model ContractFile {
   /// 조각을 다 받아 이어 붙였는가. **완성된 것만 화면에 낸다** —
   /// 반쯤 올라간 파일이 목록에 뜨면 열었을 때 깨진 문서가 나온다.
   complete Boolean @default(true)
-  /// 업로드 한 건을 가리키는 열쇠 (브라우저가 조각마다 들고 온다)
-  uploadId String? @unique
+  /// 업로드 한 건을 가리키는 열쇠 (브라우저가 조각마다 들고 온다).
+  /// **유니크를 걸지 않는다** — `randomUUID()` 라 부딪칠 일이 없는데, 유니크 제약을 추가하는
+  /// 변경은 `prisma db push` 가 'data loss' 경고로 띄우고 `db-deploy.mjs` 가 거기서 배포를
+  /// 멈춘다(안전장치는 그대로 두는 게 맞다). 조회는 `findFirst` + 인덱스로 충분하다.
+  uploadId String?
 
   uploadedAt DateTime @default(now())
 
@@ -298,6 +301,7 @@ model ContractFile {
 
   @@index([contractId])
   @@index([complete])
+  @@index([uploadId])
 }
 
 /// 올리는 중인 파일의 **조각**.

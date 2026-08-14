@@ -1,13 +1,13 @@
-// 계약서 서명본 스캔 첨부 — 형식·크기 판정과 내려보내기 헤더.
+// 계약서 서명본 스캔 첨부 — 형식 판정과 내려보내기 헤더.
+// (크기 상한·조각 나누기는 upload-chunk.test.ts)
 //
 // 여기서 틀리면 ① 브라우저가 못 여는 파일이 저장되거나 ② 저장한 형식과 다른 Content-Type 으로
 // 나가거나 ③ 한글 파일명이 깨진다. 셋 다 올린 뒤에야 드러난다.
 
 import { describe, it, expect } from "vitest";
 import {
-  MAX_UPLOAD_BYTES,
   sniffMime,
-  checkUpload,
+  checkFormat,
   formatSize,
   extensionOf,
   safeName,
@@ -46,40 +46,24 @@ describe("형식 판정 — 확장자가 아니라 파일 앞머리로", () => {
 
   // 이름만 pdf 로 바꿔 올리면 서버가 application/pdf 로 되돌려주게 된다
   it("**이름을 믿지 않는다** — 확장자가 pdf 여도 내용이 아니면 거절", () => {
-    const r = checkUpload(pad(ascii("PK")), "근로계약서.pdf");
+    const r = checkFormat(pad(ascii("PK")), "근로계약서.pdf");
     expect(r.ok).toBe(false);
     expect(r.error).toContain("PDF");
   });
 });
 
-describe("올릴 수 있는가", () => {
+describe("받아 줄 형식인가 (크기는 여기서 보지 않는다 — upload-chunk.ts 담당)", () => {
   it("PDF 는 받는다", () => {
-    expect(checkUpload(PDF, "계약서.pdf")).toMatchObject({ ok: true, mime: "application/pdf" });
+    expect(checkFormat(PDF, "계약서.pdf")).toMatchObject({ ok: true, mime: "application/pdf" });
   });
 
   it("빈 파일은 막는다", () => {
-    expect(checkUpload(new Uint8Array(0)).ok).toBe(false);
-  });
-
-  // Vercel 서버리스 요청 본문 상한이 4.5MB — 넘으면 앱에 닿지도 못하고 잘린다
-  it("4MB 를 넘으면 막고 **어떻게 줄이는지** 알려 준다", () => {
-    const big = new Uint8Array(MAX_UPLOAD_BYTES + 1);
-    big.set(ascii("%PDF-1.7"));
-    const r = checkUpload(big);
-    expect(r.ok).toBe(false);
-    expect(r.error).toContain("dpi");
-    expect(r.error).toContain("나눠서");
-  });
-
-  it("경계값(정확히 4MB)은 통과", () => {
-    const at = new Uint8Array(MAX_UPLOAD_BYTES);
-    at.set(ascii("%PDF-1.7"));
-    expect(checkUpload(at).ok).toBe(true);
+    expect(checkFormat(new Uint8Array(0)).ok).toBe(false);
   });
 
   // 아이폰 기본 촬영 형식이라 실제로 자주 올라온다. 그냥 '형식 오류' 로 막으면 방법을 모른다
   it("**HEIC 는 따로 가려내 바꾸는 법을 적는다**", () => {
-    const r = checkUpload(HEIC, "IMG_0001.HEIC");
+    const r = checkFormat(HEIC, "IMG_0001.HEIC");
     expect(r.ok).toBe(false);
     expect(r.error).toContain("JPEG");
     expect(r.error).toContain("아이폰");
