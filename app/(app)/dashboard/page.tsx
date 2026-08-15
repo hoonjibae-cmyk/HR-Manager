@@ -13,6 +13,12 @@ import {
 } from "@/lib/leave-calendar";
 import { listHolidays } from "@/lib/holiday-service";
 import { listDayOffs } from "@/lib/dayoff-service";
+import {
+  renewalAlerts,
+  daysLabel,
+  RENEWAL_KIND_LABEL,
+  RENEWAL_LEAD_DAYS,
+} from "@/lib/renewal";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +27,7 @@ const ymdUtc = (d: Date) => d.toISOString().slice(0, 10);
 
 export default async function Dashboard() {
   const now = new Date();
-  const [total, active, byScheme, pendingLeaves, recentContracts, company] =
+  const [total, active, byScheme, pendingLeaves, staffForRenewal, company] =
     await Promise.all([
       prisma.employee.count(),
       prisma.employee.count({ where: { active: true } }),
@@ -32,10 +38,29 @@ export default async function Dashboard() {
         orderBy: { createdAt: "desc" },
         take: 5,
       }),
-      prisma.contract.findMany({
-        where: { endDate: { not: null } },
-        include: { employee: true },
-        orderBy: { endDate: "asc" },
+      /*
+       * 재계약·연봉협의 판정에는 **재직자의 계약 전부**와 **서명본 스캔의 유무**가 필요하다.
+       * 만료일이 있는 계약만 읽던 예전 방식으로는 기한 없는 계약의 연봉협의를 잡을 수 없고,
+       * 스캔 여부를 모르면 '재계약서만 만들어 둔 상태' 와 '서명까지 끝난 상태' 를 못 가른다.
+       * ⚠ 스캔은 **있는지만** 보면 되므로 `take: 1` 로 끊는다(본문은 절대 읽지 않는다).
+       */
+      prisma.employee.findMany({
+        where: { active: true },
+        select: {
+          id: true,
+          name: true,
+          department: true,
+          payScheme: true,
+          contracts: {
+            select: {
+              id: true,
+              startDate: true,
+              endDate: true,
+              status: true,
+              files: { where: { complete: true }, select: { id: true }, take: 1 },
+            },
+          },
+        },
       }),
       prisma.company.findFirst(),
     ]);
@@ -123,12 +148,26 @@ export default async function Dashboard() {
     { holidays: weekHolidays.map((h) => h.date) }
   );
 
-  // 60일 내 계약 만료 예정
-  const soon = recentContracts.filter((c) => {
-    if (!c.endDate) return false;
-    const days = (c.endDate.getTime() - now.getTime()) / 86400000;
-    return days >= 0 && days <= 60;
-  });
+  /*
+   * 재계약 · 연봉협의 — 판정은 lib/renewal.ts(순수 함수, 테스트 있음).
+   * **새 계약을 만든 것만으로는 안 내려간다** — 그 계약에 서명본 스캔이 붙어야 합의가 끝난 것이다.
+   */
+  const renewals = renewalAlerts(
+    staffForRenewal.map((e) => ({
+      id: e.id,
+      name: e.name,
+      department: e.department,
+      payScheme: e.payScheme,
+      contracts: e.contracts.map((c) => ({
+        id: c.id,
+        startDate: c.startDate,
+        endDate: c.endDate,
+        status: c.status,
+        hasScan: c.files.length > 0,
+      })),
+    })),
+    now
+  );
 
   const schemeMap: Record<string, number> = {};
   byScheme.forEach((s) => (schemeMap[s.payScheme] = s._count));
@@ -150,9 +189,9 @@ export default async function Dashboard() {
           accent={pendingLeaves.length ? "text-amber-600" : ""}
         />
         <StatCard
-          label="계약 만료 임박(60일)"
-          value={`${soon.length}건`}
-          accent={soon.length ? "text-red-600" : ""}
+          label={`재계약·연봉협의(${RENEWAL_LEAD_DAYS}일)`}
+          value={`${renewals.length}건`}
+          accent={renewals.length ? "text-red-600" : ""}
         />
       </div>
 
@@ -271,52 +310,68 @@ export default async function Dashboard() {
         </div>
       </div>
 
-      {/* 계약 만료 임박 */}
-      {soon.length > 0 && (
+      {/* 재계약 · 연봉협의 */}
+      {renewals.length > 0 && (
         <div className="card p-5 mt-6">
-          <h2 className="font-bold text-slate-800 mb-4">
-            재계약 필요 (60일 내 만료)
-          </h2>
+          <h2 className="font-bold text-slate-800 mb-1">재계약 · 연봉협의 필요</h2>
+          <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+            새 계약을 <b>만드는 것만으로는 사라지지 않습니다</b> — 그 계약 카드에{" "}
+            <b>서명본 스캔</b>을 올려야 상호 합의가 끝난 것으로 보고 내려갑니다.
+            기한이 지난 건도 계속 남습니다.
+          </p>
           <table className="w-full">
             <thead>
               <tr>
                 <th className="th">직원</th>
+                <th className="th">구분</th>
                 <th className="th">계약형태</th>
-                <th className="th">만료일</th>
+                <th className="th">기준일</th>
                 <th className="th">남은 일수</th>
                 <th className="th"></th>
               </tr>
             </thead>
             <tbody>
-              {soon.map((c) => {
-                const days = Math.ceil(
-                  (c.endDate!.getTime() - now.getTime()) / 86400000
-                );
-                return (
-                  <tr key={c.id}>
-                    <td className="td font-medium">{c.employee.name}</td>
-                    <td className="td">
-                      <Pill kind={c.employee.payScheme}>
-                        {PAY_SCHEME_LABEL[c.employee.payScheme]}
-                      </Pill>
-                    </td>
-                    <td className="td tnum">{ymd(c.endDate)}</td>
-                    <td className="td tnum">
-                      <span className={days <= 30 ? "text-red-600 font-semibold" : ""}>
-                        {days}일
-                      </span>
-                    </td>
-                    <td className="td text-right">
-                      <Link
-                        href={`/employees/${c.employeeId}`}
-                        className="text-xs text-brand-600 font-semibold"
-                      >
-                        재계약서 발급 →
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })}
+              {renewals.map((r) => (
+                <tr key={`${r.employeeId}-${r.kind}`} className={r.overdue ? "bg-rose-50/40" : ""}>
+                  <td className="td font-medium">{r.name}</td>
+                  <td className="td">
+                    <span
+                      className={`pill ${
+                        r.kind === "RENEW"
+                          ? "bg-rose-50 text-rose-700"
+                          : "bg-indigo-50 text-indigo-700"
+                      }`}
+                    >
+                      {RENEWAL_KIND_LABEL[r.kind]}
+                    </span>
+                  </td>
+                  <td className="td">
+                    <Pill kind={r.payScheme}>{PAY_SCHEME_LABEL[r.payScheme]}</Pill>
+                  </td>
+                  <td className="td tnum">{r.dueDate}</td>
+                  <td className="td tnum">
+                    <span
+                      className={
+                        r.overdue
+                          ? "text-red-600 font-bold"
+                          : r.daysLeft <= 30
+                          ? "text-red-600 font-semibold"
+                          : ""
+                      }
+                    >
+                      {daysLabel(r)}
+                    </span>
+                  </td>
+                  <td className="td text-right">
+                    <Link
+                      href={`/employees/${r.employeeId}#contracts`}
+                      className="text-xs text-brand-600 font-semibold"
+                    >
+                      {r.kind === "RENEW" ? "재계약서 발급 →" : "계약 관리 →"}
+                    </Link>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
