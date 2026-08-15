@@ -13,12 +13,7 @@ import {
 } from "@/lib/leave-calendar";
 import { listHolidays } from "@/lib/holiday-service";
 import { listDayOffs } from "@/lib/dayoff-service";
-import {
-  renewalAlerts,
-  daysLabel,
-  RENEWAL_KIND_LABEL,
-  RENEWAL_LEAD_DAYS,
-} from "@/lib/renewal";
+import { renewalAlerts, daysLabel, renewalKindLabel, RENEWAL_LEAD_DAYS } from "@/lib/renewal";
 
 export const dynamic = "force-dynamic";
 
@@ -342,7 +337,7 @@ export default async function Dashboard() {
                           : "bg-indigo-50 text-indigo-700"
                       }`}
                     >
-                      {RENEWAL_KIND_LABEL[r.kind]}
+                      {renewalKindLabel(r.kind, r.payScheme)}
                     </span>
                   </td>
                   <td className="td">

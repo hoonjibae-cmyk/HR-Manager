@@ -11,6 +11,8 @@ import {
   daysLabel,
   RENEWAL_LEAD_DAYS,
   SALARY_REVIEW_EXEMPT_DEPTS,
+  RENEWAL_EXEMPT_DEPTS,
+  renewalKindLabel,
   type RenewalEmployee,
   type RenewalContract,
 } from "./renewal";
@@ -148,6 +150,50 @@ describe("연봉협의 — 기한 없는 계약", () => {
     const now = openEnded("2019-03-04");
     const next = ct({ id: 99, startDate: d("2026-09-01"), endDate: null, hasScan: true });
     expect(renewalAlerts([emp([now, next])], TODAY)).toHaveLength(0);
+  });
+});
+
+describe("부서로 빼기", () => {
+  const openEnded = (start: string) => ct({ startDate: d(start), endDate: null });
+
+  // 경영지원은 이 알림을 받아서 처리하는 쪽이다 — 자기 건이 섞이면 목록만 길어진다
+  it("**경영지원은 재계약·연봉협의 둘 다 빠진다**", () => {
+    expect(RENEWAL_EXEMPT_DEPTS).toContain("경영지원");
+    const dept = { department: "경영지원" };
+    expect(renewalAlerts([emp([ct({ endDate: d("2026-08-31") })], dept)], TODAY)).toHaveLength(0);
+    expect(renewalAlerts([emp([openEnded("2019-03-04")], dept)], TODAY)).toHaveLength(0);
+  });
+
+  // 조교팀은 연봉협의만 빠진다 — 기간제 계약이면 재계약은 챙겨야 한다
+  it("**조교팀은 연봉협의만 빠지고 재계약은 뜬다**", () => {
+    const dept = { department: "조교팀" };
+    expect(renewalAlerts([emp([openEnded("2019-03-04")], dept)], TODAY)).toHaveLength(0);
+    const fixed = renewalAlerts([emp([ct({ endDate: d("2026-08-31") })], dept)], TODAY);
+    expect(fixed).toHaveLength(1);
+    expect(fixed[0].kind).toBe("RENEW");
+  });
+});
+
+describe("구분 이름", () => {
+  // 완전비율제는 월 급여가 없고 배분율이 보수의 전부다 — '연봉협의' 는 어긋난 말이 된다
+  it("**완전비율제는 '비율협의' 로 적는다**", () => {
+    expect(renewalKindLabel("SALARY_REVIEW", "RATIO")).toBe("비율협의");
+    expect(renewalKindLabel("SALARY_REVIEW", "MONTHLY")).toBe("연봉협의");
+    expect(renewalKindLabel("SALARY_REVIEW", null)).toBe("연봉협의");
+  });
+
+  it("재계약은 급여형태와 무관하게 '재계약'", () => {
+    expect(renewalKindLabel("RENEW", "RATIO")).toBe("재계약");
+  });
+
+  // 위탁도 1년마다 비율을 다시 정한다 — 대상에서 빼지 않는다
+  it("**완전비율제(위탁)도 협의 대상이다**", () => {
+    const a = renewalAlerts(
+      [emp([ct({ startDate: d("2019-03-04"), endDate: null })], { payScheme: "RATIO" })],
+      TODAY
+    );
+    expect(a).toHaveLength(1);
+    expect(renewalKindLabel(a[0].kind, a[0].payScheme)).toBe("비율협의");
   });
 });
 

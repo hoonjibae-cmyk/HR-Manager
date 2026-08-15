@@ -22,10 +22,19 @@ import { governingContract } from "./contracts";
 export const RENEWAL_LEAD_DAYS = 60;
 
 /**
- * **연봉협의 알림에서 빼는 부서.**
+ * **이 알림에서 통째로 빼는 부서** — 재계약·연봉협의 둘 다 안 뜬다.
+ *
+ * 경영지원은 이 알림을 **받아서 처리하는 쪽**이다. 자기 부서 건이 섞이면 챙겨야 할 목록만
+ * 길어진다(그 부서 계약은 그 부서가 직접 들여다본다).
+ */
+export const RENEWAL_EXEMPT_DEPTS = ["경영지원"];
+
+/**
+ * **연봉협의 알림에서만 빼는 부서** — 재계약(기간 만료)은 그대로 뜬다.
  *
  * 조교팀은 기한 없는 계약이라도 해마다 연봉을 다시 정하지 않는다.
- * 부서 **이름**으로 가르므로 설정에서 부서 이름을 바꾸면 여기도 함께 고쳐야 한다
+ *
+ * ⚠ 둘 다 부서 **이름**으로 가르므로, 설정에서 부서 이름을 바꾸면 여기도 함께 고쳐야 한다
  * (부서 이름을 바꾸면 직원의 department 문자열도 함께 옮겨진다 — lib/departments.ts).
  */
 export const SALARY_REVIEW_EXEMPT_DEPTS = ["조교팀"];
@@ -132,6 +141,7 @@ export function renewalAlerts(
   const out: RenewalAlert[] = [];
 
   for (const emp of employees) {
+    if (RENEWAL_EXEMPT_DEPTS.includes(emp.department ?? "")) continue;
     const gov = governingContract(
       emp.contracts.filter((c) => c.status !== "TERMINATED"),
       today
@@ -183,3 +193,15 @@ export const RENEWAL_KIND_LABEL: Record<RenewalKind, string> = {
   RENEW: "재계약",
   SALARY_REVIEW: "연봉협의",
 };
+
+/**
+ * 화면에 적을 구분 이름.
+ *
+ * **완전비율제는 '연봉' 이 아니라 '비율' 을 다시 정한다** — 월 급여가 없고 매출 배분율이
+ * 보수의 전부라, '연봉협의' 라고 적으면 무엇을 협의하라는 것인지 어긋난다.
+ * (판정이 아니라 **표기**라서 급여형태만 본다 — 위탁 판정은 `isContractorContract` 쪽이다.)
+ */
+export function renewalKindLabel(kind: RenewalKind, payScheme?: string | null): string {
+  if (kind === "SALARY_REVIEW" && payScheme === "RATIO") return "비율협의";
+  return RENEWAL_KIND_LABEL[kind];
+}
