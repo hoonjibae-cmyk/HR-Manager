@@ -128,6 +128,15 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - **문서→PDF**: `lib/documents.ts`(계약서/서약서/동의서), `lib/documents-pay.ts`(명세서/증명서) 가
   HTML 을 만들고 `lib/pdf.ts` 가 puppeteer-core 로 PDF 렌더(Vercel=@sparticuz/chromium, 로컬=설치된 Chrome/Edge).
   한글폰트는 `assets/fonts/` 를 base64 임베드(`lib/fonts.ts`).
+  - **크로미움을 지고 다닐 라우트는 `next.config.js` 에서 손으로 정한다**
+    (`outputFileTracingIncludes` / `outputFileTracingExcludes`). 추적기는 import 문만 보고
+    따라가므로, `computeNextRun`·`sendTestEmail` 처럼 **다른 용도로** `lib/scheduler`·`lib/email` 을
+    부르는 라우트에도 puppeteer → @sparticuz/chromium 이 딸려 들어간다. 그러면 **60MB 짜리
+    브라우저 압축본이 함수마다 한 벌씩** 실린다(실측: 13개 라우트가 지고 있었고 그중 7개만 필요했다).
+  - ⚠ **빼는 판단은 import 문이 아니라 실행 경로로 한다** — `lib/pdf.ts` 의
+    `htmlToPdf`·`docGroupsToPdf` 에 닿는가를 본다. 잘못 빼면 **빌드는 통과하고 배포 후 발급을
+    실제로 눌러야** 드러난다.
+  - `bin/**` 만 뺀다(패키지째 빼지 않는다 — 모듈 해석이 깨질 여지가 있고, 덩치는 전부 bin 에 있다).
 - **DB 어댑터**: `lib/repo.ts` 가 Prisma 레코드 ↔ 엔진 입력/문서 입력 변환. 회사정보·요율·세액표 로딩.
 - **계약 = 보수조건의 단일 진실**: `lib/contracts.ts`. 급여 산정·계약서 발급·화면 표시 모두
   `governingContract(contracts, asOf)` 로 그 시점 계약을 찾아 쓴다.
