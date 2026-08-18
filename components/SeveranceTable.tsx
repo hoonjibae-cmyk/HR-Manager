@@ -128,12 +128,19 @@ export default function SeveranceTable({
     let dc = 0;
     let provision = 0;
     let retention = 0;
+    let cumulative = 0;
+    // DC 로 넘어간 사람 옆에 붙는 '소급' 몫 — 누계 안에 든 값이라 따로 세어 밑줄에 적는다
+    let cumulativeProvision = 0;
+    let estimatedCount = 0;
     for (const r of sorted) {
       if (r.status === "DC") dc += r.amount;
       else if (r.status === "PROVISION") provision += r.amount;
       retention += r.retention;
+      cumulative += r.cumulative;
+      if (r.status === "DC") cumulativeProvision += r.cumulativeProvision;
+      if (r.estimatedMonths > 0) estimatedCount++;
     }
-    return { dc, provision, retention };
+    return { dc, provision, retention, cumulative, cumulativeProvision, estimatedCount };
   }, [sorted]);
 
   return (
@@ -312,7 +319,26 @@ export default function SeveranceTable({
                     {won(sub.dc + sub.provision)}
                   </td>
                   <td className="td text-right tnum text-slate-600">{won(sub.retention)}</td>
-                  <td className="td" />
+                  {/* 누계도 합을 낸다 — 이 묶음이 지금까지 쌓아 둔 퇴직급여 전체다 */}
+                  <td className="td text-right tnum font-bold text-slate-800">
+                    {won(sub.cumulative)}
+                    {sub.cumulativeProvision > 0 && (
+                      <div
+                        className="text-[11px] font-normal text-amber-600"
+                        title="DC 가입 전 기간에 쌓은 충당금 — 소급 납입 대상입니다"
+                      >
+                        소급 {won(sub.cumulativeProvision)}
+                      </div>
+                    )}
+                    {sub.estimatedCount > 0 && (
+                      <div
+                        className="text-[11px] font-normal text-slate-400"
+                        title="급여 레코드가 없어 계약에서 추산한 달이 섞인 직원 수"
+                      >
+                        추산 포함 {sub.estimatedCount}명
+                      </div>
+                    )}
+                  </td>
                 </tr>
               </tfoot>
             )}
