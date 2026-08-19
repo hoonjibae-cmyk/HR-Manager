@@ -13,6 +13,7 @@ import { resignStatusOf, resignBadgeLabel, resignedSummary } from "@/lib/payroll
 import { isEstimatedHourly } from "@/lib/payroll";
 import { openPdfTab, closePdfTab, deliverPdf } from "@/lib/open-pdf";
 import { payoutNotice, type PayoutSuggestion } from "@/lib/leave-payout";
+import { planPayslipSend, sendConfirmText, nothingToSendNotice } from "@/lib/payslip-send";
 import {
   useTableSort,
   useStoredState,
@@ -79,6 +80,8 @@ interface Rec {
     isContractor?: boolean;
     parkingFee?: number;
     resignDate?: string | null;
+    /** 없으면 명세서가 나가지 않는다 — 발송 확인창이 이름을 따로 세어 보여준다 */
+    email?: string | null;
   };
 }
 
@@ -184,6 +187,13 @@ export default function PayrollClient({ today }: { today: string }) {
   const [incResult, setIncResult] = useState<any>(null);
   // 이름 검색은 기억하지 않는다 — 그때그때 한 사람 찾는 동작이지 기본값이 아니다
   const [q, setQ] = useState("");
+  /**
+   * 선택 발송으로 고른 행(PayrollRecord.id).
+   *
+   * **기억하지 않는다** — 발송은 되돌릴 수 없어서, 지난번에 고른 것이 남아 있다가 다음에
+   * 열었을 때 그대로 나가면 안 된다. 연·월을 바꾸거나 목록을 다시 읽으면 비운다.
+   */
+  const [selected, setSelected] = useState<number[]>([]);
   // 옛 단일 선택 저장값을 배열 형식으로 받아 준다
   const [filter, setFilter, clearFilter] = useStoredState("payroll.filter", DEFAULT_FILTER, (v) =>
     normalizeFilterSet(FILTER_KEYS, v)
@@ -194,6 +204,9 @@ export default function PayrollClient({ today }: { today: string }) {
     const res = await fetch(`/api/payroll?year=${year}&month=${month}`);
     const data = res.ok ? await res.json() : [];
     setRecs(data);
+    // 목록을 다시 읽으면 선택을 비운다 — 발송 뒤에도 여기를 지나므로, 방금 보낸 사람이
+    // 체크된 채 남아 다시 누르는 일이 없다.
+    setSelected([]);
     const map: Record<number, any> = {};
     data.forEach((r: Rec) => {
       map[r.employeeId] = rowInputsOf(r);
@@ -363,32 +376,63 @@ export default function PayrollClient({ today }: { today: string }) {
     }
   }
 
-  async function sendEmails() {
-    if (
-      !confirm(
-        `${year}년 ${month}월 급여명세서를 이메일로 발송하시겠습니까?\n` +
-          `발송된 기록은 자동으로 잠겨(발송완료) 재계산·공제 수정이 되지 않습니다.\n\n` +
-          `뒤늦게 잘못이 드러나면 상태 필터를 '발송완료' 로 좁힌 뒤 '🔓 발송 잠금 해제'로 되돌릴 수 있습니다 (사유 입력 필요).\n` +
-          `다만 직원이 받은 메일은 되돌릴 수 없어 정정본을 다시 보내게 되므로, 보내기 전에 확인하는 편이 낫습니다.`
-      )
-    )
+  /**
+   * 명세서 이메일 발송 — 전체(`selective=false`)와 선택 발송이 **같은 길**을 탄다.
+   *
+   * 누구에게 나가는지는 `planPayslipSend()` 로 가린다 — **서버가 쓰는 함수와 같다**.
+   * 화면이 따로 세면 "3명" 이라 적고 실제로는 2명에게 나가는 어긋남이 생기는데,
+   * 발송은 되돌릴 수 없어 그때는 이미 늦다.
+   */
+  async function sendEmails(selective: boolean) {
+    const plan = planPayslipSend(sendCandidates, selective ? selected : null);
+
+    const text = sendConfirmText(plan, year, month, { selective });
+    if (!text) {
+      alert(nothingToSendNotice(plan, { selective }));
       return;
-    setBusy("email");
+    }
+    if (!confirm(text)) return;
+
+    setBusy(selective ? "email-sel" : "email");
     const res = await fetch("/api/email/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ year, month }),
+      // 화면이 보여준 그 사람들에게만 보낸다 — 확인창의 명단과 서버가 실제로 보내는 대상이
+      // 어긋나지 않게, 고른 행이 아니라 **plan 이 추린 대상**의 id 를 넘긴다.
+      body: JSON.stringify({
+        year,
+        month,
+        ...(selective ? { payrollIds: plan.targets.map((t) => t.id) } : {}),
+      }),
     });
     const j = await res.json().catch(() => ({}));
     alert(
       res.ok
         ? `발송 완료: 성공 ${j.sent ?? 0}건 / 실패 ${j.failed ?? 0}건` +
-          (j.skippedSent ? `\n(이미 발송되어 제외: ${j.skippedSent}건)` : "")
+          (j.skippedSentNames?.length
+            ? `\n\n이미 발송되어 제외: ${j.skippedSentNames.join(", ")}`
+            : "") +
+          (j.noEmailNames?.length ? `\n메일 주소가 없어 발송 못 함: ${j.noEmailNames.join(", ")}` : "")
         : `발송 실패: ${j.error || "SMTP 설정을 확인하세요"}`
     );
     setBusy("");
     await load();
   }
+
+  const toggleRow = (id: number) =>
+    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+
+  /** 발송 판정에 넘길 값 — 화면·확인창·버튼 문구가 모두 이 하나에서 나온다 */
+  const sendCandidates = React.useMemo(
+    () =>
+      recs.map((r) => ({
+        id: r.id,
+        name: r.employee.name,
+        email: r.employee.email ?? null,
+        status: r.status,
+      })),
+    [recs]
+  );
 
   async function uploadTimesheet(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -499,6 +543,31 @@ export default function PayrollClient({ today }: { today: string }) {
   const { sorted, sort, toggle, resetSort, hasSort } = useTableSort(filtered, pickRec, "payroll.sort");
 
   /**
+   * 머리글의 전체 선택이 고르는 범위 = **지금 보이는 행 중 발송할 수 있는 것**.
+   *
+   * 걸러진 것을 넘어 그 달 전체를 고르지 않는다 — 화면에 안 보이는 사람에게 명세서가
+   * 나가는 것이 이 기능에서 가장 나쁜 실패다(합계 카드가 전체를 세는 것과는 성질이 다르다.
+   * 그쪽은 보여주기만 하고 이쪽은 돌이킬 수 없는 일을 한다).
+   */
+  const sendableIds = React.useMemo(
+    () => sorted.filter((r) => r.status !== "SENT").map((r) => r.id),
+    [sorted]
+  );
+  const allSendableChecked =
+    sendableIds.length > 0 && sendableIds.every((id) => selected.includes(id));
+
+  /**
+   * 고른 것 중 **실제로 나갈 사람** — 버튼 문구가 확인창과 같은 수를 적게 한다.
+   *
+   * 체크한 수를 그대로 적으면 메일 주소가 없는 사람이 섞였을 때 버튼은 "28명에게 발송" 인데
+   * 확인창은 24명이 된다. 버튼이 약속한 것과 실제로 하는 일이 다르면 그 버튼을 못 믿는다.
+   */
+  const selPlan = React.useMemo(
+    () => planPayslipSend(sendCandidates, selected),
+    [sendCandidates, selected]
+  );
+
+  /**
    * 지금 보이는 행의 소계 — 표 맨 아래에 붙여 둔다.
    * 필터를 걸면 그 묶음의 합이 되므로(예: 사업소득만 31명) 위 합계 카드(그 달 전체)와
    * 나란히 놓고 볼 수 있다. 열 밑에 그대로 정렬돼야 읽히므로 카드가 아니라 표 안에 둔다.
@@ -593,7 +662,24 @@ export default function PayrollClient({ today }: { today: string }) {
                 </span>
               )}
             </button>
-            <button className="btn-outline" onClick={sendEmails} disabled={!!busy}>
+            {/* 고른 사람이 있을 때만 선택 발송 버튼을 낸다 — 평소에 두 버튼이 나란히 있으면
+                전체 발송을 누를 자리에 선택 발송이 있어 헷갈린다. */}
+            {selected.length > 0 && (
+              <button
+                className="btn-primary"
+                onClick={() => sendEmails(true)}
+                disabled={!!busy}
+                title="체크한 직원에게만 명세서를 보냅니다"
+              >
+                {busy === "email-sel"
+                  ? "발송 중…"
+                  : selPlan.targets.length === selected.length
+                    ? `선택한 ${selected.length}명에게 발송`
+                    : // 메일 주소가 없어 빠지는 사람이 있으면 **두 수를 함께 적는다**
+                      `선택 ${selected.length}명 중 ${selPlan.targets.length}명 발송`}
+              </button>
+            )}
+            <button className="btn-outline" onClick={() => sendEmails(false)} disabled={!!busy}>
               {busy === "email" ? "발송 중…" : "명세서 이메일 발송"}
             </button>
           </div>
@@ -854,6 +940,21 @@ export default function PayrollClient({ today }: { today: string }) {
                 스크롤할 때 같이 밀려 사라진다. */}
             <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-slate-50 [&_th]:shadow-[inset_0_-1px_0_#e2e8f0]">
               <tr>
+                {/* 선택 발송용 체크칸. 전체 선택은 **지금 보이는 발송 가능한 행**만 고른다. */}
+                <th className="th w-px">
+                  <input
+                    type="checkbox"
+                    className="align-middle"
+                    checked={allSendableChecked}
+                    disabled={sendableIds.length === 0}
+                    onChange={(e) => setSelected(e.target.checked ? sendableIds : [])}
+                    title={
+                      sendableIds.length === 0
+                        ? "발송할 수 있는 행이 없습니다 (모두 발송완료)"
+                        : `보이는 ${sendableIds.length}명 전체 선택`
+                    }
+                  />
+                </th>
                 <SortTh label="직원" sortKey="name" sort={sort} onSort={toggle} />
                 <SortTh label="형태" sortKey="scheme" sort={sort} onSort={toggle} />
                 <th className="th">
@@ -907,6 +1008,24 @@ export default function PayrollClient({ today }: { today: string }) {
                         : "hover:bg-slate-50"
                   }
                 >
+                  {/* 발송된 기록은 잠겨 있어 고를 수 없다 — 고르게 두면 확인창에서야
+                      '제외됨' 으로 빠져 왜 안 갔는지 눌러 본 뒤에 알게 된다. */}
+                  <td className="td w-px">
+                    <input
+                      type="checkbox"
+                      className="align-middle"
+                      checked={selected.includes(r.id)}
+                      disabled={r.status === "SENT"}
+                      onChange={() => toggleRow(r.id)}
+                      title={
+                        r.status === "SENT"
+                          ? "이미 발송돼 잠긴 기록입니다 — «🔓 발송 잠금 해제» 를 먼저 거치세요"
+                          : r.employee.email
+                            ? `${r.employee.name} <${r.employee.email}>`
+                            : `${r.employee.name} — 메일 주소가 없어 발송되지 않습니다`
+                      }
+                    />
+                  </td>
                   <td className="td">
                     <div className="font-semibold whitespace-nowrap flex items-center gap-1.5">
                       <span className={resign === "RESIGNED" ? "text-rose-900" : undefined}>
@@ -1121,7 +1240,7 @@ export default function PayrollClient({ today }: { today: string }) {
                 </tr>
                 {openDedId === r.id && (
                   <tr>
-                    <td colSpan={8} className="bg-slate-50 border-t border-slate-100 px-4 py-3">
+                    <td colSpan={9} className="bg-slate-50 border-t border-slate-100 px-4 py-3">
                       <DeductionEditor rec={r} onSaved={async () => { setOpenDedId(null); await load(); }} onClose={() => setOpenDedId(null)} />
                     </td>
                   </tr>
@@ -1131,10 +1250,10 @@ export default function PayrollClient({ today }: { today: string }) {
               })}
             </tbody>
             {/* 소계 — 지금 보이는 행의 합. 스크롤해도 바닥에 붙어 금액 열 밑에 그대로 정렬된다.
-                열은 8개(직원·형태·변동입력·지급액·공제액·실수령·상태·명세서)라 3 + 3 + 2 로 나눈다. */}
+                열은 9개(선택·직원·형태·변동입력·지급액·공제액·실수령·상태·명세서)라 4 + 3 + 2 로 나눈다. */}
             <tfoot className="sticky-foot">
               <tr>
-                <td className="td" colSpan={3}>
+                <td className="td" colSpan={4}>
                   {dirty ? (
                     <>
                       <span className="text-brand-700">거른 {sorted.length}명 소계</span>

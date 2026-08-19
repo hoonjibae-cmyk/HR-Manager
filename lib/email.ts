@@ -2,6 +2,7 @@ import nodemailer, { type Transporter } from "nodemailer";
 import { prisma } from "./db";
 import { genPayslip } from "./doc-service";
 import { ymd } from "./format";
+import { planPayslipSend } from "./payslip-send";
 
 let _transporter: Transporter | null = null;
 
@@ -39,18 +40,39 @@ export async function sendTestEmail(to: string) {
  * 특정 월의 급여명세서를 대상 직원 이메일로 발송.
  * 이미 발송(SENT)된 기록은 제외 — 재클릭 시 중복 발송을 막고,
  * 발송 성공한 기록은 SENT 로 전환되어 자동 잠금(재계산·공제수정 불가)된다.
+ *
+ * `payrollIds` 를 주면 **그 기록만** 보낸다(급여 화면의 선택 발송). 한 사람만 정정본을
+ * 다시 보내거나, 메일 주소 오류로 실패한 건만 재시도할 때 쓴다 — 그때마다 전체 발송을
+ * 누르게 하면 잠금이 풀려 있는 다른 사람에게까지 다시 나간다.
+ *
+ * ⚠ **연·월 조건을 함께 건다** — id 만 믿으면 화면이 8월을 보고 있는데 7월 기록 id 가
+ * 넘어왔을 때 그대로 나간다. 대상 판정은 화면과 **같은 함수**(`planPayslipSend`)를 쓴다.
  */
-export async function sendPayslipsForMonth(year: number, month: number) {
+export async function sendPayslipsForMonth(
+  year: number,
+  month: number,
+  opts: { payrollIds?: number[] | null } = {}
+) {
   const t = getTransporter();
   if (!t) throw new Error("SMTP가 설정되지 않았습니다 (.env SMTP_HOST)");
 
-  const [recs, skippedSent] = await Promise.all([
-    prisma.payrollRecord.findMany({
-      where: { year, month, status: { not: "SENT" } },
-      include: { employee: true },
-    }),
-    prisma.payrollRecord.count({ where: { year, month, status: "SENT" } }),
-  ]);
+  const ids = opts.payrollIds ?? null;
+  // 빈 배열은 '아무도 안 고름' 이다 — 전체로 읽으면 실수가 전 직원 발송이 된다
+  if (ids && ids.length === 0)
+    return { sent: 0, failed: 0, total: 0, skippedSent: 0, skippedSentNames: [], noEmailNames: [], results: [] };
+
+  const all = await prisma.payrollRecord.findMany({
+    where: { year, month, ...(ids ? { id: { in: ids } } : {}) },
+    include: { employee: true },
+  });
+
+  const plan = planPayslipSend(
+    all.map((r) => ({ id: r.id, name: r.employee.name, email: r.employee.email, status: r.status }))
+  );
+  const sendable = new Set(plan.targets.map((r) => r.id));
+  // 메일 주소가 없는 건도 예전처럼 실패로 기록해 남긴다(조용히 빠지면 아무도 모른다)
+  const recs = all.filter((r) => sendable.has(r.id) || plan.noEmail.some((n) => n.id === r.id));
+  const skippedSent = plan.alreadySent.length;
 
   let sent = 0;
   let failed = 0;
@@ -116,5 +138,16 @@ export async function sendPayslipsForMonth(year: number, month: number) {
     }
   }
 
-  return { sent, failed, total: recs.length, skippedSent, results };
+  // **누가 빠졌는지 이름까지 돌려준다** — 인원수만 주면 화면이 "1건 제외" 라고만 적게 되고,
+  // 정정본을 다시 보내려던 사람이 잠겨서 빠진 것을 눌러 본 뒤에도 알 수 없다.
+  return {
+    sent,
+    failed,
+    total: recs.length,
+    skippedSent,
+    skippedSentNames: plan.alreadySent.map((r) => r.name),
+    noEmailNames: plan.noEmail.map((r) => r.name),
+    selective: !!ids,
+    results,
+  };
 }
