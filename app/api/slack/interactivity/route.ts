@@ -78,6 +78,7 @@ import {
 import { refreshHomeTab } from "@/lib/home-tab";
 import { createLeaveEvent, deleteLeaveEvent, gcalConfigured } from "@/lib/gcal";
 import { LEAVE_TYPE_LABEL } from "@/lib/constants";
+import { DEFAULT_DAILY_CHANNEL } from "@/lib/daily-brief";
 import { logActivity } from "@/lib/activity";
 import { ymd } from "@/lib/format";
 
@@ -413,16 +414,32 @@ export async function POST(req: Request) {
         : `${icon} ${what} 신청이 등록되었습니다 — ${dateLabel}`,
       blocks
     ).catch(() => {});
-    // 공유 채널이 지정돼 있으면 함께 게시 (승인 버튼 없음 — 기록용)
-    let meta: any = {};
-    try {
-      meta = JSON.parse(payload.view.private_metadata || "{}");
-    } catch {}
-    const channel = process.env.SLACK_MAKEUP_CHANNEL || meta.channel;
-    if (channel)
-      await postMessage(channel, `${icon} ${what} 신청: ${emp.name} · ${dateLabel}`, blocks).catch(
-        () => {}
-      );
+    // 공유 채널 게시 (승인 버튼 없음 — 기록용). **어느 채널이냐가 갈래로 갈린다**:
+    //  - 보강(교수부) → 보강계획 채널(SLACK_MAKEUP_CHANNEL). 수업 이야기라 그 채널이 맞다.
+    //  - 직원 근무(주말·평일 초과) → **운영진 채널**. 보강계획 채널은 교수부가 보는 곳이라
+    //    직원 근무가 섞이면 보강이 안 읽히고, 정작 챙겨야 할 운영진은 못 본다.
+    //    채널은 '운영진 일일 안내' 와 같은 설정(HrNotifySetting.dailyChannel)을 쓴다 —
+    //    받는 사람이 같은데 채널 설정을 둘로 두면 언젠가 한쪽만 옮기고 갈라진다.
+    if (staff) {
+      const setting = await prisma.hrNotifySetting
+        .findUnique({ where: { id: 1 }, select: { dailyChannel: true } })
+        .catch(() => null);
+      const ops = (setting ? setting.dailyChannel : DEFAULT_DAILY_CHANNEL)?.trim();
+      if (ops)
+        await postMessage(ops, `${icon} ${what} 등록: ${emp.name} · ${dateLabel}`, blocks).catch(
+          () => {}
+        );
+    } else {
+      let meta: any = {};
+      try {
+        meta = JSON.parse(payload.view.private_metadata || "{}");
+      } catch {}
+      const channel = process.env.SLACK_MAKEUP_CHANNEL || meta.channel;
+      if (channel)
+        await postMessage(channel, `${icon} ${what} 신청: ${emp.name} · ${dateLabel}`, blocks).catch(
+          () => {}
+        );
+    }
 
     await logActivity({
       action: "MAKEUP_CREATE",
