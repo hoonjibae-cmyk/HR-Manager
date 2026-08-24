@@ -166,7 +166,11 @@ export default function MakeupPolicyPanel({
             {check("직전보강", "immediateDefault", "토·일·공휴일 근무만 자동 반영")}
             {check("내신의무보강 (상한 적용)", "mandatoryDefault", "토·일·공휴일 근무만 자동 반영")}
             {check("결시보강", "absenceDefault", "끄면 관리자가 건건이 판단합니다 (권장)")}
-            {check("주말근무", "weekendDefault", "교수부가 아닌 직원의 주말 근무 신청")}
+            {check(
+              "주말근무 · 평일 초과근무",
+              "weekendDefault",
+              "교수부가 아닌 직원의 근무 신청 — 소정근로시간 밖의 시간만 수당으로 잡힙니다"
+            )}
             {check("기타", "otherDefault")}
           </div>
           <p className="text-[11px] text-slate-400 leading-relaxed">

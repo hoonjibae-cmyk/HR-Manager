@@ -113,7 +113,7 @@ export async function makeupListBlocks(
     policyForList(),
     holidaysForList(),
   ]);
-  const title = `*${name}님의 보강 · 주말근무 내역*`;
+  const title = `*${name}님의 보강 · 주말·초과근무 내역*`;
   if (!rows.length) {
     const text = `${title}\n\n_최근 두 달 안에 등록된 신청이 없습니다._\n\`/보강\` 으로 새로 신청할 수 있습니다.`;
     return { text, blocks: [{ type: "section", text: { type: "mrkdwn", text } }] };

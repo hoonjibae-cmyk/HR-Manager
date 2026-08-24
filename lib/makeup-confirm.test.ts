@@ -11,6 +11,7 @@ import {
   type ConfirmableSession,
   canSelfCancel,
   cancelNotice,
+  canPostHocConfirm,
 } from "./makeup-confirm";
 
 /** KST 벽시계 값을 UTC 필드에 담는 앱 규칙 그대로 */
@@ -115,6 +116,66 @@ describe("canSelfConfirm", () => {
       actualEnd: t("2026-08-15T15:00:00"),
     });
     expect(canSelfConfirm(s, t("2026-08-20T09:00:00")).ok).toBe(true);
+  });
+});
+
+describe("canPostHocConfirm — 사후 등록 즉시 확정", () => {
+  /*
+   * 평일 초과근무는 미리 예측할 수 없어 근무가 끝난 뒤 등록하는 것이 정상 경로다.
+   * 여기서 틀리면 ① 당일 밤 사후 등록이 '아직 안 끝났다' 로 막히거나(9시간 시차)
+   * ② 마감 지난 달에 조용히 확정돼 '확정했는데 수당이 없다' 가 된다.
+   */
+  const kstNow = t("2026-08-17T22:30:00"); // 월요일 밤
+
+  it("근무가 끝났고 마감 전이면 바로 확정할 수 있다", () => {
+    // 오늘 18~21시 근무를 22:30 에 등록 — confirmOpensAt(다음날 00:00) 전이지만 열린다
+    const s1 = session({
+      planStart: t("2026-08-17T18:00:00"),
+      planEnd: t("2026-08-17T21:00:00"),
+      category: "OVERTIME",
+    });
+    expect(canSelfConfirm(s1, kstNow).ok).toBe(false); // 기존 규칙으로는 내일부터
+    expect(canPostHocConfirm(s1, kstNow).ok).toBe(true); // 사후 등록은 지금
+  });
+
+  it("근무가 아직 안 끝났으면 확정할 수 없다 (예정 등록으로 남는다)", () => {
+    const s1 = session({
+      planStart: t("2026-08-17T21:00:00"),
+      planEnd: t("2026-08-17T23:30:00"),
+      category: "OVERTIME",
+    });
+    expect(canPostHocConfirm(s1, kstNow).ok).toBe(false);
+  });
+
+  // 마감 지난 달을 조용히 확정하면 급여에 닿지 않는 확정이 된다 — 관리자에게 넘긴다
+  it("**그 달 급여 마감(다음 달 1일)이 지났으면 확정하지 않고 관리자 안내를 준다**", () => {
+    const july = session({
+      planStart: t("2026-07-20T18:00:00"),
+      planEnd: t("2026-07-20T21:00:00"),
+      category: "OVERTIME",
+    });
+    const v = canPostHocConfirm(july, kstNow); // 8/17 — 7월 마감(8/1)은 지났다
+    expect(v.ok).toBe(false);
+    expect(v.reason).toContain("관리자");
+  });
+
+  it("이미 처리된 건(확정·취소·미실시)은 다시 확정하지 않는다", () => {
+    for (const status of ["CONFIRMED", "CANCELED", "NOSHOW"])
+      expect(
+        canPostHocConfirm(
+          session({ status, planStart: t("2026-08-17T18:00:00"), planEnd: t("2026-08-17T21:00:00") }),
+          kstNow
+        ).ok
+      ).toBe(false);
+  });
+
+  it("전날 근무를 다음날 등록해도 열린다 (가장 흔한 경우)", () => {
+    const s1 = session({
+      planStart: t("2026-08-16T18:00:00"),
+      planEnd: t("2026-08-16T22:00:00"),
+      category: "OVERTIME",
+    });
+    expect(canPostHocConfirm(s1, kstNow).ok).toBe(true);
   });
 });
 

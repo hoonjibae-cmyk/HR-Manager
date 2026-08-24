@@ -8,7 +8,7 @@ import {
   MAKEUP_CATEGORY_LABEL,
   MAKEUP_STATUS_LABEL,
   isContractorContract,
-  isWeekendWork,
+  isStaffWork,
   makeupKindLabel,
 } from "./constants";
 import {
@@ -33,6 +33,7 @@ import {
 } from "./overtime";
 import {
   canSelfConfirm,
+  canPostHocConfirm,
   canSelfCancel,
   mandatoryCapNotice,
   underMandatoryCap,
@@ -327,8 +328,9 @@ export async function syncMakeupCalendar(sessionId: number): Promise<string | nu
   if (!r) return null;
 
   // 취소·미실시는 캘린더에서 내린다 (실제로 하지 않은 수업이 남아 있으면 안 된다).
-  // 주말근무도 마찬가지 — 보강으로 넣었다가 주말근무로 바꾼 건이면 이미 올라간 일정을 내린다.
-  if (r.status === "CANCELED" || r.status === "NOSHOW" || isWeekendWork(r.category)) {
+  // 직원 근무(주말·평일 초과근무)도 마찬가지 — 보강을 보려고 보는 달력이다.
+  // 보강으로 넣었다가 직원 근무로 바꾼 건이면 이미 올라간 일정을 내린다.
+  if (r.status === "CANCELED" || r.status === "NOSHOW" || isStaffWork(r.category)) {
     if (r.gcalEventId) {
       await deleteMakeupEvent(r.gcalEventId);
       await prisma.makeupSession.update({ where: { id: r.id }, data: { gcalEventId: null } });
@@ -489,6 +491,13 @@ export interface ConfirmActualsInput {
   by: "EMPLOYEE" | "ADMIN";
   note?: string | null;
   now?: Date;
+  /**
+   * **사후 등록 즉시 확정** — 이미 끝난 근무를 등록하면서 그 시간을 바로 확정하는 경로.
+   * `canSelfConfirm`(다음날부터) 대신 `canPostHocConfirm`(근무가 끝났고 마감 전)으로 판정한다 —
+   * 사후 등록에는 베낄 '예정' 이 없어서 다음날까지 기다리게 할 이유가 없다.
+   * ⚠ 이때 `now` 는 KST 벽시계 값이어야 한다(canPostHocConfirm 의 규칙).
+   */
+  postHoc?: boolean;
 }
 
 export interface ConfirmActualsResult {
@@ -521,7 +530,9 @@ export async function confirmMakeupActuals(
     // 옛 메시지에 남은 버튼을 눌러도 여기서 막힌다(목록이 버튼을 안 그리는 것만으로는 부족하다).
     const [pol, hol] = await Promise.all([getOvertimePolicy(), holidayYmds()]);
     if (!isPayEligible(before, pol, hol)) throw new Error(NOT_PAYABLE_NOTICE);
-    const v = canSelfConfirm(before as unknown as ConfirmableSession, input.now ?? new Date());
+    const v = input.postHoc
+      ? canPostHocConfirm(before as unknown as ConfirmableSession, input.now ?? new Date())
+      : canSelfConfirm(before as unknown as ConfirmableSession, input.now ?? new Date());
     if (!v.ok) throw new Error(v.reason ?? "지금은 확정할 수 없습니다.");
   }
 
@@ -857,7 +868,7 @@ export async function makeupMonth(year: number, month: number) {
       actualStart: r.actualStart?.toISOString() ?? null,
       actualEnd: r.actualEnd?.toISOString() ?? null,
       hasGcal: !!r.gcalEventId,
-      weekend: isWeekendWork(r.category),
+      weekend: isStaffWork(r.category),
       confirmedBy: r.confirmedBy,
       confirmNotifiedAt: r.confirmNotifiedAt?.toISOString() ?? null,
       /** 수당 대상인가 — 신청자 확정이 열리는지, 확정 요청을 보낼 수 있는지가 여기서 갈린다 */

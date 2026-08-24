@@ -244,6 +244,10 @@ export function categoryDefault(
       case "ABSENCE":
         return p.absenceDefault;
       case "WEEKEND":
+      // 평일 초과근무(직원)도 주말근무와 같은 스위치 — 성질이 같다(실제로 나와 일한 것).
+      // 소정근로시간 안의 시간은 어차피 엔진이 세지 않으므로(computeOvertime ③)
+      // 기본 반영이어도 소정 안 근무가 수당이 되지는 않는다.
+      case "OVERTIME":
         return p.weekendDefault;
       default:
         return p.otherDefault;

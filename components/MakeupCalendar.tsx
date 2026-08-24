@@ -232,8 +232,8 @@ export default function MakeupCalendar({
                           className={`w-full text-left rounded px-1.5 py-0.5 text-[11px] leading-tight truncate hover:brightness-95 ${chipTone(r)}`}
                           title={`${r.name} · ${MAKEUP_CATEGORY_LABEL[r.category]} · ${r.targetClass}`}
                         >
-                          {/* 주말근무는 보강이 아니다 — 달력에서 한눈에 갈라 보이게 표시한다 */}
-                          {r.weekend && <span title="주말근무">🗓 </span>}
+                          {/* 직원 근무(주말·평일 초과)는 보강이 아니다 — 달력에서 한눈에 갈라 보이게 표시한다 */}
+                          {r.weekend && <span title={MAKEUP_CATEGORY_LABEL[r.category] ?? "직원 근무"}>🗓 </span>}
                           <span className="font-semibold">{r.name}</span>{" "}
                           <span className="tnum">{r.startTime}</span>
                           {r.status === "CONFIRMED" && r.countedHours > 0 && (
@@ -393,7 +393,7 @@ function DetailModal({
   }
 
   async function remove() {
-    const what = row.weekend ? "주말근무" : "보강";
+    const what = row.weekend ? MAKEUP_CATEGORY_LABEL[row.category] ?? "근무" : "보강";
     const also = row.weekend ? "" : " 보강캘린더 일정도 함께 삭제됩니다.";
     if (!confirm(`이 ${what} 신청을 삭제할까요?${also}`)) return;
     setBusy(true);

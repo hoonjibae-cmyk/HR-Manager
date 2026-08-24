@@ -459,6 +459,20 @@ describe("주말근무 — 보강과 같은 원장, 기본 반영", () => {
     expect(categoryDefault("NOPE", DEFAULT_OT_POLICY)).toBe(false);
   });
 
+  /*
+   * 평일 초과근무(직원) — 주말근무와 같은 스위치(weekendDefault)를 쓴다. 성질이 같다
+   * (실제로 나와 일한 것). 소정 안 근무는 어차피 엔진이 세지 않으므로 기본 반영이어도
+   * 소정근로시간이 수당으로 새지 않는다.
+   */
+  it("**평일 초과근무(OVERTIME)도 기본 반영이다** — 주말근무와 같은 스위치", () => {
+    expect(categoryDefault("OVERTIME", DEFAULT_OT_POLICY)).toBe(true);
+    expect(
+      categoryDefault("OVERTIME", { ...DEFAULT_OT_POLICY, weekendDefault: false })
+    ).toBe(false);
+    // 평일이라고 강등되지 않는다 — 강등 규칙은 직전·내신보강에만 붙는다
+    expect(categoryDefault("OVERTIME", DEFAULT_OT_POLICY, { premiumDay: false })).toBe(true);
+  });
+
   it("일요일 주말근무는 휴일근로로 ×1.5 가 붙는다", () => {
     const r = computeOvertime({
       sessions: [

@@ -114,6 +114,36 @@ export function canSelfConfirm(s: ConfirmableSession, now: Date): SelfConfirmVer
 }
 
 /**
+ * **사후 등록 즉시 확정** — 이미 끝난 근무를 등록하는 순간 그 시간을 실근무로 확정할 수 있는가.
+ *
+ * 평일 초과근무는 미리 예측해 사전신청하기 어렵다 — 늦게까지 남을지는 그날 일이 정한다.
+ * 그래서 직원 근무(주말·초과근무)는 **근무가 끝난 뒤에 등록하는 것을 정상 경로로** 두고,
+ * 그때 적은 시간이 곧 실근무 시간이므로 다음날 확정 모달을 또 열게 하지 않는다
+ * (같은 숫자를 두 번 적게 하는 것은 순수한 헛걸음이고, 그 사이에 놓치면 수당이 사라진다).
+ *
+ * `confirmOpensAt`(다음날 00:00)을 따르지 않는 이유: 그 규칙은 **미리 잡아 둔 신청**이
+ * 근무 중에 '예정' 을 베껴 확정하는 것을 막는 자리다. 사후 등록은 이미 끝난 근무를
+ * 그때 적는 것이라 베낄 '예정' 자체가 없다.
+ *
+ * ⚠ `now` 는 **KST 벽시계 값**이어야 한다(저장된 planEnd 와 같은 표기). 진짜 UTC 를 넘기면
+ * 근무가 끝나고도 9시간 동안 '아직 안 끝났다' 로 읽혀 당일 밤 사후 등록이 막힌다.
+ */
+export function canPostHocConfirm(s: ConfirmableSession, kstNow: Date): SelfCancelVerdict {
+  if (s.status !== "PLANNED") return { ok: false, reason: "이미 처리된 건입니다." };
+  const w = workWindow(s as unknown as OtSession);
+  if (kstNow < w.end) return { ok: false, reason: "근무가 아직 끝나지 않았습니다." };
+  const closesAt = confirmClosesAt(s);
+  if (kstNow > closesAt)
+    return {
+      ok: false,
+      reason:
+        `그 달 급여 마감(${dateLabel(closesAt)})이 지나 바로 확정할 수 없습니다. ` +
+        `등록은 되었으니 관리자에게 알려 주세요 — 해당 월 명세서가 이미 나갔으면 정정 절차가 필요합니다.`,
+    };
+  return { ok: true };
+}
+
+/**
  * 확정 화면에 항상 띄우는 안내 — **입력한 시간이 곧 수당이다**.
  *
  * 예정 시각을 그대로 확정 버튼만 누르는 일을 막으려는 문구다. 늘리라는 것도

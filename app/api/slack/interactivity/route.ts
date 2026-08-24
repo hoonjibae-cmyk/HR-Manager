@@ -49,12 +49,12 @@ import {
   cancelNotice,
   NOT_PAYABLE_NOTICE,
 } from "@/lib/makeup-confirm";
-import { sessionHours, workWindow, isPayEligible } from "@/lib/overtime";
+import { sessionHours, workWindow, isPayEligible, isPremiumDay } from "@/lib/overtime";
 import { makeupCalendarConfigured } from "@/lib/gcal";
 import {
   MAKEUP_CATEGORY_LABEL,
   isContractorContract,
-  isWeekendWork,
+  isStaffWork,
   makeupKindLabel,
 } from "@/lib/constants";
 import {
@@ -324,11 +324,22 @@ export async function POST(req: Request) {
       });
     }
 
+    // 직원 입구(주말·초과근무)는 카테고리를 **근무 날짜로 자동 판정**한다 — 토·일·공휴일이면
+    // 주말근무, 평일이면 평일 초과근무. 신청자가 고르게 하면 틀리고, 날짜에서 유도되는 값이다.
+    // 자정을 넘긴 근무는 시작한 날 기준(엔진의 workDateOf 와 같은 규칙).
+    let category = f.category;
+    if (isStaffWork(category)) {
+      const hol = await holidayYmds();
+      category = isPremiumDay(parsed.start!.toISOString().slice(0, 10), hol)
+        ? "WEEKEND"
+        : "OVERTIME";
+    }
+
     const row = await createMakeupSession({
       employeeId: emp.id,
       planStart: parsed.start!,
       planEnd: parsed.end!,
-      category: f.category,
+      category,
       targetClass: f.targetClass,
       headcount: f.headcount,
       detail: f.detail,
@@ -337,32 +348,71 @@ export async function POST(req: Request) {
       slackUserId: userId,
     });
 
-    const weekend = isWeekendWork(f.category);
-    const what = makeupKindLabel(f.category);
-    const icon = weekend ? "🗓" : "📚";
+    const staff = isStaffWork(category);
+    const what = makeupKindLabel(category);
+    const icon = staff ? "🗓" : "📚";
     const dateLabel = makeupDateLabel(parsed.start!, parsed.end!);
+
+    // **직원 근무의 사후 등록은 등록 즉시 확정한다** — 이미 끝난 근무를 적는 것이라 그 시간이
+    // 곧 실근무 시간이고, 다음날 확정 모달에 같은 숫자를 또 적게 할 이유가 없다.
+    // 저장 시각은 KST 벽시계라 비교용 now 도 KST 벽시계로 만든다.
+    // 마감(다음 달 1일)이 지났거나 수당 대상이 아니면 확정하지 않고 신청으로만 남긴다 —
+    // 그쪽은 관리자 판단 흐름 그대로다(canPostHocConfirm / isPayEligible 이 가른다).
+    let confirmedNow = false;
+    let postHocFailNote: string | null = null;
+    if (staff) {
+      const kstNow = new Date(Date.now() + 9 * 3600_000);
+      if (parsed.end! <= kstNow) {
+        try {
+          await confirmMakeupActuals(row.id, {
+            actualStart: parsed.start!,
+            actualEnd: parsed.end!,
+            by: "EMPLOYEE",
+            postHoc: true,
+            now: kstNow,
+          });
+          confirmedNow = true;
+        } catch (e: any) {
+          // 마감 지남 등 — 등록은 그대로 두고 왜 확정이 안 됐는지 알린다.
+          // 조용히 넘어가면 '등록했는데 왜 수당이 없냐' 가 된다.
+          postHocFailNote = String(e?.message ?? e);
+        }
+      }
+    }
+
     const opensAt = confirmOpensAt(row as any);
     const blocks = makeupRecordBlocks({
       name: emp.name,
       dept: emp.department,
-      categoryLabel: MAKEUP_CATEGORY_LABEL[f.category] ?? f.category,
+      categoryLabel: MAKEUP_CATEGORY_LABEL[category] ?? category,
       dateLabel,
       targetClass: f.targetClass,
       headcount: f.headcount,
       detail: f.detail,
       note: f.note,
       calendarSynced: makeupCalendarConfigured(),
-      weekend,
+      weekend: staff,
+      kindLabel: what,
+      confirmedNow,
       confirmOpensLabel: `${opensAt.getUTCFullYear()}.${String(opensAt.getUTCMonth() + 1).padStart(
         2,
         "0"
       )}.${String(opensAt.getUTCDate()).padStart(2, "0")}`,
     });
+    if (postHocFailNote)
+      blocks.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: `⚠️ ${postHocFailNote}` }],
+      });
 
     // 신청자 확인 DM
-    await postMessage(userId, `${icon} ${what} 신청이 등록되었습니다 — ${dateLabel}`, blocks).catch(
-      () => {}
-    );
+    await postMessage(
+      userId,
+      confirmedNow
+        ? `${icon} ${what}가(이) 등록·확정되었습니다 — ${dateLabel}`
+        : `${icon} ${what} 신청이 등록되었습니다 — ${dateLabel}`,
+      blocks
+    ).catch(() => {});
     // 공유 채널이 지정돼 있으면 함께 게시 (승인 버튼 없음 — 기록용)
     let meta: any = {};
     try {
@@ -380,10 +430,14 @@ export async function POST(req: Request) {
       actorName: userId,
       employeeId: emp.id,
       target: emp.name,
-      summary: `${emp.name}님이 ${what}을 사전신청했습니다 — ${dateLabel} · ${
-        MAKEUP_CATEGORY_LABEL[f.category] ?? f.category
-      } (${f.targetClass}).`,
-      meta: { makeupId: row.id, category: f.category, targetClass: f.targetClass },
+      summary: confirmedNow
+        ? `${emp.name}님이 ${what}를 사후 등록했습니다(즉시 확정) — ${dateLabel} · ${
+            MAKEUP_CATEGORY_LABEL[category] ?? category
+          } (${f.targetClass}).`
+        : `${emp.name}님이 ${what}을 사전신청했습니다 — ${dateLabel} · ${
+            MAKEUP_CATEGORY_LABEL[category] ?? category
+          } (${f.targetClass}).`,
+      meta: { makeupId: row.id, category, confirmedNow, targetClass: f.targetClass },
     }).catch(() => {});
 
     await refreshHomeTab(userId).catch(() => {});

@@ -200,7 +200,8 @@ export const MAKEUP_CATEGORY = {
   MANDATORY: "MANDATORY", // 내신의무보강 — 내신기간당 상한(기본 10시간)까지만
   ABSENCE: "ABSENCE", // 결시보강 — 관리자가 건건이 판단
   OTHER: "OTHER", // 기타 보강/근무
-  WEEKEND: "WEEKEND", // 주말근무 — 교수부가 아닌 직원의 주말 근무 신청
+  WEEKEND: "WEEKEND", // 주말근무 — 교수부가 아닌 직원의 토·일·공휴일 근무
+  OVERTIME: "OVERTIME", // 평일 초과근무 — 교수부가 아닌 직원의 평일 늦은 근무 (사후 등록이 보통)
 } as const;
 export type MakeupCategory = keyof typeof MAKEUP_CATEGORY;
 
@@ -210,19 +211,32 @@ export const MAKEUP_CATEGORY_LABEL: Record<string, string> = {
   ABSENCE: "결시보강",
   OTHER: "기타",
   WEEKEND: "주말근무",
+  OVERTIME: "평일 초과근무",
 };
 
 /**
- * 주말근무 신청인가 — **보강이 아니다**.
- * 구글 보강캘린더에는 보강만 올리고, 신청·확정 화면의 문구도 여기서 갈린다
- * (대상반/수강인원은 보강의 개념이라 주말근무에는 묻지 않는다).
+ * 직원(비교수부) 근무 신청인가 — **보강이 아니다**.
+ *
+ * 주말근무와 평일 초과근무는 같은 입구(슬랙 «주말·초과근무 신청»)로 들어오고
+ * **근무 날짜가 토·일·공휴일인지로만 갈린다** — 신청자가 고르는 값이 아니다.
+ * 구글 보강캘린더에는 보강만 올리고, 대상반/수강인원 대신 담당 업무를 묻는 것도 이 갈래다.
+ */
+export function isStaffWork(category: string | null | undefined): boolean {
+  return category === MAKEUP_CATEGORY.WEEKEND || category === MAKEUP_CATEGORY.OVERTIME;
+}
+
+/**
+ * 주말근무 신청인가.
+ * ⚠ 캘린더 제외·모달 갈래처럼 '보강이냐 직원 근무냐' 를 가르는 자리는 이게 아니라
+ * `isStaffWork()` 를 쓴다 — 여기에 걸면 평일 초과근무가 보강으로 잘못 분류된다.
  */
 export function isWeekendWork(category: string | null | undefined): boolean {
   return category === MAKEUP_CATEGORY.WEEKEND;
 }
 
-/** 신청 종류에 따른 화면 명칭 — "보강" / "주말근무" */
+/** 신청 종류에 따른 화면 명칭 — "보강" / "주말근무" / "초과근무" */
 export function makeupKindLabel(category: string | null | undefined): string {
+  if (category === MAKEUP_CATEGORY.OVERTIME) return "초과근무";
   return isWeekendWork(category) ? "주말근무" : "보강";
 }
 

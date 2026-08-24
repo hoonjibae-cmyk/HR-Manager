@@ -250,11 +250,12 @@ describe("makeupModalView — 보강/주말근무 두 갈래", () => {
     expect(JSON.stringify(v)).toContain("대상반");
   });
 
-  it("주말근무 양식은 보강 종류·수강인원을 묻지 않는다", () => {
+  it("직원 근무 양식은 보강 종류·수강인원을 묻지 않는다", () => {
     const v = makeupModalView({ empName: "박조교", kind: "WEEKEND" });
     expect(blockIds(v)).toEqual(["sdate", "stime", "edate", "etime", "target", "detail", "note"]);
     expect(JSON.stringify(v)).toContain("어떤 업무인가요?");
-    expect(v.title.text).toBe("주말근무 사전신청");
+    // 평일 초과근무도 같은 입구다 — 제목이 '주말' 로만 읽히면 평일 사후 등록 길을 아무도 모른다
+    expect(v.title.text).toBe("주말·초과근무 신청");
   });
 
   it("어느 입구였는지는 private_metadata 에 담긴다 (제출값에 종류 칸이 없다)", () => {
@@ -262,9 +263,20 @@ describe("makeupModalView — 보강/주말근무 두 갈래", () => {
     expect(JSON.parse(v.private_metadata)).toEqual({ channel: "C1", kind: "WEEKEND" });
   });
 
-  it("두 양식 모두 '다음날부터 직접 확정' 을 안내한다", () => {
-    for (const kind of ["MAKEUP", "WEEKEND"] as const)
-      expect(JSON.stringify(makeupModalView({ empName: "김지연", kind }))).toContain("다음날부터");
+  it("보강 양식은 '다음날부터 직접 확정' 을 안내한다", () => {
+    expect(JSON.stringify(makeupModalView({ empName: "김지연", kind: "MAKEUP" }))).toContain(
+      "다음날부터"
+    );
+  });
+
+  /*
+   * 평일 초과근무는 미리 예측할 수 없어 **사후 등록이 정상 경로**다. 그 길이 있다는 것을
+   * 양식이 직접 말해 주지 않으면, 사전신청만 되는 줄 알고 아예 등록하지 않는다.
+   */
+  it("**직원 근무 양식은 사후 등록 즉시 확정을 안내한다**", () => {
+    const t = JSON.stringify(makeupModalView({ empName: "박조교", kind: "WEEKEND" }));
+    expect(t).toContain("이미 끝난 근무");
+    expect(t).toContain("날짜로 자동 구분");
   });
 });
 

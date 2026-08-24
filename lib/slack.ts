@@ -423,7 +423,7 @@ export function makeupLauncherBlocks(companyName = "유쌤에듀") {
         },
         {
           type: "button",
-          text: { type: "plain_text", text: "주말근무 신청", emoji: true },
+          text: { type: "plain_text", text: "주말·초과근무 신청", emoji: true },
           action_id: "open_weekend_modal",
         },
         {
@@ -511,7 +511,7 @@ export function homeTabView(ctx: {
         },
         {
           type: "button",
-          text: { type: "plain_text", text: "주말근무 신청", emoji: true },
+          text: { type: "plain_text", text: "주말·초과근무 신청", emoji: true },
           action_id: "open_weekend_modal",
         },
         {
@@ -699,32 +699,42 @@ export function makeupModalView(ctx: {
   kind?: "MAKEUP" | "WEEKEND";
 }) {
   const weekend = ctx.kind === "WEEKEND";
-  const what = weekend ? "주말근무" : "보강";
+  const what = weekend ? "근무" : "보강";
   const notice = ctx.ratio
     ? "\n\n_※ 완전비율제(위탁) 계약은 오버타임 수당 대상이 아닙니다. 일정 공유 목적으로만 등록됩니다._"
     : "";
+  // 직원 근무는 **사후 등록이 정상 경로**다 — 평일에 늦게까지 남을지는 그날 일이 정하는 것이라
+  // 미리 신청할 수 없다. 이미 끝난 근무를 등록하면 적은 시간이 그대로 실근무로 확정된다.
+  const guide = weekend
+    ? `주말·공휴일 근무와 평일 초과근무 모두 여기서 등록합니다(날짜로 자동 구분됩니다). ` +
+      `승인 절차 없이 바로 등록됩니다.\n` +
+      `• *예정 근무*: 미리 등록해 두고, 근무가 끝난 다음날 실근무 시간을 확정해 주세요.\n` +
+      `• *이미 끝난 근무*: 지금 등록하면 적어 주신 시간이 *그대로 실근무 시간으로 확정*됩니다 — ` +
+      `실제로 근무한 시간을 있는 그대로 적어 주세요.`
+    : `승인 절차 없이 바로 등록됩니다. ` +
+      `*보강이 끝난 다음날부터* 실근무 시간을 직접 확정해 주시면 그 시간으로 수당이 산정됩니다.`;
   const blocks: any[] = [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text:
-          `*${ctx.empName}* 님\n승인 절차 없이 바로 등록됩니다. ` +
-          `*${what}이 끝난 다음날부터* 실근무 시간을 직접 확정해 주시면 그 시간으로 수당이 산정됩니다.` +
-          notice,
+        text: `*${ctx.empName}* 님\n` + guide + notice,
       },
     },
     { type: "divider" },
     {
       type: "input",
       block_id: "sdate",
-      label: { type: "plain_text", text: `${what} 시작 날짜(예정)` },
+      label: { type: "plain_text", text: weekend ? "근무 시작 날짜" : `${what} 시작 날짜(예정)` },
+      ...(weekend
+        ? { hint: { type: "plain_text", text: "지난 날짜를 고르면 사후 등록됩니다." } }
+        : {}),
       element: { type: "datepicker", action_id: "v" },
     },
     {
       type: "input",
       block_id: "stime",
-      label: { type: "plain_text", text: `${what} 시작 시간(예정)` },
+      label: { type: "plain_text", text: weekend ? "근무 시작 시간" : `${what} 시작 시간(예정)` },
       hint: { type: "plain_text", text: "시간대: 서울" },
       element: { type: "timepicker", action_id: "v" },
     },
@@ -732,15 +742,20 @@ export function makeupModalView(ctx: {
       type: "input",
       block_id: "edate",
       optional: true,
-      label: { type: "plain_text", text: `${what} 종료 날짜(예정)` },
+      label: { type: "plain_text", text: weekend ? "근무 종료 날짜" : `${what} 종료 날짜(예정)` },
       hint: { type: "plain_text", text: "같은 날 끝나면 비워 두세요." },
       element: { type: "datepicker", action_id: "v" },
     },
     {
       type: "input",
       block_id: "etime",
-      label: { type: "plain_text", text: `${what} 종료 시간(예정)` },
-      hint: { type: "plain_text", text: "끝나는 시간이 미정인 경우에도 예상 시간은 기입해주세요." },
+      label: { type: "plain_text", text: weekend ? "근무 종료 시간" : `${what} 종료 시간(예정)` },
+      hint: {
+        type: "plain_text",
+        text: weekend
+          ? "이미 끝난 근무면 실제로 끝난 시간을 적어 주세요."
+          : "끝나는 시간이 미정인 경우에도 예상 시간은 기입해주세요.",
+      },
       element: { type: "timepicker", action_id: "v" },
     },
   ];
@@ -832,7 +847,7 @@ export function makeupModalView(ctx: {
     callback_id: "makeup_plan_submit",
     // 어떤 입구로 들어왔는지는 제출값이 아니라 여기에 담는다 (주말근무는 종류 선택칸이 없다)
     private_metadata: JSON.stringify({ channel: ctx.channel ?? "", kind: weekend ? "WEEKEND" : "MAKEUP" }),
-    title: { type: "plain_text", text: weekend ? "주말근무 사전신청" : "보강계획 사전신청" },
+    title: { type: "plain_text", text: weekend ? "주말·초과근무 신청" : "보강계획 사전신청" },
     submit: { type: "plain_text", text: "제출" },
     close: { type: "plain_text", text: "닫기" },
     blocks,
@@ -884,12 +899,16 @@ export function makeupRecordBlocks(args: {
   detail?: string | null;
   note?: string | null;
   calendarSynced?: boolean;
-  /** 주말근무면 문구가 갈린다 (보강캘린더에 올라가지 않는다) */
+  /** 직원 근무(주말·평일 초과)면 문구가 갈린다 (보강캘린더에 올라가지 않는다) */
   weekend?: boolean;
   /** 실근무 확정이 열리는 날 — "2026.08.16" */
   confirmOpensLabel?: string;
+  /** 사후 등록으로 **이미 확정까지 끝난** 건 — 안내문이 갈린다 */
+  confirmedNow?: boolean;
+  /** 화면 명칭 — "주말근무"/"초과근무"/"보강". 없으면 weekend 플래그로 정한다 */
+  kindLabel?: string;
 }) {
-  const what = args.weekend ? "주말근무" : "보강";
+  const what = args.kindLabel ?? (args.weekend ? "주말근무" : "보강");
   const fields = [
     `*${args.weekend ? "구분" : "보강종류"}*\n${args.categoryLabel}`,
     `*일시*\n${args.dateLabel}`,
@@ -901,9 +920,9 @@ export function makeupRecordBlocks(args: {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `${args.weekend ? "🗓" : "📚"} *${what} 신청이 등록되었습니다* — ${args.name}${
-          args.dept ? ` (${args.dept})` : ""
-        }`,
+        text: `${args.weekend ? "🗓" : "📚"} *${what}${
+          args.confirmedNow ? "가(이) 등록·확정되었습니다" : " 신청이 등록되었습니다"
+        }* — ${args.name}${args.dept ? ` (${args.dept})` : ""}`,
       },
     },
     { type: "section", fields: fields.map((text) => ({ type: "mrkdwn", text })) },
@@ -920,11 +939,15 @@ export function makeupRecordBlocks(args: {
     elements: [
       {
         type: "mrkdwn",
-        text:
-          (!args.weekend && args.calendarSynced ? "보강캘린더에 등록되었습니다. " : "") +
-          `${what}이 끝난 다음날${
-            args.confirmOpensLabel ? `(${args.confirmOpensLabel})` : ""
-          }부터 실근무 시간을 직접 확정해 주세요. 확정한 시간으로 수당이 산정됩니다.`,
+        text: args.confirmedNow
+          ? // 이미 끝난 근무의 사후 등록 — 적은 시간이 그대로 실근무로 확정됐다.
+            // "다음날부터 확정해 주세요" 를 그대로 내보내면 없는 할 일을 시키는 셈이다.
+            `이미 끝난 근무라 적어 주신 시간이 *실근무 시간으로 바로 확정*되었습니다. ` +
+            `이 시간으로 수당이 산정됩니다. 잘못 적었다면 급여 마감 전까지 «내 신청 내역»에서 고칠 수 있습니다.`
+          : (!args.weekend && args.calendarSynced ? "보강캘린더에 등록되었습니다. " : "") +
+            `${what}이 끝난 다음날${
+              args.confirmOpensLabel ? `(${args.confirmOpensLabel})` : ""
+            }부터 실근무 시간을 직접 확정해 주세요. 확정한 시간으로 수당이 산정됩니다.`,
       },
     ],
   });
