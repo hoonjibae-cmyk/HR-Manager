@@ -21,6 +21,9 @@ export interface LeaveRow {
   name: string;
   department: string | null;
   position: string | null;
+  /** 재직 여부 — 퇴직자도 명단에 실리고 재직상태 필터로 가른다 */
+  active: boolean;
+  resignDate: string | null;
   /** 법정 연차 발생 대상인가 */
   eligible: boolean;
   /** 계약에서 미적용으로 못박았는지 (근로시간 자동 판정과 구분해 보여주기 위함) */
@@ -59,8 +62,12 @@ function pick(r: LeaveRow, key: string): any {
 }
 
 /** 브라우저에 기억해 두는 필터 — 다음에 들어와도 이대로 걸려 있다 */
-const FILTER_KEYS = ["dept", "eligible"] as const;
-const DEFAULT_FILTER: Record<(typeof FILTER_KEYS)[number], FilterValues> = { dept: [], eligible: [] };
+const FILTER_KEYS = ["dept", "eligible", "status"] as const;
+const DEFAULT_FILTER: Record<(typeof FILTER_KEYS)[number], FilterValues> = {
+  dept: [],
+  eligible: [],
+  status: [],
+};
 
 /** 정렬키 → 열 이름 — 여러 단계로 정렬했을 때 순서를 풀어 보여주기 위함 */
 const SORT_LABELS: Record<string, string> = {
@@ -90,7 +97,7 @@ export default function LeaveTable({
   const [f, setF, clearFilter] = useStoredState("leave.filter", DEFAULT_FILTER, (v) =>
     normalizeFilterSet(FILTER_KEYS, v)
   );
-  const { dept, eligible } = f;
+  const { dept, eligible, status } = f;
   const set = (k: keyof typeof DEFAULT_FILTER) => (v: FilterValues) =>
     setF((p) => ({ ...p, [k]: v }));
 
@@ -106,12 +113,14 @@ export default function LeaveTable({
     const needle = q.trim().toLowerCase();
     return rows.filter((r) => {
       if (eligible.length && !eligible.includes(r.eligible ? "yes" : "no")) return false;
+      // 직원 관리 화면과 같은 값(active/resigned)을 쓴다 — 빈 배열은 전체
+      if (status.length && !status.includes(r.active ? "active" : "resigned")) return false;
       if (!matchesFilter(dept, r.department)) return false;
       if (needle && !`${r.name}${r.department ?? ""}${r.position ?? ""}`.toLowerCase().includes(needle))
         return false;
       return true;
     });
-  }, [rows, q, dept, eligible]);
+  }, [rows, q, dept, eligible, status]);
 
   const { sorted, sort, toggle, resetSort, hasSort } = useTableSort(filtered, pick, "leave.sort");
   // 정렬도 기억하므로 '되돌릴 게 있는지' 판단에 함께 넣는다
@@ -150,6 +159,15 @@ export default function LeaveTable({
           options={[
             { value: "yes", label: "적용 대상" },
             { value: "no", label: "미적용" },
+          ]}
+        />
+        <FilterSelect
+          label="재직상태"
+          value={status}
+          onChange={set("status")}
+          options={[
+            { value: "active", label: "재직" },
+            { value: "resigned", label: "퇴직" },
           ]}
         />
         <FilterSelect
@@ -229,7 +247,7 @@ export default function LeaveTable({
             </thead>
             <tbody>
               {sorted.map((r) => (
-                <tr key={r.id} className="hover:bg-slate-50">
+                <tr key={r.id} className={r.active ? "hover:bg-slate-50" : "bg-rose-50/40 hover:bg-rose-50"}>
                   <td className="td">
                     <Link
                       href={`/leave/${r.id}`}
@@ -237,6 +255,12 @@ export default function LeaveTable({
                     >
                       {r.name}
                     </Link>
+                    {/* 이름만 봐서는 재직자와 구분이 안 된다 — 급여 화면과 같은 원칙으로 날짜까지 적는다 */}
+                    {!r.active && (
+                      <span className="ml-2 pill bg-rose-100 text-rose-600">
+                        {r.resignDate ? `${r.resignDate} 퇴직` : "퇴직"}
+                      </span>
+                    )}
                     {!r.eligible && (
                       <span className="ml-2 pill bg-slate-100 text-slate-500">연차 미적용</span>
                     )}

@@ -39,9 +39,11 @@ export default async function LeavePage({
     : new Date(Date.UTC(year, 11, 31, 23, 59, 59));
 
   const [employees, txns, pending, allRequests, holidays, dayOffs] = await Promise.all([
-    // 위탁계약(프리랜서·완전비율제)은 근로기준법 미적용 → 연차 관리 대상에서 제외
+    // 위탁계약(프리랜서·완전비율제)은 근로기준법 미적용 → 연차 관리 대상에서 제외.
+    // **퇴직자도 함께 싣는다** — 미사용 연차수당 정산·이력 확인 때문에 퇴직 후에도 봐야 한다.
+    // 화면의 재직상태 필터로 가른다(직원 관리 화면과 같은 방식).
     prisma.employee.findMany({
-      where: { active: true, payScheme: { not: "RATIO" }, isContractor: false },
+      where: { payScheme: { not: "RATIO" }, isContractor: false },
       orderBy: { empNo: "asc" },
     }),
     prisma.leaveTransaction.findMany(),
@@ -74,27 +76,34 @@ export default async function LeavePage({
     // 계약상 별도로 정한 경우 Employee.leaveEligible 이 우선한다.
     const { weeklyContractual } = computeWeeklyHours(parseSchedule(e.schedule));
     const eligible = isLeaveEligible(weeklyContractual, (e as any).leaveEligible);
+    // **퇴직자는 퇴사일 기준으로 계산한다** — 오늘 기준으로 계산하면 퇴사 후에도 근속이
+    // 계속 자라 연차 기간이 다음 해로 넘어가고 발생·잔여가 실제와 어긋난다.
+    // 퇴직 시점에 멈춘 값이 '그 사람의 마지막 연차 상태' 다.
+    const asOf = e.resignDate && e.resignDate < now ? e.resignDate : now;
     return {
       e,
+      asOf,
       weeklyContractual,
-      s: summarizeLeave(e.hireDate, now, list, { eligible }),
-      c: summarizeComp(list, now),
+      s: summarizeLeave(e.hireDate, asOf, list, { eligible }),
+      c: summarizeComp(list, asOf),
       p: usedInPeriod(list, from, to),
     };
   });
 
   const DAY = 86400000;
-  const leaveRows: LeaveRow[] = rows.map(({ e, s, c, p, weeklyContractual }) => ({
+  const leaveRows: LeaveRow[] = rows.map(({ e, asOf, s, c, p, weeklyContractual }) => ({
     id: e.id,
     name: e.name,
     department: e.department,
     position: e.position,
+    active: e.active,
+    resignDate: e.resignDate ? e.resignDate.toISOString().slice(0, 10) : null,
     eligible: s.eligible,
     forcedOff: (e as any).leaveEligible === false,
     weeklyContractual,
     hireDate: e.hireDate.toISOString().slice(0, 10),
     serviceLabel: s.serviceLabel,
-    serviceDays: Math.floor((now.getTime() - e.hireDate.getTime()) / DAY),
+    serviceDays: Math.floor((asOf.getTime() - e.hireDate.getTime()) / DAY),
     periodStart: s.period.start.toISOString().slice(0, 10),
     periodEnd: s.period.end.toISOString().slice(0, 10),
     periodLabel: s.period.label,

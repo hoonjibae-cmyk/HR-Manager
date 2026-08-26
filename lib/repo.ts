@@ -173,6 +173,10 @@ export async function previewPayroll(employeeId: number, month: MonthlyInput) {
 export async function leaveSummaryFor(employeeId: number, asOf: Date = new Date()) {
   const emp = await prisma.employee.findUnique({ where: { id: employeeId } });
   if (!emp) throw new Error("직원을 찾을 수 없습니다");
+  // **퇴직자는 퇴사일에 멈춘 값으로 본다** — 오늘 기준이면 근속이 계속 자라 연차 기간이
+  // 다음 해로 넘어가고 발생·잔여가 실제와 어긋난다. 연차 화면 명단(app/(app)/leave)과
+  // 같은 규칙이라 표와 상세가 같은 숫자를 보여준다.
+  if (emp.resignDate && emp.resignDate < asOf) asOf = emp.resignDate;
   const txns = await prisma.leaveTransaction.findMany({ where: { employeeId } });
   const leaveTxns: LeaveTxn[] = txns.map((t) => ({
     date: t.date,
