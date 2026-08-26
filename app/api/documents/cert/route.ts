@@ -7,11 +7,11 @@ export const maxDuration = 120;
 
 export async function POST(req: Request) {
   if (!(await isAuthed())) return new Response("unauthorized", { status: 401 });
-  const { employeeId, type, purpose } = await req.json();
-  if (type !== "CERT_EMPLOYMENT" && type !== "CERT_CAREER")
+  const { employeeId, type, purpose, reason } = await req.json();
+  if (type !== "CERT_EMPLOYMENT" && type !== "CERT_CAREER" && type !== "CERT_RELEASE")
     return new Response("invalid type", { status: 400 });
   try {
-    const { pdf, filename } = await genCertificate(Number(employeeId), type, { purpose });
+    const { pdf, filename } = await genCertificate(Number(employeeId), type, { purpose, reason });
     await logActivity({ action: "DOC_ISSUE", target: filename, summary: `증명서를 발급했습니다 — ${filename}` });
     return pdfResponse(pdf, filename);
   } catch (e: any) {

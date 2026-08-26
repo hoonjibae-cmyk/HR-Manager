@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { PageHeader, Pill } from "@/components/ui";
 import DocHub from "@/components/DocHub";
-import { DOCUMENT_TYPE_LABEL } from "@/lib/constants";
+import { DOCUMENT_TYPE_LABEL, isContractorContract } from "@/lib/constants";
 import { ymd } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +24,15 @@ export default async function DocumentsPage() {
       />
 
       <div className="mb-6">
-        <DocHub employees={employees.map((e) => ({ id: e.id, name: e.name, department: e.department, position: e.position }))} />
+        <DocHub
+          employees={employees.map((e) => ({
+            id: e.id,
+            name: e.name,
+            department: e.department,
+            position: e.position,
+            contractor: isContractorContract(e),
+          }))}
+        />
       </div>
 
       <div className="card overflow-x-auto">

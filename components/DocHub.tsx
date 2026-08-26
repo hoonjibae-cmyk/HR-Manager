@@ -3,7 +3,14 @@
 import { useState } from "react";
 import DocButton from "@/components/DocButton";
 
-interface Emp { id: number; name: string; department: string | null; position: string | null }
+interface Emp {
+  id: number;
+  name: string;
+  department: string | null;
+  position: string | null;
+  /** 위탁계약(프리랜서) — 해촉증명서는 이쪽에만 발급된다 */
+  contractor?: boolean;
+}
 
 export default function DocHub({ employees }: { employees: Emp[] }) {
   const [empId, setEmpId] = useState<string>("");
@@ -35,6 +42,13 @@ export default function DocHub({ employees }: { employees: Emp[] }) {
           <DocCard title="경력증명서" desc="근무이력 증명">
             <DocButton endpoint="/api/documents/cert" body={{ employeeId: selected.id, type: "CERT_CAREER" }} label="발급" className="btn-outline w-full" promptPurpose />
           </DocCard>
+          {/* 해촉증명서는 위탁계약(프리랜서) 전용 — 근로자에게 보이면 잘못 발급된다.
+              서버도 같은 판정으로 다시 막는다(위탁이 아니거나 퇴사일이 없으면 거부). */}
+          {selected.contractor && (
+            <DocCard title="해촉증명서" desc="위탁계약 종료 증명 — 퇴사(해촉)일 입력 후 발급">
+              <DocButton endpoint="/api/documents/cert" body={{ employeeId: selected.id, type: "CERT_RELEASE" }} label="발급" className="btn-outline w-full" promptPurpose />
+            </DocCard>
+          )}
           <DocCard title="계약서 (개별)" desc="직원 상세 → 계약 이력에서 발급">
             <a href={`/employees/${selected.id}`} className="btn-ghost w-full">직원 상세로 →</a>
           </DocCard>

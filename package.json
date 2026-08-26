@@ -1,6 +1,6 @@
 {
   "name": "yoossam-hr",
-  "version": "1.25.0",
+  "version": "1.26.0",
   "private": true,
   "description": "유쌤에듀 HR 관리 프로그램 - 급여 산정, 연차 관리, 계약서/증명서 발급, 급여명세서 자동발송",
   "scripts": {

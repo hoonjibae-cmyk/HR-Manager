@@ -7,11 +7,12 @@ import {
   overtimeDetailHtml,
   certEmploymentHtml,
   certCareerHtml,
+  certReleaseHtml,
   type DocPayroll,
 } from "./documents-pay";
 import { getCompany, empToDoc, contractToDoc } from "./repo";
 import { docPolicyFor, documentBlockReason } from "./departments";
-import { MAKEUP_CATEGORY_LABEL } from "./constants";
+import { MAKEUP_CATEGORY_LABEL, isContractorContract } from "./constants";
 import { incentiveRosterFor, rosterToStudents } from "./payroll-service";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
@@ -214,22 +215,49 @@ export async function genPayslip(payrollId: number) {
   return { pdf, filename: `급여명세서_${pr.employee.name}_${pr.year}-${pr.month}.pdf` };
 }
 
-/** 증명서 (재직/경력) */
+/** 증명서 (재직/경력/해촉) */
 export async function genCertificate(
   employeeId: number,
-  type: "CERT_EMPLOYMENT" | "CERT_CAREER",
-  opts: { purpose?: string } = {}
+  type: "CERT_EMPLOYMENT" | "CERT_CAREER" | "CERT_RELEASE",
+  opts: { purpose?: string; reason?: string } = {}
 ) {
   const emp = await prisma.employee.findUnique({ where: { id: employeeId } });
   if (!emp) throw new Error("직원 없음");
+
+  // 해촉증명서는 **위탁계약(프리랜서) 전용**이다 — '해촉' 은 위촉 관계를 끝냈다는 말이라
+  // 근로자에게 발급하면 사실과 다른 문서가 되고, 반대로 회사가 근로자를 위탁으로 취급했다는
+  // 기록이 되어 근로자성 다툼의 빌미가 된다(은행 이체 표시를 위탁 여부로 가르는 것과 같은 이유).
+  // 계약이 끝난 사실의 증명이므로 해촉일(퇴사일)도 있어야 한다.
+  if (type === "CERT_RELEASE") {
+    if (!isContractorContract(emp))
+      throw new Error(
+        `${emp.name}님은 위탁계약(프리랜서)이 아닙니다 — 해촉증명서는 위탁계약 종료에만 발급합니다. ` +
+          `근로자는 재직증명서(퇴직 표기) 또는 경력증명서를 발급하세요.`
+      );
+    if (!emp.resignDate)
+      throw new Error(
+        `${emp.name}님의 퇴사(해촉)일이 입력되어 있지 않습니다 — 계약이 끝난 사실을 증명하는 문서라 ` +
+          `직원 정보에 퇴사일을 먼저 넣어야 합니다.`
+      );
+  }
+
   const company = await getCompany();
   const serial = `${new Date().getFullYear()}-${String(emp.id).padStart(4, "0")}`;
   const html =
     type === "CERT_EMPLOYMENT"
       ? certEmploymentHtml({ employee: empToDoc(emp), company, purpose: opts.purpose, serial })
-      : certCareerHtml({ employee: empToDoc(emp), company, purpose: opts.purpose, serial });
+      : type === "CERT_CAREER"
+        ? certCareerHtml({ employee: empToDoc(emp), company, purpose: opts.purpose, serial })
+        : certReleaseHtml({
+            employee: empToDoc(emp),
+            company,
+            purpose: opts.purpose,
+            reason: opts.reason,
+            serial,
+          });
   const pdf = await htmlToPdf(html);
-  const label = type === "CERT_EMPLOYMENT" ? "재직증명서" : "경력증명서";
+  const label =
+    type === "CERT_EMPLOYMENT" ? "재직증명서" : type === "CERT_CAREER" ? "경력증명서" : "해촉증명서";
   const path = await save(pdf, `${label}_${emp.name}.pdf`);
   await record(emp.id, type, `${label} - ${emp.name}`, path, opts);
   return { pdf, filename: `${label}_${emp.name}.pdf` };

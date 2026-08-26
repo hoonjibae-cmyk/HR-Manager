@@ -440,6 +440,16 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
             <div className="flex flex-col gap-2">
               <DocButton endpoint="/api/documents/cert" body={{ employeeId: id, type: "CERT_EMPLOYMENT" }} label="재직증명서" promptPurpose />
               <DocButton endpoint="/api/documents/cert" body={{ employeeId: id, type: "CERT_CAREER" }} label="경력증명서" promptPurpose />
+              {/* 해촉증명서는 위탁계약(프리랜서) 전용 — 근로자에게 보이면 잘못 발급된다.
+                  서버(genCertificate)도 같은 판정으로 다시 막는다. */}
+              {isContractorContract(emp) && (
+                <DocButton
+                  endpoint="/api/documents/cert"
+                  body={{ employeeId: id, type: "CERT_RELEASE" }}
+                  label="해촉증명서"
+                  promptPurpose
+                />
+              )}
             </div>
           </div>
 

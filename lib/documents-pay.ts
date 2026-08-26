@@ -477,6 +477,52 @@ export function certCareerHtml(args: {
   </div>`;
 }
 
+/* ============================ 해촉증명서 ============================ */
+/**
+ * **위탁계약(프리랜서) 전용**이다 — '해촉(解囑)' 은 위촉 관계를 끝냈다는 말이라
+ * 근로자에게 발급하면 문서 자체가 사실과 어긋난다(근로자는 퇴직 표기된 재직·경력증명서).
+ * 발급 가능 판정은 doc-service 가 `isContractorContract` 로 한다 — 여기서는 그리기만 한다.
+ *
+ * 주 용도는 건강보험공단 제출(프리랜서 계약 종료 후 지역가입자 보험료 조정)이라
+ * **주민등록번호를 그대로 싣는다** — 공단이 대조하는 값이라 마스킹하면 반려된다.
+ * 계약이 끝난 사실의 증명이므로 **해촉일(resignDate)이 있어야** 발급된다(doc-service 검사).
+ */
+export function certReleaseHtml(args: {
+  employee: DocEmployee;
+  company: DocCompany;
+  purpose?: string;
+  /** 해촉 사유 — 기본 "계약기간 만료" */
+  reason?: string;
+  serial?: string;
+  issueDate?: Date;
+}): string {
+  const { employee: e, company: c } = args;
+  const issue = args.issueDate ?? new Date();
+  const end = e.resignDate ? ymd(e.resignDate) : "-";
+  return `${head(c, `<div class="small">발급번호: ${esc(args.serial ?? "-")}</div>`)}
+  <div class="doc-title" style="letter-spacing:0.3em">해 촉 증 명 서</div>
+  <table class="kv" style="margin-top:20px">
+    <tr><th>성명</th><td>${esc(e.name)}</td><th>주민등록번호</th><td>${esc(e.rrn ?? "-")}</td></tr>
+    <tr><th>주소</th><td colspan="3">${esc(e.address ?? "-")}</td></tr>
+    <tr><th>위촉 업무</th><td colspan="3">${esc(e.duty ?? e.position ?? "-")}</td></tr>
+    <tr><th>위촉 기간</th><td>${ymd(e.hireDate)} ~ ${end}</td><th>해촉일자</th><td>${end}</td></tr>
+    <tr><th>해촉 사유</th><td colspan="3">${esc(args.reason ?? "계약기간 만료")}</td></tr>
+    <tr><th>용도</th><td colspan="3">${esc(args.purpose ?? "제출용")}</td></tr>
+  </table>
+  <p style="text-align:center;margin:30px 0;font-size:12pt">
+    위 사람은 <b>${esc(c.name)}</b>와 위탁계약을 체결하고 상기 기간 동안 활동하였으나,<br/>
+    ${e.resignDate ? ymdKo(e.resignDate) : "-"}자로 해촉되었음을 증명합니다.
+  </p>
+  <div class="doc-foot" style="align-items:center;text-align:center">
+    <div class="date-center">${ymdKo(issue)}</div>
+    <div style="margin-top:18px;font-size:13pt">
+      <div style="font-weight:800;font-size:16pt;letter-spacing:0.02em">${esc(c.name)}</div>
+      <div style="margin-top:6px">대표이사 ${esc(c.ceo)} ${c.stamp ? stampImg(c) : '<span class="seal">(직인)</span>'}</div>
+      <div class="small" style="margin-top:3px">${esc(c.address)} · ${esc(c.phone)}</div>
+    </div>
+  </div>`;
+}
+
 /* ==================== 인센티브 산정 내역서 (명세서 첨부) ==================== */
 /**
  * 월급+인센티브 강사의 학생 명단별 인센티브 산정 근거.

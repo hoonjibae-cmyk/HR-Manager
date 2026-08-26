@@ -126,6 +126,7 @@ export const DOCUMENT_TYPE = {
   PAYSLIP: "PAYSLIP", // 급여명세서 / 사업소득명세서
   CERT_EMPLOYMENT: "CERT_EMPLOYMENT", // 재직증명서
   CERT_CAREER: "CERT_CAREER", // 경력증명서
+  CERT_RELEASE: "CERT_RELEASE", // 해촉증명서 — 위탁계약(프리랜서) 종료 증명
   CERT_INCOME: "CERT_INCOME", // 소득금액증명(참고용)
 } as const;
 export type DocumentType = keyof typeof DOCUMENT_TYPE;
@@ -140,6 +141,7 @@ export const DOCUMENT_TYPE_LABEL: Record<string, string> = {
   PAYSLIP: "급여명세서",
   CERT_EMPLOYMENT: "재직증명서",
   CERT_CAREER: "경력증명서",
+  CERT_RELEASE: "해촉증명서",
   CERT_INCOME: "소득금액증명",
 };
 
