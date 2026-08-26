@@ -65,17 +65,84 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+/**
+ * 직원 완전 삭제 — **입사 취소용**이다(입사하기로 했다가 오지 않은 사람은 DB 에 남길 이유가 없다).
+ *
+ * 되돌릴 수 없는 작업이라 안전장치가 셋이다.
+ *  ① **확인 문구** — body 로 `confirm: "삭제"` 가 정확히 와야 지운다. 없으면 지우지 않고
+ *     **무엇이 함께 지워지는지**(계약·급여·연차·첨부 건수)를 돌려준다 — 화면이 이걸 미리보기로
+ *     띄우고 사용자가 '삭제' 를 직접 타이핑한 뒤에야 실제 요청이 나간다.
+ *  ② **명세서가 발송된 직원은 막는다** — 이미 급여가 나간 사람이면 입사 취소가 아니라
+ *     퇴사다. 임금 기록은 3년 보존 의무(근로기준법 §42)가 있어 지우면 안 되고,
+ *     퇴사일을 넣으면 급여 시트에서 자동으로 내려간다.
+ *  ③ **작업 이력에 지운 내용을 남긴다** — AuditLog 는 cascade 가 아니라 남는다(SetNull).
+ *     이름·사번·건수까지 적어 나중에 '왜 이 사람이 없지' 를 되짚을 수 있게 한다.
+ */
+export async function DELETE(req: Request, { params }: { params: { id: string } }) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const id = Number(params.id);
   try {
-    const gone = await prisma.employee.findUnique({ where: { id: Number(params.id) } });
-    await prisma.employee.delete({ where: { id: Number(params.id) } });
+    const emp = await prisma.employee.findUnique({ where: { id } });
+    if (!emp) return NextResponse.json({ error: "직원을 찾을 수 없습니다." }, { status: 404 });
+
+    const [contracts, payroll, payrollSent, leaveTxns, files, contractFiles, makeups, timesheets] =
+      await Promise.all([
+        prisma.contract.count({ where: { employeeId: id } }),
+        prisma.payrollRecord.count({ where: { employeeId: id } }),
+        prisma.payrollRecord.count({ where: { employeeId: id, status: "SENT" } }),
+        prisma.leaveTransaction.count({ where: { employeeId: id } }),
+        prisma.attachedFile.count({ where: { employeeId: id, complete: true } }),
+        prisma.attachedFile.count({
+          where: { contract: { employeeId: id }, complete: true },
+        }),
+        prisma.makeupSession.count({ where: { employeeId: id } }),
+        prisma.timesheetDay.count({ where: { employeeId: id } }),
+      ]);
+
+    const summary = {
+      name: emp.name,
+      empNo: emp.empNo,
+      contracts,
+      payroll,
+      payrollSent,
+      leaveTxns,
+      files: files + contractFiles,
+      makeups,
+      timesheets,
+    };
+
+    // ② 명세서가 나간 직원은 삭제가 아니라 퇴사 처리다
+    if (payrollSent > 0)
+      return NextResponse.json(
+        {
+          error:
+            `${emp.name}님은 급여명세서가 이미 발송된 기록이 ${payrollSent}건 있습니다. ` +
+            `임금 기록은 3년 보존 의무가 있어 삭제할 수 없습니다 — 직원 정보에 퇴사일을 넣으면 ` +
+            `급여 시트에서 자동으로 빠집니다.`,
+          summary,
+        },
+        { status: 409 }
+      );
+
+    // ① 확인 문구가 없으면 지우지 않고 미리보기를 돌려준다
+    const body = await req.json().catch(() => ({}));
+    if (body?.confirm !== "삭제")
+      return NextResponse.json(
+        { error: "확인 문구가 필요합니다.", requires: "삭제", summary },
+        { status: 428 }
+      );
+
+    await prisma.employee.delete({ where: { id } });
     await logActivity({
       action: "EMPLOYEE_DELETE",
-      target: gone?.name,
-      summary: `직원 ${gone?.name ?? params.id}을(를) 삭제했습니다. (급여·계약·연차 기록 포함)`,
+      target: emp.name,
+      summary:
+        `직원 ${emp.name}(${emp.empNo})을(를) 완전 삭제했습니다 — ` +
+        `계약 ${contracts}건 · 급여기록 ${payroll}건 · 연차기록 ${leaveTxns}건 · ` +
+        `첨부파일 ${summary.files}건 · 보강/근무 ${makeups}건이 함께 삭제됐습니다.`,
+      meta: summary,
     });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, summary });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });
   }

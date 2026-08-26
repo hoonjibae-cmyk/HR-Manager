@@ -24,6 +24,7 @@ import {
 } from "@/lib/contracts";
 import ContractIssueNotice from "@/components/ContractIssueNotice";
 import AttachmentBox from "@/components/AttachmentBox";
+import EmployeeDeleteButton from "@/components/EmployeeDeleteButton";
 
 export const dynamic = "force-dynamic";
 
@@ -478,6 +479,12 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
             </p>
           </div>
         </div>
+      </div>
+
+      {/* 위험 구역 — 눈에 잘 안 띄는 맨 아래 구석에 둔다. 자주 쓸 버튼이 아니고,
+          잘 보이는 자리에 두면 '정보 수정' 대신 눌리는 사고가 난다. */}
+      <div className="mt-10 pt-4 border-t border-slate-100 text-right">
+        <EmployeeDeleteButton employeeId={id} name={emp.name} />
       </div>
     </div>
   );
