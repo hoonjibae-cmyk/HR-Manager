@@ -34,6 +34,8 @@ export interface DocPayroll {
   incentiveP: number;
   bonusP: number;
   unusedLeaveP: number;
+  /** 연차미사용수당 일수 — 명세서 각주에 계산식을 적기 위해서만 쓴다. 음수 = 초과 사용 정산 */
+  unusedLeaveDays?: number | null;
   gross: number;
   pensionD: number;
   employmentD: number;
@@ -383,6 +385,17 @@ export function payslipHtml(args: {
     ${isFree
       ? `<div class="small">· 사업소득 원천징수: 지급총액의 3.3%(소득세 3% + 지방소득세 0.3%) 공제</div>`
       : `<div class="small">· 4대보험 및 근로소득세는 관계법령·간이세액표(또는 세무대리인 산정액)에 따릅니다.</div>`}
+    ${(() => {
+      // 연차미사용수당 산출 근거 — 금액이 있을 때만 적는다(없는 항목의 식을 늘어놓지 않는다).
+      // **음수(초과 사용 정산)는 문구가 갈린다** — 양수 문구 그대로면 '미사용 −N일' 이라는
+      // 말이 안 되는 글이 되고, 왜 급여가 깎였는지 명세서만 봐서는 알 수 없게 된다.
+      if (!p.unusedLeaveP) return "";
+      const d = p.unusedLeaveDays ?? 0;
+      const daysTxt = d ? `${Math.abs(d)}일 × ${won(p.hourlyWage)}원 × 8시간 = ` : "";
+      if (p.unusedLeaveP > 0)
+        return `<div class="small">· 연차미사용수당 = 미사용 연차일수 × 통상시급 × 8시간(1일 통상임금) — ${daysTxt}<b>${won(p.unusedLeaveP)}원</b></div>`;
+      return `<div class="small">· 연차미사용수당(차감) = 초과 사용한 연차일수 × 통상시급 × 8시간 — ${daysTxt}<b>−${won(Math.abs(p.unusedLeaveP))}원</b>. 퇴직일까지 발생한 연차보다 초과 사용한 일수를 임금공제 동의서에 따라 마지막 급여에서 정산한 금액입니다.</div>`;
+    })()}
     ${p.retentionD ? `<div class="small">· 퇴직유보금: 인센티브 원천액의 8.3%(1/12)로, 확인서에 따라 별도 통장으로 송금·적립됩니다.</div>` : ""}
     ${
       p.parkingD > 0

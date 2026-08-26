@@ -125,3 +125,48 @@ describe("payslipHtml — 정정 발급 표시", () => {
     expect(html).toContain("정정 발급 (제1차)");
   });
 });
+
+describe("payslipHtml — 연차미사용수당 산출 근거", () => {
+  /*
+   * 여기서 틀리면 ① 명세서만 봐서는 수당이 어떻게 나온 금액인지 알 수 없거나
+   * ② 초과 사용 정산(음수)인데 '미사용 수당' 문구가 그대로 나가 왜 깎였는지 모른 채
+   * 마지막 급여를 받게 된다.
+   */
+  it("양수: 미사용 일수 × 통상시급 × 8시간 식을 적는다", () => {
+    const html = payslipHtml({
+      employee,
+      company,
+      payroll: { ...base, unusedLeaveP: 574_160, unusedLeaveDays: 5, gross: 3_574_160, net: 3_574_160 },
+    });
+    expect(html).toContain("연차미사용수당 = 미사용 연차일수 × 통상시급 × 8시간");
+    expect(html).toContain("5일 × 14,354원 × 8시간");
+    expect(html).toContain("574,160");
+  });
+
+  it("**음수(초과 사용 정산): 문구가 갈리고 동의서 근거를 적는다**", () => {
+    const html = payslipHtml({
+      employee,
+      company,
+      payroll: { ...base, unusedLeaveP: -416_448, unusedLeaveDays: -4, gross: 2_583_552, net: 2_583_552 },
+    });
+    expect(html).toContain("연차미사용수당(차감)");
+    expect(html).toContain("초과 사용한 연차일수");
+    expect(html).toContain("4일 × 14,354원 × 8시간");
+    expect(html).toContain("임금공제 동의서에 따라 마지막 급여에서 정산");
+    expect(html).not.toContain("−4일"); // 일수는 크기로 적는다 — 음수 기호가 붙으면 식이 안 읽힌다
+  });
+
+  it("수당이 없으면 식도 없다 (없는 항목의 식을 늘어놓지 않는다)", () => {
+    expect(payslipHtml({ employee, company, payroll: base })).not.toContain("연차미사용수당 =");
+  });
+
+  it("일수를 모르는 옛 기록은 식 없이 원칙만 적는다", () => {
+    const html = payslipHtml({
+      employee,
+      company,
+      payroll: { ...base, unusedLeaveP: 100_000 },
+    });
+    expect(html).toContain("연차미사용수당 = 미사용 연차일수 × 통상시급 × 8시간");
+    expect(html).not.toContain("일 × 14,354원");
+  });
+});

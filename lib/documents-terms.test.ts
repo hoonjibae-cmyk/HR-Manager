@@ -285,6 +285,24 @@ describe("임금공제 동의서 — 3.3% 대상자에게는 4대보험을 적�
     expect(f).not.toContain("근로기준법 제43조");
   });
 
+  /*
+   * 연차 초과사용 정산 — 발생보다 많이 쓰고 퇴사하는 경우 마지막 급여에서 공제하는 근거.
+   * §43 전액불 원칙 때문에 **명시적 동의**가 있어야 공제할 수 있다 — 이 조항이 그 동의다.
+   */
+  it("**연차 초과사용 정산 조항이 있다** — 마지막 급여에서 공제하는 동의", () => {
+    const t = html({ incomeType: "EMPLOYEE" });
+    expect(t).toContain("연차 정산");
+    expect(t).toContain("초과하여 사용한 연차");
+    expect(t).toContain("1일 통상임금");
+    // 3.3% 실질 근로자도 연차는 있다 — 위탁이 아니면 들어간다
+    expect(html({ incomeType: "FREELANCE" })).toContain("연차 정산");
+  });
+
+  it("**위탁계약에는 연차 정산 조항을 적지 않는다** — 연차(§60) 자체가 없다", () => {
+    expect(html({ incomeType: "FREELANCE", payScheme: "RATIO" } as any)).not.toContain("연차 정산");
+    expect(html({ incomeType: "EMPLOYEE", isContractor: true } as any)).not.toContain("연차 정산");
+  });
+
   it("'임금' 이 아니라 '지급액' 으로 적는다 (위탁은 임금이 아니다)", () => {
     expect(html({ incomeType: "FREELANCE" })).toContain("매월 지급액에서 공제");
     expect(html({ incomeType: "EMPLOYEE" })).toContain("매월 임금에서 공제");
