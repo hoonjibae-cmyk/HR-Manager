@@ -204,16 +204,18 @@ function toHours(hhmm: string): number {
   return (h || 0) + (m || 0) / 60;
 }
 
-/** 스케줄에서 주 소정근로시간 / 주 연장 / 주휴시간 계산 */
+/** 스케줄에서 주 소정근로시간 / 주 연장 / 주휴시간 / 주 근무일수 계산 */
 export function computeWeeklyHours(schedule: ScheduleDay[]) {
   let contractual = 0; // Σ min(일근로,8)
   let overtime = 0; // Σ max(일근로-8,0)
+  let workDays = 0; // 주 근무일수 — 연차 1일의 유급 시간 산정에 쓴다
   for (const d of schedule) {
     if (!d.work) continue;
     let dur = toHours(d.end) - toHours(d.start) - (d.breakH || 0);
     if (dur <= 0) continue;
     contractual += Math.min(dur, 8);
     overtime += Math.max(dur - 8, 0);
+    workDays += 1;
   }
   const weeklyRaw = contractual;
   const weeklyContractual = Math.min(weeklyRaw, 40);
@@ -222,7 +224,26 @@ export function computeWeeklyHours(schedule: ScheduleDay[]) {
   // 주휴시간: 주 15시간 미만이면 0, 아니면 주소정/5 (=주소정/40*8) 상한 8
   const weeklyHoliday =
     weeklyContractual < 15 ? 0 : Math.min(weeklyContractual / 5, 8);
-  return { weeklyContractual, weeklyOvertime: overtime, weeklyHoliday };
+  return { weeklyContractual, weeklyOvertime: overtime, weeklyHoliday, workDays };
+}
+
+/**
+ * **연차 하루의 유급 시간** = 주 소정근로시간 ÷ 주 근무일수 (상한 8시간).
+ *
+ * 연차수당의 원칙은 1일 통상임금 = 통상시급 × **1일 소정근로시간**이다. 이 학원은
+ * 14~22시 근무에 휴게 30분이라 1일 소정이 7.5시간인데, 8시간 고정으로 곱하면
+ * 하루당 0.5시간분이 부풀려진다 — 지급(+)이면 더 주는 쪽이지만 **초과사용 정산(−)이면
+ * 1일 통상임금보다 더 깎는 셈**이라 §43(전액불 원칙) 다툼의 소지가 된다.
+ * 휴게시간은 근로시간이 아니므로(§54) 산입하지 않는다.
+ *
+ * 시급제의 연차 유급 인정(lib/timesheet.ts — 계약 주 근로시간 ÷ 주 근무일수)과 같은 규칙이다.
+ * **근로시간표가 없으면 8시간**으로 본다 — 표가 없다고 수당을 0 으로 만들 수는 없고,
+ * 그 경우 화면이 이미 '근로시간표 없음' 경고를 띄운다.
+ */
+export function dailyLeaveHours(schedule: ScheduleDay[]): number {
+  const { weeklyContractual, workDays } = computeWeeklyHours(schedule);
+  if (!workDays || weeklyContractual <= 0) return 8;
+  return Math.min(weeklyContractual / workDays, 8);
 }
 
 /* ───────────── 포괄임금(고정OT) 분해 ───────────── */
@@ -632,11 +653,13 @@ export function computePayroll(
   const carP = round0((emp.carAllow || 0) * prorate);
   const bonusP = month.bonus ?? 0;
 
-  // --- 연차미사용수당 = 1일 통상임금(통상시급×8) × 미사용일수 ---
+  // --- 연차미사용수당 = 1일 통상임금(통상시급 × 1일 소정근로시간) × 미사용일수 ---
   // 위탁계약은 연차(§60) 자체가 없어 미사용수당도 없다.
+  // 1일 소정근로시간은 근로시간표에서 뽑는다(주 소정 ÷ 근무일수, 상한 8) — 휴게 30분 체계라
+  // 7.5시간인 직원에게 8 을 곱하면 초과사용 정산(음수) 때 1일 통상임금보다 더 깎게 된다.
   const unusedLeaveP = contractor
     ? 0
-    : round0((month.unusedLeaveDays ?? 0) * hourlyWage * 8);
+    : round0((month.unusedLeaveDays ?? 0) * hourlyWage * dailyLeaveHours(emp.schedule));
 
   const gross =
     baseP +

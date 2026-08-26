@@ -132,15 +132,36 @@ describe("payslipHtml — 연차미사용수당 산출 근거", () => {
    * ② 초과 사용 정산(음수)인데 '미사용 수당' 문구가 그대로 나가 왜 깎였는지 모른 채
    * 마지막 급여를 받게 된다.
    */
-  it("양수: 미사용 일수 × 통상시급 × 8시간 식을 적는다", () => {
+  it("양수: 미사용 일수 × 통상시급 × 1일 소정근로시간 식을 적는다", () => {
     const html = payslipHtml({
       employee,
       company,
       payroll: { ...base, unusedLeaveP: 574_160, unusedLeaveDays: 5, gross: 3_574_160, net: 3_574_160 },
     });
-    expect(html).toContain("연차미사용수당 = 미사용 연차일수 × 통상시급 × 8시간");
-    expect(html).toContain("5일 × 14,354원 × 8시간");
+    expect(html).toContain("연차미사용수당 = 미사용 연차일수 × 통상시급 × 1일 소정근로시간");
+    expect(html).toContain("5일 × 14,354원 × 8시간"); // 금액에서 역산 — ×8 로 계산된 기록은 8 로 나온다
     expect(html).toContain("574,160");
+  });
+
+  /*
+   * 시간은 저장된 금액에서 역산한다 — 14~22시·휴게 30분 체계(1일 7.5시간)의 새 기록과
+   * 8시간 고정으로 계산된 옛 기록이 섞여 있어도, 각주의 식이 금액과 어긋나지 않는다.
+   */
+  it("**7.5시간 체계는 식에도 7.5시간으로 나온다** (금액에서 역산)", () => {
+    const html = payslipHtml({
+      employee,
+      company,
+      payroll: {
+        ...base,
+        hourlyWage: 13_014,
+        unusedLeaveP: -390_420, // 4일 × 13,014 × 7.5
+        unusedLeaveDays: -4,
+        gross: 2_609_580,
+        net: 2_609_580,
+      },
+    });
+    expect(html).toContain("4일 × 13,014원 × 7.5시간");
+    expect(html).toContain("390,420");
   });
 
   it("**음수(초과 사용 정산): 문구가 갈리고 동의서 근거를 적는다**", () => {
@@ -151,7 +172,7 @@ describe("payslipHtml — 연차미사용수당 산출 근거", () => {
     });
     expect(html).toContain("연차미사용수당(차감)");
     expect(html).toContain("초과 사용한 연차일수");
-    expect(html).toContain("4일 × 14,354원 × 8시간");
+    expect(html).toContain("4일 × 14,354원 × 7.25시간"); // 416,448 ÷ (4 × 14,354) — 금액이 진실이다
     expect(html).toContain("임금공제 동의서에 따라 마지막 급여에서 정산");
     expect(html).not.toContain("−4일"); // 일수는 크기로 적는다 — 음수 기호가 붙으면 식이 안 읽힌다
   });
@@ -166,7 +187,7 @@ describe("payslipHtml — 연차미사용수당 산출 근거", () => {
       company,
       payroll: { ...base, unusedLeaveP: 100_000 },
     });
-    expect(html).toContain("연차미사용수당 = 미사용 연차일수 × 통상시급 × 8시간");
+    expect(html).toContain("연차미사용수당 = 미사용 연차일수 × 통상시급 × 1일 소정근로시간");
     expect(html).not.toContain("일 × 14,354원");
   });
 });

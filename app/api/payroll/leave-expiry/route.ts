@@ -15,7 +15,7 @@ import {
   isLeaveEligible,
   type LeaveTxn,
 } from "@/lib/leave";
-import { computeWeeklyHours } from "@/lib/payroll";
+import { computeWeeklyHours, dailyLeaveHours } from "@/lib/payroll";
 import { parseSchedule } from "@/lib/constants";
 import { payoutSuggestions, periodLastDay, type PayoutInput } from "@/lib/leave-payout";
 import { runPayrollMonth, type PayrollInputMap } from "@/lib/payroll-service";
@@ -77,6 +77,8 @@ export async function GET(req: Request) {
       remaining: s.period.remaining,
       alreadyDays: r.unusedLeaveDays ?? 0,
       hourlyWage: r.hourlyWage ?? 0,
+      // 엔진과 같은 함수로 구한다 — 미리보기 금액과 실제 명세서가 원 단위까지 같아야 한다
+      dailyHours: dailyLeaveHours(parseSchedule(e.schedule)),
     };
   });
 

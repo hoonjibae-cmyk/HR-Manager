@@ -25,6 +25,7 @@ const row = (over: Partial<PayoutInput> = {}): PayoutInput => ({
   remaining: 5,
   alreadyDays: 0,
   hourlyWage: 20_000,
+  dailyHours: 8,
   ...over,
 });
 
@@ -54,6 +55,20 @@ describe("수당 금액 — 급여 엔진과 같은 식", () => {
     expect(payoutAmount(5, 20_000)).toBe(800_000);
     expect(payoutAmount(0.5, 20_000)).toBe(80_000);
     expect(payoutAmount(3, 0)).toBe(0);
+  });
+
+  /*
+   * 1일 소정근로가 8시간이 아닌 체계(14~22시 · 휴게 30분 = 7.5시간)에서는 하루치가
+   * 통상시급 × 7.5 다. 8 로 곱하면 지급(+)은 부풀고 초과사용 정산(−)은 더 깎는다.
+   */
+  it("**1일 소정근로시간을 곱한다** — 7.5시간 체계는 × 7.5", () => {
+    expect(payoutAmount(4, 13_014, 7.5)).toBe(390_420);
+    expect(payoutAmount(4, 13_014)).toBe(416_448); // 옛 8시간 고정과 구분
+  });
+
+  it("미리보기 금액이 dailyHours 를 따른다", () => {
+    const [s1] = payoutSuggestions([row({ dailyHours: 7.5, hourlyWage: 13_014, remaining: 4 })], 2026, 8);
+    expect(s1.suggestAmount).toBe(390_420);
   });
 });
 

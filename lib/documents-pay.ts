@@ -391,10 +391,17 @@ export function payslipHtml(args: {
       // 말이 안 되는 글이 되고, 왜 급여가 깎였는지 명세서만 봐서는 알 수 없게 된다.
       if (!p.unusedLeaveP) return "";
       const d = p.unusedLeaveDays ?? 0;
-      const daysTxt = d ? `${Math.abs(d)}일 × ${won(p.hourlyWage)}원 × 8시간 = ` : "";
+      // 실제 곱해진 1일 시간은 저장된 금액에서 **역산**한다 — 옛 기록(×8)과 새 기록(×1일
+      // 소정근로시간)이 섞여 있어도 식과 금액이 어긋나지 않는다. 휴게시간은 근로시간이
+      // 아니므로(§54) 14~22시·휴게 30분 체계는 7.5시간으로 나온다.
+      const hrs =
+        d && p.hourlyWage > 0
+          ? Math.round((Math.abs(p.unusedLeaveP) / (Math.abs(d) * p.hourlyWage)) * 100) / 100
+          : 0;
+      const daysTxt = d && hrs ? `${Math.abs(d)}일 × ${won(p.hourlyWage)}원 × ${hrs}시간 = ` : "";
       if (p.unusedLeaveP > 0)
-        return `<div class="small">· 연차미사용수당 = 미사용 연차일수 × 통상시급 × 8시간(1일 통상임금) — ${daysTxt}<b>${won(p.unusedLeaveP)}원</b></div>`;
-      return `<div class="small">· 연차미사용수당(차감) = 초과 사용한 연차일수 × 통상시급 × 8시간 — ${daysTxt}<b>−${won(Math.abs(p.unusedLeaveP))}원</b>. 퇴직일까지 발생한 연차보다 초과 사용한 일수를 임금공제 동의서에 따라 마지막 급여에서 정산한 금액입니다.</div>`;
+        return `<div class="small">· 연차미사용수당 = 미사용 연차일수 × 통상시급 × 1일 소정근로시간(휴게 제외) — ${daysTxt}<b>${won(p.unusedLeaveP)}원</b></div>`;
+      return `<div class="small">· 연차미사용수당(차감) = 초과 사용한 연차일수 × 통상시급 × 1일 소정근로시간(휴게 제외) — ${daysTxt}<b>−${won(Math.abs(p.unusedLeaveP))}원</b>. 퇴직일까지 발생한 연차보다 초과 사용한 일수를 임금공제 동의서에 따라 마지막 급여에서 정산한 금액입니다.</div>`;
     })()}
     ${p.retentionD ? `<div class="small">· 퇴직유보금: 인센티브 원천액의 8.3%(1/12)로, 확인서에 따라 별도 통장으로 송금·적립됩니다.</div>` : ""}
     ${

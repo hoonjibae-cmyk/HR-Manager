@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   computePayroll,
   computeWeeklyHours,
+  dailyLeaveHours,
   lookupIncomeTax,
   floor10,
   blendWageTerms,
@@ -1144,5 +1145,51 @@ describe("isEstimatedHourly — 어림으로 산출한 달인가 (화면이 붉�
     for (const h of [null, 0, 86.5, 120]) {
       expect(noted(h)).toBe(isEstimatedHourly({ payScheme: "HOURLY", workedHours: h }));
     }
+  });
+});
+
+describe("연차미사용수당 — 1일 소정근로시간 기준 (8시간 고정이 아니다)", () => {
+  /*
+   * 연차수당의 원칙은 1일 통상임금 = 통상시급 × 1일 소정근로시간이다. 이 학원은 휴게 30분
+   * 체계(1일 7.5시간)라 8 을 곱하면 하루당 0.5시간분이 부풀려진다 — 지급(+)은 더 주는
+   * 쪽이지만 **초과사용 정산(−)은 1일 통상임금보다 더 깎는 셈**이 된다(§43 다툼 소지).
+   * 휴게시간은 근로시간이 아니다(§54).
+   */
+  it("dailyLeaveHours — 15~22시·휴게 0.5 주5일은 6.5시간, 표가 없으면 8시간", () => {
+    expect(dailyLeaveHours(instructor)).toBe(6.5); // (7 − 0.5) × 5일 ÷ 5일
+    expect(dailyLeaveHours(fullTime)).toBe(8);
+    expect(dailyLeaveHours([])).toBe(8);
+  });
+
+  const run = (days: number, schedule: ScheduleDay[]) =>
+    computePayroll(
+      {
+        incomeType: "EMPLOYEE",
+        payScheme: "MONTHLY",
+        baseWage: 2_700_000,
+        positionAllow: 0,
+        mealAllow: 0,
+        carAllow: 0,
+        dependents: 1,
+        schedule,
+        incThreshold: null,
+        incPerStudent: null,
+      } as EmployeePayInput,
+      { unusedLeaveDays: days },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+
+  it("**미사용 수당(+)이 1일 소정근로시간으로 계산된다**", () => {
+    const r = run(4, instructor); // 1일 6.5시간
+    expect(r.unusedLeaveP).toBe(Math.round(4 * r.hourlyWage * 6.5));
+    const r8 = run(4, fullTime); // 1일 8시간 — 예전과 같다
+    expect(r8.unusedLeaveP).toBe(Math.round(4 * r8.hourlyWage * 8));
+  });
+
+  it("**초과사용 정산(−)도 같은 시간으로 깎는다** — 8시간으로 깎으면 과공제다", () => {
+    const r = run(-4, instructor);
+    expect(r.unusedLeaveP).toBe(-Math.round(4 * r.hourlyWage * 6.5));
+    expect(Math.abs(r.unusedLeaveP)).toBeLessThan(Math.round(4 * r.hourlyWage * 8));
   });
 });

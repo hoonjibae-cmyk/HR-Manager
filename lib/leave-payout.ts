@@ -43,6 +43,8 @@ export interface PayoutInput {
   alreadyDays: number;
   /** 통상시급 — 금액 미리보기용. 0 이면 금액을 못 보여 준다 */
   hourlyWage: number;
+  /** 연차 하루의 유급 시간 (주 소정 ÷ 근무일수, 상한 8) — 엔진의 dailyLeaveHours 와 같은 값 */
+  dailyHours: number;
 }
 
 export interface PayoutSuggestion {
@@ -54,15 +56,19 @@ export interface PayoutSuggestion {
   alreadyDays: number;
   /** 넣기를 제안하는 일수 = 남은 − 이미 넣은 (음수면 0) */
   suggestDays: number;
-  /** 제안 일수로 계산한 수당 (원) — 엔진과 **같은 식**: 일수 × 통상시급 × 8 */
+  /** 제안 일수로 계산한 수당 (원) — 엔진과 **같은 식**: 일수 × 통상시급 × 1일 소정근로시간 */
   suggestAmount: number;
   /** 이미 넣은 일수가 남은 일수를 채웠는가 */
   done: boolean;
 }
 
-/** 미사용 연차수당 = 일수 × 통상시급 × 8시간 (lib/payroll.ts 의 unusedLeaveP 와 같은 식) */
-export function payoutAmount(days: number, hourlyWage: number): number {
-  return Math.round(days * hourlyWage * 8);
+/**
+ * 미사용 연차수당 = 일수 × 통상시급 × **1일 소정근로시간** (lib/payroll.ts 의 unusedLeaveP 와 같은 식).
+ * 8시간 고정이 아니다 — 휴게 30분 체계(1일 7.5시간)에서 8 을 곱하면 미리보기와 실제 명세서가 갈린다.
+ * dailyHours 는 엔진의 `dailyLeaveHours(schedule)` 로 구해 넘긴다(없으면 8).
+ */
+export function payoutAmount(days: number, hourlyWage: number, dailyHours = 8): number {
+  return Math.round(days * hourlyWage * dailyHours);
 }
 
 /**
@@ -89,7 +95,7 @@ export function payoutSuggestions(
         remaining: round1(r.remaining),
         alreadyDays: round1(r.alreadyDays),
         suggestDays: suggest,
-        suggestAmount: payoutAmount(suggest, r.hourlyWage),
+        suggestAmount: payoutAmount(suggest, r.hourlyWage, r.dailyHours),
         done: suggest === 0,
       };
     })
