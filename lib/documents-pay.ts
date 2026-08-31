@@ -324,13 +324,43 @@ export function payslipHtml(args: {
     const baseForCalc = baseApplied ?? (blend ? blend.baseWage : null);
     if (matches) {
       const period = `${p.month}월 ${from.getUTCDate()}일 ~ ${p.month}월 ${to.getUTCDate()}일`;
+      if (baseForCalc != null) {
+        /*
+         * 곱하는 값(계약 월 급여총액)과 결과(기본급 항목)를 한 등식에 적으면 안 된다 —
+         * 포괄임금·식대 포함 체계에서는 총액을 일할한 뒤 약정 연장·야간·식대를 갈라 실으므로
+         * "기본급 4,600,000 × 28/31 = 3,704,399" 처럼 **수학적으로 틀린 식**이 찍혔다.
+         * 일할 결과는 총액대로 적고, 기본급은 '항목을 가른 잔액' 임을 따로 밝힌다.
+         * 총액이 그대로 기본급이 되는 경우(가를 항목이 없음)에만 예전 한 줄 표기를 쓴다.
+         */
+        const prorated = Math.round((baseForCalc * activeDays) / daysInMonth);
+        if (prorated === p.baseP) {
+          basisLines.push(
+            `<b>월중 입·퇴사 일할계산</b> — 재직 ${period} (${activeDays}일/${daysInMonth}일): ${blend ? "적용 " : ""}기본급 ${won(baseForCalc)}원 × ${activeDays}/${daysInMonth} = <b>${won(p.baseP)}원</b>`
+          );
+        } else {
+          // 총액에서 갈라져 나간 항목들 — 실제로 있는 것만 적는다
+          const carved = [
+            fx?.otHours ? "약정 연장근로수당" : "",
+            fx?.nightHours ? "약정 야간근로수당" : "",
+            p.mealP ? "식대(비과세)" : "",
+            p.carP ? "차량유지비(비과세)" : "",
+          ].filter(Boolean);
+          basisLines.push(
+            `<b>월중 입·퇴사 일할계산</b> — 재직 ${period} (${activeDays}일/${daysInMonth}일): ` +
+              `${blend ? "적용 " : ""}월 급여총액 ${won(baseForCalc)}원 × ${activeDays}/${daysInMonth} = <b>${won(prorated)}원</b>` +
+              (carved.length ? ` <span class="muted">(${carved.join("·")} 포함)</span>` : "")
+          );
+          basisLines.push(
+            `이 총액에서 ${carved.length ? carved.join("·") + "을(를) " : ""}각 항목으로 갈라 실은 잔액이 기본급 <b>${won(p.baseP)}원</b>입니다 — 항목 합계는 일할한 총액과 일치합니다.`
+          );
+        }
+      } else {
+        basisLines.push(
+          `<b>월중 입·퇴사 일할계산</b> — 재직 ${period} (${activeDays}일/${daysInMonth}일, 재직비율 ${(ratio * 100).toFixed(1)}%) → 기본급 <b>${won(p.baseP)}원</b>`
+        );
+      }
       basisLines.push(
-        baseForCalc != null
-          ? `<b>월중 입·퇴사 일할계산</b> — 재직 ${period} (${activeDays}일/${daysInMonth}일): ${blend ? "적용 " : ""}기본급 ${won(baseForCalc)}원 × ${activeDays}/${daysInMonth} = <b>${won(p.baseP)}원</b>`
-          : `<b>월중 입·퇴사 일할계산</b> — 재직 ${period} (${activeDays}일/${daysInMonth}일, 재직비율 ${(ratio * 100).toFixed(1)}%) → 기본급 <b>${won(p.baseP)}원</b>`
-      );
-      basisLines.push(
-        `직책수당·식대·차량유지비 등 월 정액 수당도 동일 비율(${activeDays}/${daysInMonth})로 일할 지급됩니다.`
+        `직책수당 등 월 정액 수당도 동일 비율(${activeDays}/${daysInMonth})로 일할 지급됩니다.`
       );
     } else {
       basisLines.push(

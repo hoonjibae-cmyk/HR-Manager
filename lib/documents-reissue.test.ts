@@ -191,3 +191,64 @@ describe("payslipHtml — 연차미사용수당 산출 근거", () => {
     expect(html).not.toContain("일 × 14,354원");
   });
 });
+
+describe("payslipHtml — 월중 입·퇴사 일할 산출 근거의 등식", () => {
+  /*
+   * 곱하는 값은 계약 월 급여총액인데 결과 자리에 '항목을 가른 잔액(기본급)' 을 적으면
+   * "4,600,000 × 28/31 = 3,704,399" 같은 **수학적으로 틀린 식**이 명세서에 찍힌다.
+   * 총액 일할은 총액대로 적고, 기본급은 잔액임을 따로 밝힌다.
+   */
+  const emp831 = {
+    ...employee,
+    hireDate: new Date(Date.UTC(2023, 2, 1)),
+    resignDate: new Date(Date.UTC(2026, 7, 28)), // 8/28 퇴사 → 28/31
+  } as unknown as DocEmployee;
+
+  it("**항목이 갈리는 체계는 '월 급여총액 × 비율 = 일할총액' 으로 적고 기본급은 잔액으로**", () => {
+    const html = payslipHtml({
+      employee: emp831,
+      company,
+      payroll: {
+        ...base,
+        year: 2026,
+        month: 8,
+        prorationRatio: 28 / 31,
+        baseP: 3_704_399, // 총액 일할(4,154,839)에서 약정 OT·야간·식대를 가른 잔액
+        overtimeP: 71_137,
+        nightP: 59_281,
+        mealP: 320_022,
+        gross: 4_154_839,
+        net: 4_154_839,
+        hourlyWage: 24_999,
+        breakdown: JSON.stringify({
+          baseApplied: 4_600_000,
+          fixed: { baseHours: 172.062, otHours: 4.345, nightHours: 10.8625 },
+        }),
+      },
+    });
+    expect(html).toContain("월 급여총액 4,600,000원 × 28/31 = <b>4,154,839원</b>");
+    expect(html).toContain("잔액이 기본급 <b>3,704,399원</b>");
+    expect(html).toContain("약정 연장근로수당·약정 야간근로수당·식대(비과세) 포함");
+    // 틀린 등식이 더는 나오지 않는다
+    expect(html).not.toContain("4,600,000원 × 28/31 = <b>3,704,399원</b>");
+  });
+
+  it("가를 항목이 없으면(총액 = 기본급) 예전 한 줄 표기 그대로", () => {
+    const html = payslipHtml({
+      employee: emp831,
+      company,
+      payroll: {
+        ...base,
+        year: 2026,
+        month: 8,
+        prorationRatio: 28 / 31,
+        baseP: Math.round((3_000_000 * 28) / 31), // 2,709,677
+        gross: 2_709_677,
+        net: 2_709_677,
+        breakdown: JSON.stringify({ baseApplied: 3_000_000 }),
+      },
+    });
+    expect(html).toContain("기본급 3,000,000원 × 28/31 = <b>2,709,677원</b>");
+    expect(html).not.toContain("월 급여총액");
+  });
+});
