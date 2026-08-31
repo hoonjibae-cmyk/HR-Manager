@@ -1,13 +1,14 @@
 /**
- * **연차기간이 끝나는 달의 미사용 연차수당 정산 제안** — 순수 함수(DB 무관).
+ * **미사용 연차수당 정산 제안** — 순수 함수(DB 무관). 짚어 주는 갈래가 둘이다.
  *
- * 연차는 입사일 기준 1년 단위로 발생하고 그 기간이 끝나면 **소멸**한다(근로기준법 §60⑦).
- * 소멸분을 수당으로 정산하려면 **그 달 급여에 실어야** 하는데, 연차기간 종료월은 사람마다
- * 달라서(입사일이 제각각) 급여 담당자가 매달 30명치 입사일을 헤아릴 수가 없다.
- * 그래서 급여 화면이 **그 달에 기간이 끝나는 사람을 짚어 주고 남은 일수를 계산해** 둔다.
+ *  ① **연차기간이 그 달에 끝나는 사람** — 연차는 입사일 기준 1년 단위로 발생하고 기간이
+ *     끝나면 소멸한다(근로기준법 §60⑦). 종료월이 사람마다 달라 담당자가 헤아릴 수 없다.
+ *  ② **그 달에 퇴사하는 사람** — 퇴직하면 남은 연차를 더 쓸 수 없게 되므로 미사용분은
+ *     수당으로 정산해 **마지막 급여에 실어야** 한다. 기간이 안 끝났어도 마찬가지다.
+ *     같은 달에 둘 다 해당하면 **퇴사 정산**으로 본다(근로관계가 끝나는 쪽이 우선한다).
  *
- * ⚠ **자동으로 넣지 않는다.** 미사용 연차를 수당으로 줄지, 다음 기간으로 이월할지,
- * 사용촉진(§61)을 했는지는 회사가 정할 일이다. 화면은 금액까지 계산해 보여 주고
+ * ⚠ **자동으로 넣지 않는다.** 수당으로 줄지, (재직자라면) 이월할지, 사용촉진(§61)을
+ * 했는지는 회사가 정할 일이다. 화면은 금액까지 계산해 보여 주고
  * **넣을지 말지는 사람이 누른다**.
  */
 
@@ -37,6 +38,8 @@ export interface PayoutInput {
   eligible: boolean;
   /** 이번 연차기간의 마지막 날 */
   periodEnd: Date;
+  /** 퇴사일 — 그 달에 퇴사하면 기간 만료와 무관하게 정산 대상이다 */
+  resignDate?: Date | null;
   /** 이번 연차기간의 남은 일수 */
   remaining: number;
   /** 이미 그 달 급여의 '미사용' 칸에 넣어 둔 일수 */
@@ -50,7 +53,9 @@ export interface PayoutInput {
 export interface PayoutSuggestion {
   employeeId: number;
   name: string;
-  /** 사용기한 YYYY-MM-DD */
+  /** 왜 이 달에 정산해야 하는가 — EXPIRY(연차기간 만료) | RESIGN(퇴사 정산) */
+  kind: "EXPIRY" | "RESIGN";
+  /** 기준일 YYYY-MM-DD — EXPIRY 면 사용기한, RESIGN 이면 퇴사일 */
   expiry: string;
   remaining: number;
   alreadyDays: number;
@@ -85,13 +90,19 @@ export function payoutSuggestions(
   month: number
 ): PayoutSuggestion[] {
   return rows
-    .filter((r) => r.eligible && inMonth(r.periodEnd, year, month) && r.remaining > 0)
+    .filter((r) => {
+      if (!r.eligible || r.remaining <= 0) return false;
+      const resigns = !!r.resignDate && inMonth(r.resignDate, year, month);
+      return resigns || inMonth(r.periodEnd, year, month);
+    })
     .map((r) => {
+      const resigns = !!r.resignDate && inMonth(r.resignDate!, year, month);
       const suggest = Math.max(0, round1(r.remaining - r.alreadyDays));
       return {
         employeeId: r.employeeId,
         name: r.name,
-        expiry: ymd(r.periodEnd),
+        kind: (resigns ? "RESIGN" : "EXPIRY") as "RESIGN" | "EXPIRY",
+        expiry: resigns ? ymd(r.resignDate!) : ymd(r.periodEnd),
         remaining: round1(r.remaining),
         alreadyDays: round1(r.alreadyDays),
         suggestDays: suggest,
@@ -112,5 +123,11 @@ export function payoutNotice(list: PayoutSuggestion[]): string | null {
   const todo = list.filter((s) => !s.done);
   if (!todo.length) return null;
   const days = round1(todo.reduce((a, s) => a + s.suggestDays, 0));
-  return `이 달에 연차기간이 끝나는 직원 ${todo.length}명 · 미사용 ${days}일`;
+  const resigns = todo.filter((s) => s.kind === "RESIGN").length;
+  const what = resigns
+    ? resigns === todo.length
+      ? "퇴사 정산"
+      : "연차기간 만료·퇴사 정산"
+    : "연차기간 만료";
+  return `이 달 ${what} 대상 ${todo.length}명 · 미사용 ${days}일`;
 }

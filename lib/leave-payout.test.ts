@@ -164,3 +164,67 @@ describe("표 위 한 줄", () => {
     expect(payoutNotice([])).toBeNull();
   });
 });
+
+describe("퇴사 정산 — 그 달에 퇴사하는 직원도 짚는다", () => {
+  /*
+   * 퇴직하면 남은 연차를 더 쓸 수 없게 되므로 미사용분은 **마지막 급여에서** 수당으로
+   * 정산해야 한다. 연차기간이 안 끝났어도 마찬가지다 — 기간 만료만 보면 8월 입사자가
+   * 3월에 퇴사할 때 아무도 짚어 주지 않아 그대로 체불이 된다.
+   */
+  it("**기간이 안 끝났어도 그 달 퇴사자는 목록에 오른다** (kind=RESIGN, 기준일=퇴사일)", () => {
+    const [s1] = payoutSuggestions(
+      [row({ periodEnd: d("2027-02-28"), resignDate: d("2026-08-20") })],
+      2026,
+      8
+    );
+    expect(s1).toBeDefined();
+    expect(s1.kind).toBe("RESIGN");
+    expect(s1.expiry).toBe("2026-08-20");
+    expect(s1.suggestDays).toBe(5);
+  });
+
+  it("퇴사가 다른 달이면 오르지 않는다 (그 달 시트의 일이 아니다)", () => {
+    expect(
+      payoutSuggestions([row({ periodEnd: d("2027-02-28"), resignDate: d("2026-09-10") })], 2026, 8)
+    ).toHaveLength(0);
+  });
+
+  // 근로관계가 끝나는 쪽이 우선한다 — '기간 만료' 로 적으면 이월 선택지가 있는 줄 안다
+  it("**같은 달에 기간도 끝나고 퇴사도 하면 '퇴사 정산' 으로 본다**", () => {
+    const [s1] = payoutSuggestions(
+      [row({ periodEnd: d("2026-08-31"), resignDate: d("2026-08-15") })],
+      2026,
+      8
+    );
+    expect(s1.kind).toBe("RESIGN");
+    expect(s1.expiry).toBe("2026-08-15");
+  });
+
+  it("퇴사자라도 잔여가 없으면 오르지 않는다", () => {
+    expect(
+      payoutSuggestions(
+        [row({ periodEnd: d("2027-02-28"), resignDate: d("2026-08-20"), remaining: 0 })],
+        2026,
+        8
+      )
+    ).toHaveLength(0);
+  });
+
+  it("안내 한 줄이 갈래를 밝힌다", () => {
+    const resign = payoutSuggestions(
+      [row({ periodEnd: d("2027-02-28"), resignDate: d("2026-08-20") })],
+      2026,
+      8
+    );
+    expect(payoutNotice(resign)).toContain("퇴사 정산");
+    const both = payoutSuggestions(
+      [
+        row({ periodEnd: d("2027-02-28"), resignDate: d("2026-08-20") }),
+        row({ employeeId: 2, name: "이만료", periodEnd: d("2026-08-31") }),
+      ],
+      2026,
+      8
+    );
+    expect(payoutNotice(both)).toContain("연차기간 만료·퇴사 정산");
+  });
+});

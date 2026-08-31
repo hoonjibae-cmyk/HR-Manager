@@ -180,7 +180,7 @@ export default function PayrollClient({ today }: { today: string }) {
   const [openDedId, setOpenDedId] = useState<number | null>(null);
   const [unlockRec, setUnlockRec] = useState<Rec | null>(null);
   const [addOpen, setAddOpen] = useState(false);
-  /** 그 달에 연차기간이 끝나는 직원 — 미사용 연차수당을 넣을지 사람이 정한다 */
+  /** 그 달에 연차기간이 끝나거나 퇴사하는 직원 — 미사용 연차수당을 넣을지 사람이 정한다 */
   const [payout, setPayout] = useState<PayoutSuggestion[]>([]);
   const [payoutOpen, setPayoutOpen] = useState(false);
   const [tsResult, setTsResult] = useState<any>(null);
@@ -653,7 +653,7 @@ export default function PayrollClient({ today }: { today: string }) {
               className="btn-outline"
               onClick={() => setPayoutOpen(true)}
               disabled={!!busy}
-              title="이 달에 연차기간이 끝나는 직원의 미사용 연차수당을 확인하고 반영합니다"
+              title="이 달에 연차기간이 끝나거나 퇴사하는 직원의 미사용 연차수당을 확인하고 반영합니다"
             >
               🍃 연차수당 상세
               {payout.some((p) => !p.done) && (
@@ -1887,7 +1887,8 @@ function InlineInput({
 }
 
 /**
- * 연차수당 상세 — **이 달에 연차기간이 끝나는 직원**과 미사용 일수를 모아 보여 준다.
+ * 연차수당 상세 — **이 달에 연차기간이 끝나거나 퇴사하는 직원**과 미사용 일수를 모아 보여 준다.
+ * 퇴사자는 기간이 안 끝났어도 남은 연차를 더 쓸 수 없게 되므로 마지막 급여에서 정산해야 한다.
  *
  * 급여 표에 열을 더하지 않고 따로 둔 이유: 연차기간 종료월은 입사일에 따라 사람마다 달라
  * 한 달에 많아야 두어 명이다. 47명짜리 표에 그 두 명을 위한 칸을 상시로 두면
@@ -1960,13 +1961,14 @@ function LeavePayoutModal({
           🍃 연차수당 상세 — {year}년 {month}월
         </h3>
         <p className="text-xs text-slate-500 mb-3">
-          이 달에 <b>연차기간이 끝나는</b> 직원입니다. 기간이 끝나면 남은 연차는 소멸하므로
-          (근로기준법 §60⑦) 수당으로 정산하려면 <b>이 달 급여</b>에 실어야 합니다.
+          이 달에 <b>연차기간이 끝나거나</b>(§60⑦ — 기간이 끝나면 남은 연차는 소멸)
+          <b> 퇴사하는</b>(남은 연차를 더 쓸 수 없어 미사용분을 수당으로 정산) 직원입니다.
+          정산하려면 <b>이 달 급여</b>에 실어야 합니다.
         </p>
 
         {list.length === 0 ? (
           <div className="text-center text-slate-400 py-10 text-sm">
-            이 달에 연차기간이 끝나는 직원이 없습니다.
+            이 달에 연차기간이 끝나거나 퇴사하는 직원이 없습니다.
             <div className="text-xs mt-1 text-slate-400">
               연차기간은 <b>입사일 기준 1년 단위</b>라 사람마다 종료월이 다릅니다.
             </div>
@@ -1979,11 +1981,16 @@ function LeavePayoutModal({
                 사용촉진(§61)을 했는지는 회사가 정할 일입니다.
               </div>
               <div>
-                · 금액은 <b>미사용 일수 × 통상시급 × 8시간</b>으로, 급여명세서에 찍히는 식과 같습니다.
+                · 금액은 <b>미사용 일수 × 통상시급 × 1일 소정근로시간</b>(휴게 제외, 상한 8시간)으로,
+                급여명세서에 찍히는 식과 같습니다.
               </div>
               <div>
-                · 잔여는 <b>그 달 말일 기준</b>입니다. 남은 기간에 연차를 더 쓰면 줄어드니,
-                기간이 끝난 뒤 반영하는 편이 정확합니다.
+                · 잔여는 <b>그 달 말일 기준</b>(퇴사자는 <b>퇴사일 기준</b>)입니다. 남은 기간에
+                연차를 더 쓰면 줄어드니, 기간이 끝난 뒤 반영하는 편이 정확합니다.
+              </div>
+              <div>
+                · <b>퇴사 정산</b>은 사용촉진(§61)을 적법하게 거친 경우가 아니면 지급 의무가
+                있습니다 — 판단이 서지 않으면 노무 자문을 거쳐 반영하세요.
               </div>
             </div>
 
@@ -1993,7 +2000,7 @@ function LeavePayoutModal({
                   <tr className="text-slate-500 text-xs">
                     <th className="px-2 py-2 w-8"></th>
                     <th className="px-2 py-2 text-left">직원</th>
-                    <th className="px-2 py-2 text-left">사용기한</th>
+                    <th className="px-2 py-2 text-left">구분 · 기준일</th>
                     <th className="px-2 py-2 text-right">잔여</th>
                     <th className="px-2 py-2 text-right">이미 반영</th>
                     <th className="px-2 py-2 text-right">추가 반영</th>
@@ -2021,7 +2028,19 @@ function LeavePayoutModal({
                           </span>
                         )}
                       </td>
-                      <td className="px-2 py-2 tnum text-slate-500">{s.expiry}</td>
+                      <td className="px-2 py-2 tnum text-slate-500 whitespace-nowrap">
+                        {/* 왜 이 달에 정산해야 하는지가 한눈에 갈려야 한다 — 퇴사 정산은 놓치면 체불이다 */}
+                        <span
+                          className={`pill mr-1.5 text-[10px] ${
+                            s.kind === "RESIGN"
+                              ? "bg-rose-50 text-rose-600"
+                              : "bg-slate-100 text-slate-500"
+                          }`}
+                        >
+                          {s.kind === "RESIGN" ? "퇴사 정산" : "기간 만료"}
+                        </span>
+                        {s.expiry}
+                      </td>
                       <td className="px-2 py-2 text-right tnum">{s.remaining}일</td>
                       <td className="px-2 py-2 text-right tnum text-slate-400">
                         {s.alreadyDays ? `${s.alreadyDays}일` : "-"}
