@@ -425,7 +425,7 @@ model PayrollRecord {
   nightHours         Float  @default(0) // 야간근로시간(월)
   holidayHours       Float  @default(0) // 휴일근로시간(월, 8시간 이내 ×1.5)
   holidayOverHours   Float  @default(0) // 휴일근로 중 1일 8시간 초과분(월, ×2.0 — 근로기준법 §56②)
-  studentCount       Int? // 인센티브용 학생수 (명단 없을 때 수동 입력)
+  studentCount       Float? // 인센티브용 학생수 — 재원계수 소수 입력 허용 (회차÷8 = 0.125 단위, 셋째자리까지)
   studentUnits       Float? // 인센티브 가중 인원 (명단 기반, 월중 입학·전출·퇴원 반영 0.x 가능)
   classRevenue       Int? // 비율제용 반 매출액
   bonus              Int    @default(0) // 특별상여

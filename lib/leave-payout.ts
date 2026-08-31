@@ -91,13 +91,20 @@ export function payoutSuggestions(
 ): PayoutSuggestion[] {
   return rows
     .filter((r) => {
-      if (!r.eligible || r.remaining <= 0) return false;
+      if (!r.eligible) return false;
       const resigns = !!r.resignDate && inMonth(r.resignDate, year, month);
-      return resigns || inMonth(r.periodEnd, year, month);
+      // **퇴사자는 잔여가 마이너스(초과사용)여도 올린다** — 발생분보다 많이 쓰고 나가는
+      // 경우 초과일수를 (−)로 정산(마지막 급여에서 공제, 임금공제 동의서 근거)해야 하는데
+      // 목록에서 빠지면 그대로 놓친다. 재직자의 기간 만료는 예전대로 양수만 — 초과분을
+      // 다음 기간에서 조정할지는 회사가 따로 정할 일이라 자동 제안하지 않는다.
+      if (resigns) return r.remaining !== 0;
+      return r.remaining > 0 && inMonth(r.periodEnd, year, month);
     })
     .map((r) => {
       const resigns = !!r.resignDate && inMonth(r.resignDate!, year, month);
-      const suggest = Math.max(0, round1(r.remaining - r.alreadyDays));
+      // 퇴사 정산은 음수 제안을 그대로 둔다(공제). 기간 만료는 0 밑으로 내려가지 않는다.
+      const raw = round1(r.remaining - r.alreadyDays);
+      const suggest = resigns ? raw : Math.max(0, raw);
       return {
         employeeId: r.employeeId,
         name: r.name,

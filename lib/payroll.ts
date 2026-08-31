@@ -141,7 +141,7 @@ export interface MonthlyInput {
   nightHours?: number; // 야간근로(월, 22~06시) — +0.5 가산
   holidayHours?: number; // 휴일근로(월, 주휴일·공휴일) 8시간 이내 — ×1.5
   holidayOverHours?: number; // 휴일근로 중 1일 8시간 초과분 — ×2.0 (근로기준법 §56②)
-  studentCount?: number | null; // 인센티브용 (명단 없을 때 수동 입력 정수)
+  studentCount?: number | null; // 인센티브용 (명단 없을 때 수동 입력 — 재원계수 소수 허용)
   /** 인센티브 가중 인원 — 학생 명단 기반. 월중 입학·전출·퇴원은 회차 비례(0~1)로
    *  환산되므로 소수. 지정 시 studentCount 대신 사용한다. */
   studentUnits?: number | null;

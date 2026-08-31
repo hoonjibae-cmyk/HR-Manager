@@ -200,13 +200,46 @@ describe("퇴사 정산 — 그 달에 퇴사하는 직원도 짚는다", () => 
     expect(s1.expiry).toBe("2026-08-15");
   });
 
-  it("퇴사자라도 잔여가 없으면 오르지 않는다", () => {
+  it("퇴사자라도 잔여가 0이면 오르지 않는다 (정산할 것이 없다)", () => {
     expect(
       payoutSuggestions(
         [row({ periodEnd: d("2027-02-28"), resignDate: d("2026-08-20"), remaining: 0 })],
         2026,
         8
       )
+    ).toHaveLength(0);
+  });
+
+  /*
+   * 발생분보다 많이 쓰고 나가는 퇴사자 — 초과일수를 (−)로 정산해 마지막 급여에서 공제해야
+   * 하는데(임금공제 동의서 근거) 양수만 거르면 목록에서 빠져 그대로 놓친다.
+   */
+  it("**잔여가 마이너스(초과 사용)인 퇴사자도 오른다** — (−) 정산 제안", () => {
+    const [s1] = payoutSuggestions(
+      [row({ periodEnd: d("2027-02-28"), resignDate: d("2026-08-20"), remaining: -4, dailyHours: 7.5, hourlyWage: 13_014 })],
+      2026,
+      8
+    );
+    expect(s1).toBeDefined();
+    expect(s1.kind).toBe("RESIGN");
+    expect(s1.suggestDays).toBe(-4);
+    expect(s1.suggestAmount).toBe(-390_420); // −4일 × 13,014원 × 7.5시간
+    expect(s1.done).toBe(false);
+  });
+
+  it("이미 (−)로 넣어 뒀으면 done — 다시 제안하지 않는다", () => {
+    const [s1] = payoutSuggestions(
+      [row({ periodEnd: d("2027-02-28"), resignDate: d("2026-08-20"), remaining: -4, alreadyDays: -4 })],
+      2026,
+      8
+    );
+    expect(s1.suggestDays).toBe(0);
+    expect(s1.done).toBe(true);
+  });
+
+  it("재직자의 기간 만료는 예전대로 양수만 — 초과분 자동 제안은 하지 않는다", () => {
+    expect(
+      payoutSuggestions([row({ periodEnd: d("2026-08-31"), remaining: -2 })], 2026, 8)
     ).toHaveLength(0);
   });
 

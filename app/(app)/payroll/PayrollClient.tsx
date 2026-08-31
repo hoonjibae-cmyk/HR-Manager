@@ -1992,6 +1992,11 @@ function LeavePayoutModal({
                 · <b>퇴사 정산</b>은 사용촉진(§61)을 적법하게 거친 경우가 아니면 지급 의무가
                 있습니다 — 판단이 서지 않으면 노무 자문을 거쳐 반영하세요.
               </div>
+              <div>
+                · 잔여가 <b className="text-rose-600">마이너스(초과 사용)</b>인 퇴사자는 초과
+                일수를 (−)로 정산해 마지막 급여에서 <b>공제</b>합니다 — 임금공제 동의서의
+                연차 정산 조항이 근거입니다.
+              </div>
             </div>
 
             <div className="flex-1 min-h-0 overflow-auto border border-slate-200 rounded">
@@ -2041,14 +2046,16 @@ function LeavePayoutModal({
                         </span>
                         {s.expiry}
                       </td>
-                      <td className="px-2 py-2 text-right tnum">{s.remaining}일</td>
+                      <td className={`px-2 py-2 text-right tnum ${s.remaining < 0 ? "text-rose-600 font-semibold" : ""}`}>
+                        {s.remaining}일
+                      </td>
                       <td className="px-2 py-2 text-right tnum text-slate-400">
                         {s.alreadyDays ? `${s.alreadyDays}일` : "-"}
                       </td>
-                      <td className="px-2 py-2 text-right tnum font-semibold">
+                      <td className={`px-2 py-2 text-right tnum font-semibold ${s.suggestDays < 0 ? "text-rose-600" : ""}`}>
                         {s.suggestDays ? `${s.suggestDays}일` : "-"}
                       </td>
-                      <td className="px-2 py-2 text-right tnum font-semibold text-brand-600">
+                      <td className={`px-2 py-2 text-right tnum font-semibold ${s.suggestAmount < 0 ? "text-rose-600" : "text-brand-600"}`}>
                         {s.suggestAmount ? `${won(s.suggestAmount)}원` : "-"}
                       </td>
                     </tr>
