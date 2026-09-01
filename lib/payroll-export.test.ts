@@ -413,12 +413,12 @@ describe("워크북 출력", () => {
 });
 
 describe("재직 상태 열 — 그 달 퇴직자 표시", () => {
-  it("퇴사일이 그 달 안이면 '퇴직'", () => {
-    expect(exportStatusOf(new Date(Date.UTC(2026, 7, 15)), 2026, 8)).toBe("퇴직");
-    expect(exportStatusOf("2026-08-31", 2026, 8)).toBe("퇴직");
+  it("퇴사일이 그 달 안이면 '퇴직' + 날짜 — 세무사의 상실 신고에 퇴직일이 필요하다", () => {
+    expect(exportStatusOf(new Date(Date.UTC(2026, 7, 15)), 2026, 8)).toBe("퇴직 (2026-08-15)");
+    expect(exportStatusOf("2026-08-31", 2026, 8)).toBe("퇴직 (2026-08-31)");
   });
-  it("그 전에 퇴직한 사람(정산분 수동 추가)도 '퇴직'", () => {
-    expect(exportStatusOf("2026-07-31", 2026, 8)).toBe("퇴직");
+  it("그 전에 퇴직한 사람(정산분 수동 추가)도 날짜와 함께", () => {
+    expect(exportStatusOf("2026-07-31", 2026, 8)).toBe("퇴직 (2026-07-31)");
   });
   it("퇴사 예정(다음 달 이후)이거나 퇴사일이 없으면 빈칸 — 그 달은 아직 재직", () => {
     expect(exportStatusOf("2026-09-01", 2026, 8)).toBe("");
@@ -435,12 +435,12 @@ describe("재직 상태 열 — 그 달 퇴직자 표시", () => {
         { ...rec({ name: "퇴직자", gross: 500_000, net: 500_000 }), employee: { name: "퇴직자", empNo: "2", rrn: "1", resignDate: new Date(Date.UTC(2026, 6, 15)) } },
       ],
     });
-    expect(rows.map((r) => r.status)).toEqual(["", "퇴직"]);
+    expect(rows.map((r) => r.status)).toEqual(["", "퇴직 (2026-07-15)"]);
     const wb = XLSX.read(buffer, { type: "buffer" });
     const aoa = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false });
     const col = (aoa[1] as any[]).indexOf("재직 상태");
     expect(col).toBe(aoa[1].length - 1); // 마지막 열
-    expect(aoa[3][col]).toBe("퇴직");
+    expect(aoa[3][col]).toBe("퇴직 (2026-07-15)");
     expect(aoa[4][col]).toBe("퇴직 1명"); // 합계 행
   });
 });

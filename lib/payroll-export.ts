@@ -83,7 +83,9 @@ export interface ExportRow {
 }
 
 /**
- * 재직 상태 열 — 퇴사일이 그 달 말일 이전이면 '퇴직'.
+ * 재직 상태 열 — 퇴사일이 그 달 말일 이전이면 '퇴직 (YYYY-MM-DD)'.
+ * 날짜를 함께 적는 이유: 세무사가 상실 신고를 하려면 어차피 퇴직일이 필요하다 —
+ * 표시만 있으면 날짜를 따로 물어보게 된다.
  * 그 달에 퇴사한 사람(마지막 급여)과, 퇴직 후 정산분으로 수동 추가된 사람이 여기 잡힌다.
  * 퇴사일이 그 달보다 뒤(퇴사 예정)면 그 달은 아직 재직이므로 적지 않는다.
  */
@@ -93,8 +95,13 @@ export function exportStatusOf(
   month: number
 ): string {
   if (!resignDate) return "";
+  const d = new Date(resignDate);
   const monthEnd = new Date(Date.UTC(year, month, 0, 23, 59, 59));
-  return new Date(resignDate) <= monthEnd ? "퇴직" : "";
+  if (d > monthEnd) return "";
+  const ymd = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    d.getUTCDate()
+  ).padStart(2, "0")}`;
+  return `퇴직 (${ymd})`;
 }
 
 /** 지급일 — 임금은 익월 `payday` 일에 지급한다(계약서 제4조와 같은 규칙) */
@@ -350,7 +357,7 @@ export function buildPayrollExportWorkbook(args: {
     ...Array.from({ length: lastNumCol - firstNumCol + 1 }, () => ({ wch: 13 })),
     { wch: 15 }, // 기타
     { wch: 17 }, // ID
-    { wch: 10 }, // 재직 상태
+    { wch: 17 }, // 재직 상태 (퇴직 + 날짜)
   ];
   ws["!rows"] = [{ hpt: 26 }, { hpt: 30 }];
   ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } }];
