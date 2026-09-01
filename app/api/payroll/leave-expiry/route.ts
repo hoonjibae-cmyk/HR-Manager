@@ -95,9 +95,8 @@ export async function GET(req: Request) {
 /**
  * 고른 직원의 **미사용 연차 일수를 급여에 넣고 다시 산정**한다.
  *
- * ⚠ **그 행에 이미 들어 있는 입력값을 함께 실어 보낸다.** `runPayrollMonth` 는 넘기지 않은
- * 항목을 보존하려 애쓰지만 오버타임 시간처럼 원장에서 다시 채우는 값이 있어, 손으로 넣어 둔
- * 시간이 이 경로에서 조용히 0 이 될 수 있다. 기존 값을 그대로 다시 넣어 그 여지를 없앤다.
+ * 미사용 일수 **하나만** 실어 보낸다 — `runPayrollMonth` 가 넘기지 않은 항목을 보존한다
+ * (오버타임 시간은 원장 > 기존 저장값 순으로 채운다. lib/overtime-inputs.ts).
  *
  * 발송(SENT)된 달은 `runPayrollMonth` 가 알아서 건드리지 않는다 — 명세서가 이미 나갔으므로
  * 잠금 해제를 거쳐야 한다. 여기서는 그런 행을 골라내 몇 건인지 알려 준다.
@@ -129,18 +128,12 @@ export async function POST(req: Request) {
   for (const r of open) {
     const days = wanted.get(r.employeeId);
     if (days == null || !Number.isFinite(days)) continue;
-    // 그 행의 현재 입력값 그대로 + 미사용 일수만 교체
+    // 미사용 일수만 넘긴다 — 넘기지 않은 항목은 runPayrollMonth 가 보존한다
+    // (오버타임 시간은 원장 > 기존값, 나머지는 기존값. lib/overtime-inputs.ts).
+    // 예전처럼 행의 값을 그대로 되돌려 실으면 그 사이 확정된 보강 시간이 옛 값에 눌린다.
+    // **음수도 그대로 싣는다** — 퇴사 정산의 초과사용분은 (−) 일수로 공제된다(임금공제 동의서).
     inputs[r.employeeId] = {
-      extraHours: r.extraHours,
-      overtimeHours: r.overtimeHours,
-      holidayHours: r.holidayHours,
-      holidayOverHours: r.holidayOverHours,
-      nightHours: r.nightHours,
-      studentCount: r.studentCount,
-      classRevenue: r.classRevenue,
-      bonus: r.bonus,
-      incentiveManual: r.incentiveManual,
-      unusedLeaveDays: Math.max(0, Math.round(days * 10) / 10),
+      unusedLeaveDays: Math.round(days * 10) / 10,
     } as any;
   }
 

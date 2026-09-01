@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { won } from "@/lib/format";
 import {
   PAY_SCHEME_LABEL,
@@ -139,6 +139,27 @@ function rowInputsOf(r: Rec) {
   };
 }
 
+/**
+ * 화면에서 **실제로 고친 항목만** 골라낸다.
+ *
+ * 저장된 값을 그대로 되돌려 보내면 서버가 '관리자가 이번에 지정한 값' 으로 읽는다 —
+ * 그래서 월초에 한 번 산정해 0 이 저장된 뒤 보강·초과근무가 확정되면, 재산정 때마다
+ * 화면이 그 0 을 명시값으로 돌려보내 **확정된 오버타임 시간이 영영 반영되지 않았다**
+ * (김수민 8월: 명세서 별첨에는 나오는데 지급액에는 없었다). 고치지 않은 항목은 아예
+ * 싣지 않아야 서버가 원장(확정분)이나 기존 저장값으로 알아서 채운다(lib/overtime-inputs.ts).
+ * 빈칸으로 지운 것은 0 으로 바뀐 '고친 값' 이므로 그대로 실린다 — 지우는 길은 남는다.
+ */
+function dirtyRowInput(v: any, base: any) {
+  const c = cleanRowInput(v ?? {});
+  if (base === undefined) return c; // 기준이 없으면(저장 전 행) 전부 새 입력이다
+  const b = cleanRowInput(base);
+  const out: Record<string, any> = {};
+  for (const k of Object.keys(c) as (keyof typeof c)[]) {
+    if (c[k] !== b[k]) out[k as string] = c[k];
+  }
+  return out;
+}
+
 /** 변동입력 폼 값 → API 전송용 숫자 변환 */
 function cleanRowInput(v: any) {
   return {
@@ -175,6 +196,8 @@ export default function PayrollClient({ today }: { today: string }) {
   const setMonth = (m: number) => setPeriod((p) => ({ ...p, month: m }));
   const [recs, setRecs] = useState<Rec[]>([]);
   const [inputs, setInputs] = useState<Record<number, any>>({});
+  /** 서버에서 읽어 온 그대로의 변동입력 — 무엇을 '고쳤는지' 가려내는 기준(dirtyRowInput) */
+  const baseInputs = useRef<Record<number, any>>({});
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState("");
   const [openDedId, setOpenDedId] = useState<number | null>(null);
@@ -212,6 +235,7 @@ export default function PayrollClient({ today }: { today: string }) {
       map[r.employeeId] = rowInputsOf(r);
     });
     setInputs(map);
+    baseInputs.current = { ...map };
     setLoading(false);
     // 연차 원장을 훑는 조회라 급여 목록과 **따로** 부른다 — 실패해도 급여 화면은 그대로 뜬다
     fetch(`/api/payroll/leave-expiry?year=${year}&month=${month}`)
@@ -226,9 +250,12 @@ export default function PayrollClient({ today }: { today: string }) {
 
   async function run() {
     setBusy("calc");
+    // 고친 항목만 싣는다 — 저장된 값을 그대로 돌려보내면 원장(보강 확정분)에서
+    // 다시 채우는 오버타임 시간이 옛 값에 눌린다 (dirtyRowInput 주석 참고)
     const cleanInputs: Record<number, any> = {};
     for (const [id, v] of Object.entries(inputs)) {
-      cleanInputs[Number(id)] = cleanRowInput(v);
+      const d = dirtyRowInput(v, baseInputs.current[Number(id)]);
+      if (Object.keys(d).length) cleanInputs[Number(id)] = d;
     }
     const res = await fetch("/api/payroll/run", {
       method: "POST",
@@ -277,7 +304,8 @@ export default function PayrollClient({ today }: { today: string }) {
       body: JSON.stringify({
         year,
         month,
-        inputs: { [employeeId]: cleanRowInput(inputs[employeeId] ?? {}) },
+        // 고친 항목만 — 나머지는 서버가 원장·기존값에서 채운다 (일괄 산정과 같은 규칙)
+        inputs: { [employeeId]: dirtyRowInput(inputs[employeeId], baseInputs.current[employeeId]) },
         employeeIds: [employeeId],
       }),
     });
@@ -291,7 +319,10 @@ export default function PayrollClient({ today }: { today: string }) {
     const data: Rec[] = r2.ok ? await r2.json() : [];
     setRecs(data);
     const fresh = data.find((x) => x.employeeId === employeeId);
-    if (fresh) setInputs((p) => ({ ...p, [employeeId]: rowInputsOf(fresh) }));
+    if (fresh) {
+      setInputs((p) => ({ ...p, [employeeId]: rowInputsOf(fresh) }));
+      baseInputs.current[employeeId] = rowInputsOf(fresh);
+    }
     setBusy("");
   }
 

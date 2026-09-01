@@ -373,6 +373,32 @@ describe("computePayroll — 추가근로(법내연장) vs 법정연장 구분",
     expect(r.overtimeP).toBe(Math.round(4 * r.hourlyWage * 1.5));
     expect(r.gross).toBe(3_000_000 + r.extraP + r.overtimeP);
   });
+
+  it("근로시간표가 비어 있어도 통상시급이 0 이 되지 않는다 — 209시간(주 40h) 환산", () => {
+    // 김수민 8월: 시간표가 빈 월급제 직원 — 통상시급 0 → 확정된 오버타임이 0원으로 나갔다.
+    // 보강 화면·슬랙 DM(hourlyWageOf)과 같은 209시간 폴백을 쓴다.
+    const r = computePayroll(
+      { ...emp, baseWage: 2_800_000, schedule: [] },
+      { extraHours: 2 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.hourlyWage).toBe(Math.round(2_800_000 / 209)); // 13,397
+    expect(r.extraP).toBe(Math.round((2_800_000 / 209) * 2)); // 26,794
+    expect(r.gross).toBe(2_800_000 + r.extraP);
+    expect(r.notes.join(" ")).toContain("209시간");
+  });
+
+  it("시간표가 비어도 계약서의 기본급 산정시간(fixedBaseHours)이 있으면 그쪽이 우선", () => {
+    const r = computePayroll(
+      { ...emp, schedule: [], fixedBaseHours: 200 },
+      { extraHours: 1 },
+      DEFAULT_RATES_2025,
+      smallTaxTable
+    );
+    expect(r.hourlyWage).toBe(Math.round(3_000_000 / 200));
+    expect(r.notes.join(" ")).not.toContain("209시간");
+  });
 });
 
 describe("computePayroll — 퇴직유보금 (인센티브 × 1/12)", () => {

@@ -9,6 +9,7 @@ import {
 import { getActiveRates, getTaxTable, empToPayInput } from "./repo";
 import { summarizeIncentive, isRevenueRoster, type RosterStudent } from "./incentive";
 import { overtimeInputsFor } from "./makeup-service";
+import { mergeOvertimeHours, ledgerApplied } from "./overtime-inputs";
 import { parkingDeductionOf } from "./constants";
 import {
   planSheetCleanup,
@@ -411,15 +412,12 @@ export async function runPayrollMonth(
         mInput.timesheet = null;
       }
     }
-    // 오버타임(보강 실근무 확정분) — 명시적으로 넘긴 값이 있으면 그쪽을 존중한다
+    // 오버타임 시간: **명시 입력 > 원장(실근무 확정분) > 기존 저장값 > 0** (lib/overtime-inputs.ts).
+    // 화면은 관리자가 실제로 고친 항목만 보내므로, 저장된 0 이 명시 입력으로 둔갑해
+    // 나중에 확정된 원장 시간을 막는 일이 없다(김수민 8월 — 별첨에는 나오는데 지급액에는 없었다).
     const ot = otMap.get(emp.id);
-    if (ot) {
-      if (mInput.extraHours === undefined) mInput.extraHours = ot.extraHours;
-      if (mInput.overtimeHours === undefined) mInput.overtimeHours = ot.overtimeHours;
-      if (mInput.holidayHours === undefined) mInput.holidayHours = ot.holidayHours;
-      if (mInput.holidayOverHours === undefined) mInput.holidayOverHours = ot.holidayOverHours;
-      if (mInput.nightHours === undefined) mInput.nightHours = ot.nightHours;
-    }
+    const otHours = mergeOvertimeHours(mInput as any, ot ?? null, existing);
+    Object.assign(mInput, otHours);
     mInput.prorationRatio = prorationRatioFor(
       year,
       month,
@@ -572,8 +570,10 @@ export async function runPayrollMonth(
             : null,
         // 시간기록표 근거 — 명세서의 체류/휴게/순 근로/연차 구분 표기용
         timesheet: mInput.timesheet ?? null,
-        // 보강 오버타임 산정 내역 — 명세서 첨부 '오버타임 산정 내역서' 가 이걸 그대로 쓴다
-        overtime: ot?.detail?.length
+        // 보강 오버타임 산정 내역 — 명세서 첨부 '오버타임 산정 내역서' 가 이걸 그대로 쓴다.
+        // **원장 시간을 그대로 산정에 썼을 때만** 남긴다 — 관리자가 시간을 직접 고쳐
+        // 원장과 다르게 산정한 달에 원장 내역서를 붙이면 별첨과 지급액이 어긋난 문서가 나간다.
+        overtime: ledgerApplied(otHours, ot ?? null) && ot?.detail?.length
           ? {
               extraHours: ot.extraHours,
               overtimeHours: ot.overtimeHours,

@@ -463,8 +463,20 @@ export function computePayroll(
   const fixedNight = isMonthlyScheme ? emp.fixedNightHours ?? 0 : 0;
   const hasFixed = fixedOt > 0 || fixedNight > 0;
   // 기본급 산정시간 — 계약서에 적힌 값(예 209시간)이 있으면 그대로, 없으면 스케줄 환산
-  const baseHours =
+  let baseHours =
     isMonthlyScheme && emp.fixedBaseHours ? emp.fixedBaseHours : monthlyStdHours;
+  // 근로시간표가 비어 있으면(소정 0시간) 통상시급 분모가 0 이 되어 **오버타임·연차수당이
+  // 전부 0원**으로 나간다 — 시간이 시트에 실리고 별첨 내역서까지 붙는데 지급액만 0 이라
+  // 아무도 눈치채지 못한다(김수민 8월). 조용히 덜 주는 쪽으로 틀리므로 법정 기준
+  // 209시간(주 40시간, (40+8)×4.345)으로 환산한다. 보강 화면·슬랙 DM 이 쓰는
+  // hourlyWageOf(lib/makeup-service.ts)와 같은 폴백이라 두 자리의 통상시급이 갈라지지 않는다.
+  if (isMonthlyScheme && baseHours <= 0) {
+    baseHours = 209;
+    notes.push(
+      "⚠️ 근로시간표가 비어 있어 통상시급을 209시간(주 40시간 기준)으로 환산했습니다. " +
+        "직원 정보에 근로시간표를 채우면 계약 소정근로시간 기준으로 다시 계산됩니다."
+    );
+  }
 
   // --- 일할계산 비율 (월중 입/퇴사). 비율제는 매출 기반이라 미적용 ---
   const rawRatio = month.prorationRatio ?? 1;
