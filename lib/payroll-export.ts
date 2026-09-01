@@ -19,7 +19,10 @@
 // 실비정산·기타공제는 평소 비어 있어 원래 시트에 열이 없다. 값이 있는 달에만 열을 붙여
 // **합계가 어긋나지 않게** 한다(조용히 빼면 입금액이 안 맞는다).
 
-import * as XLSX from "xlsx";
+// xlsx-js-style: SheetJS 0.18.5 에 셀 서식(cell.s)을 얹은 포크 — 세무사에게 나가는 표라
+// 머리글·테두리·합계 강조가 있어야 읽힌다. **은행 이체 파일(lib/bank-transfer.ts)은 그대로
+// `xlsx` 를 쓴다** — 그쪽은 은행 양식이 "구조를 절대 바꾸지 말라" 는 표라 서식을 얹지 않는다.
+import * as XLSX from "xlsx-js-style";
 import { variableOvertimeOf } from "./payroll";
 
 export interface ExportPayrollRecord {
@@ -55,7 +58,7 @@ export interface ExportPayrollRecord {
   expenseD: number;
   otherD: number;
   net: number;
-  employee: { name: string; empNo: string; rrn?: string | null };
+  employee: { name: string; empNo: string; rrn?: string | null; resignDate?: Date | string | null };
 }
 
 export interface ExportRow {
@@ -75,6 +78,23 @@ export interface ExportRow {
   otherDeduct: number; // 기타공제
   note: string; // 기타 (원천징수 방식)
   id: string; // 주민등록번호
+  /** 재직 상태 — 그 달(또는 그 전)에 퇴직했으면 '퇴직', 아니면 빈칸 */
+  status: string;
+}
+
+/**
+ * 재직 상태 열 — 퇴사일이 그 달 말일 이전이면 '퇴직'.
+ * 그 달에 퇴사한 사람(마지막 급여)과, 퇴직 후 정산분으로 수동 추가된 사람이 여기 잡힌다.
+ * 퇴사일이 그 달보다 뒤(퇴사 예정)면 그 달은 아직 재직이므로 적지 않는다.
+ */
+export function exportStatusOf(
+  resignDate: Date | string | null | undefined,
+  year: number,
+  month: number
+): string {
+  if (!resignDate) return "";
+  const monthEnd = new Date(Date.UTC(year, month, 0, 23, 59, 59));
+  return new Date(resignDate) <= monthEnd ? "퇴직" : "";
 }
 
 /** 지급일 — 임금은 익월 `payday` 일에 지급한다(계약서 제4조와 같은 규칙) */
@@ -107,7 +127,7 @@ export function statutoryDeductionOf(r: ExportPayrollRecord): number {
  */
 export { variableOvertimeOf };
 
-export function buildExportRow(r: ExportPayrollRecord, payDate: string): ExportRow {
+export function buildExportRow(r: ExportPayrollRecord, payDate: string, status = ""): ExportRow {
   const overtimePay = variableOvertimeOf(r);
   const unusedLeavePay = r.unusedLeaveP || 0;
   const bonus = r.bonusP || 0;
@@ -133,6 +153,7 @@ export function buildExportRow(r: ExportPayrollRecord, payDate: string): ExportR
     otherDeduct: r.otherD || 0,
     note: r.incomeType === "FREELANCE" ? "3.3% 적용" : "4대보험(근로소득)",
     id: r.employee.rrn || "",
+    status,
   };
 }
 
@@ -162,7 +183,9 @@ export function buildPayrollExportWorkbook(args: {
   records: ExportPayrollRecord[];
 }): { buffer: Buffer; rows: ExportRow[]; mismatches: string[]; missingId: string[] } {
   const payDate = payDateOf(args.year, args.month, args.payday);
-  const rows = args.records.map((r) => buildExportRow(r, payDate));
+  const rows = args.records.map((r) =>
+    buildExportRow(r, payDate, exportStatusOf(r.employee.resignDate, args.year, args.month))
+  );
 
   // 평소 0 인 열은 원래 시트에 없다 — 값이 있는 달에만 붙여 합계가 맞게 한다
   const hasExpense = rows.some((r) => r.expense !== 0);
@@ -185,6 +208,7 @@ export function buildPayrollExportWorkbook(args: {
     ...(hasOther ? ["기타공제"] : []),
     "기타",
     "ID",
+    "재직 상태",
   ];
 
   const body = rows.map((r) => [
@@ -204,6 +228,7 @@ export function buildPayrollExportWorkbook(args: {
     ...(hasOther ? [r.otherDeduct || null] : []),
     r.note,
     r.id,
+    r.status,
   ]);
 
   // 합계 행 — 세무사가 총액을 대조할 수 있게
@@ -225,6 +250,7 @@ export function buildPayrollExportWorkbook(args: {
     ...(hasOther ? [sum((r) => r.otherDeduct)] : []),
     "",
     "",
+    rows.some((r) => r.status) ? `퇴직 ${rows.filter((r) => r.status).length}명` : "",
   ];
 
   const title = `${args.companyName} · ${args.year}년 ${args.month}월 급여자료 (지급일 ${payDate})`;
@@ -251,23 +277,83 @@ export function buildPayrollExportWorkbook(args: {
   }
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  // 숫자 열에 천단위 서식 (제목 1행 + 머리글 1행 이후부터 합계행까지)
   const firstNumCol = 2;
-  const lastNumCol = header.length - 3; // '기타'·'ID' 앞까지
-  for (let r = 2; r < 2 + body.length + 1; r++) {
-    for (let c = firstNumCol; c <= lastNumCol; c++) {
-      const cell = ws[XLSX.utils.encode_cell({ r, c })];
-      if (cell && typeof cell.v === "number") cell.z = MONEY;
+  const lastNumCol = header.length - 4; // '기타'·'ID'·'재직 상태' 앞까지
+  const lastCol = header.length - 1;
+  const headerRow = 1;
+  const totalRow = headerRow + body.length + 1;
+
+  // ── 셀 서식 (xlsx-js-style) ─────────────────────────────────────────
+  // 세무사가 눈으로 훑는 표라 격자·머리글·합계가 구분돼야 한다.
+  const NAVY = "1F3864"; // 머리글 바탕
+  const GRID = "BFBFBF"; // 격자선
+  const BAND = "F2F6FB"; // 짝수 행 줄무늬
+  const RESIGN_BG = "FDEBEB"; // 퇴직 행 — 급여 화면의 붉은 행과 같은 신호
+  const RED = "C00000";
+  const thin = { style: "thin", color: { rgb: GRID } };
+  const box = { top: thin, bottom: thin, left: thin, right: thin };
+
+  const put = (r: number, c: number, s: any) => {
+    const addr = XLSX.utils.encode_cell({ r, c });
+    // 빈 자리도 셀을 만들어 테두리를 채운다 — 없는 셀엔 서식이 안 붙어 격자에 구멍이 난다
+    if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+    ws[addr].s = s;
+  };
+
+  // 제목
+  put(0, 0, { font: { bold: true, sz: 13, color: { rgb: NAVY } }, alignment: { vertical: "center" } });
+  // 머리글
+  for (let c = 0; c <= lastCol; c++)
+    put(headerRow, c, {
+      font: { bold: true, sz: 10, color: { rgb: "FFFFFF" } },
+      fill: { patternType: "solid", fgColor: { rgb: NAVY } },
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border: box,
+    });
+  // 본문 + 합계
+  for (let r = headerRow + 1; r <= totalRow; r++) {
+    const isTotal = r === totalRow;
+    const resigned = !isTotal && !!rows[r - headerRow - 1]?.status;
+    for (let c = 0; c <= lastCol; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      const num = ws[addr] && typeof ws[addr].v === "number";
+      if (num) ws[addr].z = MONEY; // 천단위 (음수는 −)
+      const statusCol = c === lastCol;
+      put(r, c, {
+        font: {
+          sz: 10,
+          bold: isTotal || (statusCol && resigned),
+          color: statusCol && resigned ? { rgb: RED } : undefined,
+        },
+        fill: isTotal
+          ? { patternType: "solid", fgColor: { rgb: "DDEBF7" } }
+          : resigned
+            ? { patternType: "solid", fgColor: { rgb: RESIGN_BG } }
+            : (r - headerRow) % 2 === 0
+              ? { patternType: "solid", fgColor: { rgb: BAND } }
+              : undefined,
+        alignment: {
+          horizontal: num ? "right" : c === 0 ? "left" : "center",
+          vertical: "center",
+        },
+        border: box,
+      });
     }
   }
+  // 경고 줄 — 붉게
+  for (let r = totalRow + 1; r < aoa.length; r++)
+    put(r, 0, { font: { sz: 10, bold: true, color: { rgb: RED } } });
+
   ws["!cols"] = [
     { wch: 14 }, // 이름
     { wch: 10 }, // 지급일
     ...Array.from({ length: lastNumCol - firstNumCol + 1 }, () => ({ wch: 13 })),
     { wch: 15 }, // 기타
     { wch: 17 }, // ID
+    { wch: 10 }, // 재직 상태
   ];
-  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } }];
+  ws["!rows"] = [{ hpt: 26 }, { hpt: 30 }];
+  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } }];
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, `${args.year}년 ${args.month}월`);

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as XLSX from "xlsx";
 import {
   buildExportRow,
+  exportStatusOf,
   buildPayrollExportWorkbook,
   payDateOf,
   reconcileRow,
@@ -48,6 +49,7 @@ const rec = (o: Partial<ExportPayrollRecord> & { name: string }): ExportPayrollR
     name: o.name,
     empNo: "1",
     rrn: "rrn" in (o as any) ? (o as any).rrn : "961003-2951624",
+    resignDate: (o as any).resignDate ?? null,
   },
 });
 
@@ -303,6 +305,7 @@ describe("워크북 출력", () => {
       "월정기주차비(50%)차감",
       "기타",
       "ID",
+      "재직 상태",
     ]);
   });
 
@@ -340,7 +343,7 @@ describe("워크북 출력", () => {
     });
     const col = (aoa[1] as any[]).indexOf("인센티브");
     expect(aoa[2][col]).toBe(600_000);
-    expect(aoa[3][col]).toBeUndefined(); // 인센티브가 없는 직원은 0 이 아니라 빈칸
+    expect(aoa[3][col] ?? "").toBe(""); // 인센티브가 없는 직원은 0 이 아니라 빈칸 (서식용 빈 셀)
     expect(aoa[aoa.length - 1][col]).toBe(600_000);
   });
 
@@ -406,5 +409,38 @@ describe("워크북 출력", () => {
     });
     expect(mismatches).toEqual([]);
     expect(missingId).toEqual([]);
+  });
+});
+
+describe("재직 상태 열 — 그 달 퇴직자 표시", () => {
+  it("퇴사일이 그 달 안이면 '퇴직'", () => {
+    expect(exportStatusOf(new Date(Date.UTC(2026, 7, 15)), 2026, 8)).toBe("퇴직");
+    expect(exportStatusOf("2026-08-31", 2026, 8)).toBe("퇴직");
+  });
+  it("그 전에 퇴직한 사람(정산분 수동 추가)도 '퇴직'", () => {
+    expect(exportStatusOf("2026-07-31", 2026, 8)).toBe("퇴직");
+  });
+  it("퇴사 예정(다음 달 이후)이거나 퇴사일이 없으면 빈칸 — 그 달은 아직 재직", () => {
+    expect(exportStatusOf("2026-09-01", 2026, 8)).toBe("");
+    expect(exportStatusOf(null, 2026, 8)).toBe("");
+  });
+  it("시트 마지막 열에 '퇴직' 이 적히고 합계 행에 인원이 잡힌다", () => {
+    const { buffer, rows } = buildPayrollExportWorkbook({
+      year: 2026,
+      month: 7,
+      payday: 7,
+      companyName: "주식회사 유쌤에듀",
+      records: [
+        rec({ name: "재직자", gross: 1_000_000, net: 1_000_000 }),
+        { ...rec({ name: "퇴직자", gross: 500_000, net: 500_000 }), employee: { name: "퇴직자", empNo: "2", rrn: "1", resignDate: new Date(Date.UTC(2026, 6, 15)) } },
+      ],
+    });
+    expect(rows.map((r) => r.status)).toEqual(["", "퇴직"]);
+    const wb = XLSX.read(buffer, { type: "buffer" });
+    const aoa = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false });
+    const col = (aoa[1] as any[]).indexOf("재직 상태");
+    expect(col).toBe(aoa[1].length - 1); // 마지막 열
+    expect(aoa[3][col]).toBe("퇴직");
+    expect(aoa[4][col]).toBe("퇴직 1명"); // 합계 행
   });
 });
