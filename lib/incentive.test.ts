@@ -412,3 +412,92 @@ describe("findMonthBlocks — 제목 줄 찾기", () => {
     expect(findMonthBlocks([["이름", "반"]])).toEqual([]);
   });
 });
+
+describe("환산인원 양식 — 학생마다 환산 학생수를 직접 적는 새 표준 양식", () => {
+  const UNITS_HEAD = ["번호", "상태", "이름", "반", "학교/학년", "입학일", "퇴원일", "환산 학생수"];
+  const rows = [
+    ["26년 8월"],
+    ["서연승 선생님"],
+    [...UNITS_HEAD],
+    [1, "재원", "권준우", "A반", "미사고", null, null, 1],
+    [2, "신규", "유하율", "A반", "미사고", "8/18(4회)", null, 0.5],
+    [3, "신규", "곽지오", "B반", "미사고", "8/27(1회)", null, 0.125],
+    [4, "퇴원", "이퇴원", "B반", "미사고", null, "8/1(0회)", "-"],
+    ["TOTAL 환산 학생수", null, null, null, null, null, null, 1.625],
+    ["인센티브", null, null, null, null, null, null, 253_750],
+  ];
+
+  it("학생별 환산 학생수를 그대로 읽는다 ('-' 는 null → 회차 규칙이 0 처리)", () => {
+    const [b] = rostersForMonth(parseRosterWorkbook(wbOf({ 서연승: rows })), 2026, 8);
+    const by = (n: string) => b.students.find((s) => s.name === n)!;
+    expect(by("권준우").sheetUnits).toBe(1);
+    expect(by("유하율").sheetUnits).toBe(0.5);
+    expect(by("곽지오").sheetUnits).toBe(0.125);
+    expect(by("이퇴원").sheetUnits).toBeNull();
+    // 퇴원 0회 학생은 회차 쪽 규칙으로 가중치 0
+    expect(studentWeight(by("이퇴원"))).toBe(0);
+  });
+
+  it("시트가 적은 환산 학생수가 회차 계산보다 우선한다", () => {
+    // 유하율은 회차(4회 → 0.5)와 시트값(0.5)이 같지만, 시트값이 다르면 시트값을 쓴다
+    const [b] = rostersForMonth(parseRosterWorkbook(wbOf({ 서연승: rows })), 2026, 8);
+    const s = summarizeIncentive(b.students, { threshold: 1, perStudent: 100_000 });
+    expect(s.units).toBeCloseTo(1.625, 6); // 1 + 0.5 + 0.125 + 0
+    expect(s.amount).toBe(62_500); // (1.625 − 1) × 100,000
+  });
+
+  it("「TOTAL 환산 학생수」 행과 「인센티브」 행을 검산용으로 읽는다", () => {
+    const [b] = rostersForMonth(parseRosterWorkbook(wbOf({ 서연승: rows })), 2026, 8);
+    expect(b.sheetTotalUnits).toBe(1.625);
+    expect(b.sheetTotalAmount).toBe(253_750);
+  });
+
+  it("studentWeight — sheetUnits 가 있으면 회차를 무시하고 0~1 로 상한·하한", () => {
+    expect(studentWeight({ status: "ENROLLED", name: "A", sessions: 8, sheetUnits: 0.5 })).toBe(0.5);
+    expect(studentWeight({ status: "ENROLLED", name: "A", sheetUnits: 1.5 })).toBe(1);
+    expect(studentWeight({ status: "ENROLLED", name: "A", sheetUnits: -0.5 })).toBe(0);
+  });
+
+  it("옛 양식(인센티브 열)은 그대로 파싱된다 — sheetUnits 없이 회차 계산", () => {
+    const old = [
+      ["26년 8월"],
+      ["하수정 선생님"],
+      [...HEAD_HEAD],
+      [1, "재원", "만근생", "A반", "미사고", null, null, null],
+      [2, "신규", "반달생", "A반", "미사고", "8/18(4회)", null, 50_000],
+    ];
+    const [b] = rostersForMonth(parseRosterWorkbook(wbOf({ 하수정: old })), 2026, 8);
+    expect(b.students.every((s) => s.sheetUnits == null)).toBe(true);
+    expect(studentWeight(b.students.find((s) => s.name === "반달생")!)).toBe(0.5);
+    expect(b.sheetTotalAmount).toBe(50_000); // 학생별 인센티브 칸의 합
+  });
+});
+
+describe("혼합 양식 — 환산 학생수와 학생별 인센티브 열이 함께 있는 시트", () => {
+  // 실제 최은희 8월: 두 벌 배치 + 오른쪽 벌 옆에 요약 줄(「인센티브 | 300,000」)이 낀다
+  const HYBRID = ["번호", "상태", "이름", "반", "학교/학년", "입학일", "퇴원일", "환산학생수", "인센티브"];
+  const rows = [
+    ["26년 8월"],
+    ["최은희 선생님"],
+    [...HYBRID, ...HYBRID],
+    [1, "전출", "박정인", "M9", "은가람중3", null, "8/31(7회)", 0.875, 0,
+     41, "전출", "이동기", "유클A", "미강중3", null, "8/31(8회)", 1, 100_000],
+    [2, "전출", "노준희", "M9", "윤슬중3", null, "8/31(7회)", 0.875, null,
+     null, null, null, null, null, null, "인센티브", null, 300_000],
+    [3, "전출", "이세은", "유클A", "미사중3", null, "8/31(8회)", 1, 100_000,
+     null, null, null, null, null, null, "인센티브유보액", null, 25_000],
+  ];
+
+  it("옆 벌 요약 줄의 「인센티브」 글자를 금액으로 오독하지 않고, 학생별 열의 합을 쓴다", () => {
+    const [b] = rostersForMonth(parseRosterWorkbook(wbOf({ 최은희: rows })), 2026, 8);
+    expect(b.sheetTotalAmount).toBe(200_000); // 0 + 100,000 + 100,000 (요약 줄 300,000 아님)
+    expect(b.students.map((s) => s.name)).toContain("노준희"); // 요약 줄과 같은 행이어도 학생은 산다
+    expect(b.students).toHaveLength(4);
+  });
+
+  it("환산 학생수는 그대로 읽힌다", () => {
+    const [b] = rostersForMonth(parseRosterWorkbook(wbOf({ 최은희: rows })), 2026, 8);
+    const s = summarizeIncentive(b.students, { threshold: 3, perStudent: 100_000 });
+    expect(s.units).toBeCloseTo(3.75, 6); // 0.875 + 0.875 + 1 + 1
+  });
+});

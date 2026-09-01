@@ -220,6 +220,16 @@ export async function POST(req: Request) {
       row.over = s.over;
       row.sheetAmount = b.sheetTotalAmount ?? null;
 
+      // 환산인원 양식의 「TOTAL 환산 학생수」 검산 — 학생별 환산의 합과 달라도 조용히 지나가지
+      // 않는다(시트 수식이 일부 행을 빠뜨린 채 합계만 맞아 보이는 경우를 잡는다).
+      if (b.sheetTotalUnits != null && Math.abs(b.sheetTotalUnits - s.units) > 0.001) {
+        warnings.push(
+          `${emp.name}: 시트의 TOTAL 환산 학생수(${b.sheetTotalUnits})와 학생별 환산 합계(` +
+            `${s.units.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")})가 다릅니다 — ` +
+            `시트의 합계 수식 범위를 확인하세요. 산정은 학생별 합계로 했습니다.`
+        );
+      }
+
       // 시트가 스스로 낸 금액과 다르면 반드시 알린다.
       // 갈리는 지점은 **기준 인원을 무엇으로 채우느냐** 하나뿐이다 —
       // 시트는 명단 왼쪽 칸에 이름이 기준 인원수만큼 있으면 채운 것으로 보고,

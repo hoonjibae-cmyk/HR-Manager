@@ -66,6 +66,12 @@ export interface RosterStudent {
   revenue?: number | null;
   /** 명단에 적혀 있던 배분율(0.45). 계산은 계약 값으로 하고 이 값은 대조용 */
   sharePercent?: number | null;
+  /**
+   * ② 새 양식(환산인원 방식)이 학생마다 직접 적은 **환산 학생수**(재원계수 0~1).
+   * 있으면 회차에서 다시 계산하지 않고 이 값을 그대로 쓴다 — 시트가 이미 회차÷8 로
+   * 환산해 둔 값이라, 우리가 다시 계산해 미세하게 다르면 시트와 내역서가 갈린다.
+   */
+  sheetUnits?: number | null;
 }
 
 /** 명단이 매출 기준인지 — 매출이 적힌 학생이 하나라도 있으면 매출 기준이다 */
@@ -92,8 +98,9 @@ export interface IncentiveSummary {
   totalCount: number;
 }
 
-/** 학생 1명의 재원계수 (0~1) */
+/** 학생 1명의 재원계수 (0~1). 명단이 환산 학생수를 직접 적었으면 그 값이 우선이다 */
 export function studentWeight(s: RosterStudent): number {
+  if (s.sheetUnits != null) return Math.min(Math.max(s.sheetUnits, 0), 1);
   const full = s.fullSessions && s.fullSessions > 0 ? s.fullSessions : STANDARD_SESSIONS;
   if (s.sessions == null) return 1; // 회차 미기재 = 만근
   const w = s.sessions / full;
@@ -284,6 +291,8 @@ export interface ParsedRoster {
   /** 시트 TOTAL 행의 값 (검산용). 없으면 null */
   sheetTotalRevenue?: number | null;
   sheetTotalAmount?: number | null;
+  /** 환산인원 양식의 「TOTAL 환산 학생수」 (검산용) */
+  sheetTotalUnits?: number | null;
 }
 
 /** 시트 한 장의 월 블록 하나 = 강사 1명 × 1개월 */
@@ -304,6 +313,8 @@ const LABELS = {
   withdraw: ["퇴원일", "전출일", "퇴소일"],
   pay: ["월급여", "급여"],
   incentive: ["인센티브"],
+  // 환산인원 양식 — 학생마다 재원계수(회차÷8)를 직접 적는 열
+  units: ["환산 학생수", "환산학생수", "환산인원"],
   note: ["비고"],
 };
 
@@ -493,6 +504,7 @@ function parseBlock(
     titleKind: b.kind,
     sheetTotalRevenue: null,
     sheetTotalAmount: null,
+    sheetTotalUnits: null,
   };
 
   // 5) 데이터행
@@ -505,11 +517,34 @@ function parseBlock(
       const row = grid[r] ?? [];
       const seqRaw = cols.seq != null ? row[cols.seq] : null;
 
-      // 시트가 스스로 낸 합계 — 우리 산정과 대조해 어긋나면 알린다
-      if (/^\s*(TOTAL|합\s*계)\s*$/i.test(String(seqRaw ?? ""))) {
+      // 시트가 스스로 낸 합계 — 우리 산정과 대조해 어긋나면 알린다.
+      // 환산인원 양식은 「TOTAL 환산 학생수」 처럼 뒤에 말이 붙으므로 접두 일치로 본다.
+      if (/^\s*(TOTAL|합\s*계)/i.test(String(seqRaw ?? ""))) {
         if (cols.revenue != null) out.sheetTotalRevenue = numOf(row[cols.revenue]);
         if (cols.share != null) out.sheetTotalAmount = numOf(row[cols.share]);
+        if (cols.units != null) out.sheetTotalUnits = numOf(row[cols.units]);
         continue;
+      }
+
+      // 환산인원 양식의 마지막 줄 — 「인센티브 | 253,750」. TOTAL 아래에 시트가 스스로 낸
+      // 금액이 적히므로 우리 산정과 대조할 답으로 받는다(이름 칸이 비어 있어 아래 검사로는 못 잡는다).
+      // **학생별 인센티브 열이 있는 혼합 양식은 여기서 잡지 않는다** — 그 열의 합이 시트의
+      // 답이고, 옆 벌 요약 줄의 「인센티브」 글자를 집으면 이 벌 환산 칸의 학생 값(0.875)을
+      // 금액으로 오독한다. 찾는 범위도 블록 전체가 아니라 **이 벌의 열 안**으로 좁힌다.
+      if (cols.units != null && cols.incentive == null && out.sheetTotalAmount == null) {
+        const cVals = Object.values(cols).filter((v): v is number => v != null);
+        const lo = Math.min(...cVals);
+        const hi = Math.max(...cVals);
+        const hasIncLabel = row.some(
+          (v: any, c: number) => c >= lo && c <= hi && String(v ?? "").trim() === "인센티브"
+        );
+        if (hasIncLabel) {
+          const amt = numOf(row[cols.units]);
+          if (amt != null) {
+            out.sheetTotalAmount = amt;
+            continue;
+          }
+        }
       }
 
       const name = String(row[cols.name] ?? "").trim();
@@ -562,6 +597,9 @@ function parseBlock(
         fullSessions: STANDARD_SESSIONS,
         revenue: cols.revenue != null ? numOf(row[cols.revenue]) : null,
         sharePercent,
+        // 환산인원 양식이 직접 적은 재원계수. "-" 는 못 읽어 null 이 되는데,
+        // 그 학생은 회차(0회) 쪽 규칙이 그대로 0 으로 처리한다.
+        sheetUnits: cols.units != null ? numOf(row[cols.units]) : null,
       });
     }
   }

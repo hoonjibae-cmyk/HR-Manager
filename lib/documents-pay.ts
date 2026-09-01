@@ -600,12 +600,17 @@ export function incentiveDetailHtml(args: {
     d ? `${new Date(d).getUTCMonth() + 1}/${new Date(d).getUTCDate()}` : "";
   const sessTxt = (r: (typeof s.rows)[number]) =>
     r.sessions == null ? `${s.standardSessions}회` : `${num(r.sessions)}회`;
+  // 환산 학생수는 관리시트 표기 그대로 소수 셋째자리 — 0 은 '-' (0회 퇴원)
+  const unitsTxt = (w: number) => (w > 0 ? w.toFixed(3) : "-");
 
   // 좌/우 2개 블록으로 분할 (엑셀 양식과 동일한 배치)
   const half = Math.ceil(s.rows.length / 2);
   const blocks = [s.rows.slice(0, half), s.rows.slice(half)];
+  // **학생별 열은 금액이 아니라 「환산 학생수」다** — 관리시트(환산인원 양식)와 같은 모양.
+  // 인센티브는 학생별로 배분되는 것이 아니라 (TOTAL 환산 − 기준 인원) × 기준금액 한 번으로
+  // 정해지므로, 학생 옆에 금액을 적으면 그 학생 몫처럼 읽혀 시트와도 우리 산정과도 어긋난다.
   const rowHtml = (r: (typeof s.rows)[number], i: number, offset: number) => {
-    const dim = r.amount === 0 && r.weight >= 1; // 기준 인원 이내 만근 학생
+    const dim = r.weight <= 0; // 그 달 수업이 없던 학생 (0회 퇴원 등)
     return `<tr class="${dim ? "dim" : ""}">
       <td class="c">${r.seq ?? offset + i + 1}</td>
       <td class="c">${esc(STUDENT_STATUS_LABEL[r.status] ?? "재원")}</td>
@@ -614,15 +619,19 @@ export function incentiveDetailHtml(args: {
       <td class="c sm">${md(r.enrollDate)}</td>
       <td class="c sm">${md(r.withdrawDate)}</td>
       <td class="c">${sessTxt(r)}</td>
-      <td class="num">${r.amount ? won(r.amount) : "-"}</td>
+      <td class="num">${unitsTxt(r.weight)}</td>
     </tr>`;
   };
-  const tableHtml = (rows: typeof s.rows, offset: number) =>
+  const tableHtml = (rows: typeof s.rows, offset: number, foot = "") =>
     rows.length
       ? `<table class="pay roster">
-      <thead><tr><th>번호</th><th>상태</th><th>이름</th><th>반</th><th>입학</th><th>퇴원</th><th>회차</th><th>인센티브</th></tr></thead>
-      <tbody>${rows.map((r, i) => rowHtml(r, i, offset)).join("")}</tbody></table>`
+      <thead><tr><th>번호</th><th>상태</th><th>이름</th><th>반</th><th>입학</th><th>퇴원</th><th>회차</th><th>환산 학생수</th></tr></thead>
+      <tbody>${rows.map((r, i) => rowHtml(r, i, offset)).join("")}${foot}</tbody></table>`
       : "";
+  // 시트의 마지막 줄 그대로 — 둘째 단(없으면 첫째 단) 끝에 TOTAL 을 붙인다
+  const totalFoot =
+    `<tr class="total"><td colspan="7" style="text-align:right">TOTAL 환산 학생수</td>` +
+    `<td class="num"><b>${num(s.units)}</b></td></tr>`;
 
   const payable = s.amount - (args.retention ?? 0);
 
@@ -636,8 +645,8 @@ export function incentiveDetailHtml(args: {
   <table class="kv">
     <tr><th>기준 인원수</th><td>${s.threshold}명</td><th>1인당 기준금액</th><td>${wonUnit(s.perStudent)}</td></tr>
     <tr><th>1회당 단가</th><td>${wonUnit(s.perSession)} <span class="muted">(기준금액 ÷ ${s.standardSessions}회)</span></td><th>월 표준 수업</th><td>${s.standardSessions}회 (만근)</td></tr>
-    <tr><th>학생 인원</th><td>총 ${s.totalCount}명 <span class="muted">(만근 ${s.fullCount}명 · 중도 ${s.partialCount}명)</span></td><th>가중 인원</th><td><b>${num(s.units)}명</b></td></tr>
-    <tr><th>기준 초과</th><td><b>${num(s.over)}명</b> <span class="muted">(가중 ${num(s.units)} − 기준 ${s.threshold})</span></td><th>인센티브 합계</th><td><b>${wonUnit(s.amount)}</b></td></tr>
+    <tr><th>학생 인원</th><td>총 ${s.totalCount}명 <span class="muted">(만근 ${s.fullCount}명 · 중도 ${s.partialCount}명)</span></td><th>TOTAL 환산 학생수</th><td><b>${num(s.units)}명</b></td></tr>
+    <tr><th>기준 초과</th><td><b>${num(s.over)}명</b> <span class="muted">(환산 ${num(s.units)} − 기준 ${s.threshold})</span></td><th>인센티브 합계</th><td><b>${wonUnit(s.amount)}</b></td></tr>
     ${
       args.retention
         ? `<tr><th>퇴직유보금</th><td>${wonUnit(args.retention)} <span class="muted">(인센티브 × 1/12, 별도통장)</span></td><th>인센티브 지급액</th><td><b>${wonUnit(payable)}</b></td></tr>`
@@ -647,15 +656,13 @@ export function incentiveDetailHtml(args: {
   </table>
 
   <div class="roster-grid">
-    <div>${tableHtml(blocks[0], 0)}</div>
-    <div>${tableHtml(blocks[1], half)}</div>
+    <div>${tableHtml(blocks[0], 0, blocks[1].length ? "" : totalFoot)}</div>
+    <div>${tableHtml(blocks[1], half, totalFoot)}</div>
   </div>
 
   <div class="clause" style="margin-top:8px">
-    <div class="small">· 산정식: <b>인센티브 = (가중 인원 − 기준 인원수) × 1인당 기준금액</b></div>
-    <div class="small">· 가중 인원 = 학생별 재원계수의 합. 재원계수 = 해당 월 수업 회차 ÷ ${s.standardSessions}회(만근), 최대 1.0</div>
-    <div class="small">· 월 중간에 입학·전출·퇴원한 학생은 실제 수업 회차에 비례하여 산정됩니다 (1회당 ${won(s.perSession)}원, 0회는 미산정).</div>
-    <div class="small">· 기준 인원수(${s.threshold}명) 이내의 학생은 인센티브가 발생하지 않으며, 만근 학생이 기준 인원을 먼저 채웁니다.</div>
+    <div class="small">· 산정식: <b>인센티브 = (TOTAL 환산 학생수 − 기준 인원수) × 1인당 기준금액</b> — (${num(s.units)} − ${s.threshold}) × ${won(s.perStudent)}원 = <b>${won(s.amount)}원</b></div>
+    <div class="small">· 환산 학생수 = 해당 월 수업 회차 ÷ ${s.standardSessions}회(만근), 최대 1.000 — 월 중간 입학·전출·퇴원 학생은 실제 회차에 비례합니다 (0회는 '-').</div>
     <div class="small">· 본 내역서는 급여명세서의 <b>인센티브</b> 항목 산출 근거로 첨부됩니다.</div>
   </div>
   </div>`;

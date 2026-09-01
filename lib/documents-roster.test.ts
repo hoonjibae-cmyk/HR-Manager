@@ -173,3 +173,39 @@ describe("rosterDetailHtml — 명단 모양에 맞는 내역서를 고른다", 
     ).toBeNull();
   });
 });
+
+describe("incentiveDetailHtml — 환산인원 양식 재현", () => {
+  const base = { employee, company, year: 2026, month: 8 } as const;
+  const students: RosterStudent[] = [
+    { seq: 1, status: "ENROLLED", name: "권준우", sheetUnits: 1 },
+    { seq: 2, status: "NEW", name: "유하율", sessions: 4, sheetUnits: 0.5 },
+    { seq: 3, status: "WITHDRAWN", name: "이퇴원", sessions: 0 },
+  ];
+  const render = () =>
+    rosterDetailHtml({ ...base, students, kind: "INCENTIVE", threshold: 1, perStudent: 100_000 })!;
+
+  it("학생별 열은 금액이 아니라 「환산 학생수」다", () => {
+    const html = render();
+    expect(html).toContain("환산 학생수");
+    expect(html).toContain("1.000");
+    expect(html).toContain("0.500");
+  });
+
+  it("표 끝에 「TOTAL 환산 학생수」 줄이 붙는다", () => {
+    const html = render();
+    expect(html).toContain("TOTAL 환산 학생수");
+    expect(html).toContain("1.5"); // 1 + 0.5 + 0
+  });
+
+  it("산정식이 환산인원 방식으로 적힌다", () => {
+    const html = render();
+    expect(html).toContain("(TOTAL 환산 학생수 − 기준 인원수) × 1인당 기준금액");
+    expect(html).toContain("(1.5 − 1) × 100,000원 = <b>50,000원</b>");
+  });
+
+  it("0회 학생은 '-' 로 적고 흐리게 그린다", () => {
+    const html = render();
+    expect(html).toContain("이퇴원");
+    expect(html).toMatch(/class="dim"/);
+  });
+});

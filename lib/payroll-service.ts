@@ -132,6 +132,9 @@ export function rosterToStudents(rows: any[]): RosterStudent[] {
     fullSessions: r.fullSessions,
     revenue: r.revenue ?? null,
     sharePercent: r.sharePercent ?? null,
+    // 저장된 재원계수를 그대로 되살린다 — 환산인원 양식은 시트가 적은 값이 계수의 진실이라,
+    // 회차에서 다시 계산하면 저장·업로드 시점의 값과 미세하게 갈릴 수 있다.
+    sheetUnits: r.weight ?? null,
   }));
 }
 
