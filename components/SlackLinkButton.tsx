@@ -20,6 +20,13 @@ export default function SlackLinkButton() {
       `새로 연결: ${j.linkedCount}명${j.linkedCount ? "\n  · " + j.linked.map((l: any) => `${l.name} ← ${l.slackName} (${l.via})`).join("\n  · ") : ""}`,
       `기존 연결 유지: ${j.alreadyLinked}명`,
     ];
+    // 슬랙 계정이 삭제돼 연동을 푼 사람 — 조용히 풀면 왜 '미연동' 이 됐는지 모른다
+    if (j.unlinked?.length)
+      lines.push(
+        `연동 해제(슬랙 계정 삭제됨): ${j.unlinked
+          .map((u: any) => `${u.name}${u.active ? "" : " (퇴직)"}`)
+          .join(", ")}`
+      );
     if (!j.emailVisible)
       lines.push(
         "\n⚠️ 슬랙 이메일을 읽지 못했습니다 (users:read.email 권한 미부여).\n이름만으로 매칭했습니다."

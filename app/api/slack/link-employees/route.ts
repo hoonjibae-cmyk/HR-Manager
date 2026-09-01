@@ -45,16 +45,34 @@ export async function POST() {
   }
 
   const employees = await prisma.employee.findMany();
+
+  // **끊어진 연동을 먼저 푼다** — 퇴직 등으로 슬랙 계정이 삭제되면 users.list 에서 빠지는데
+  // (slackUserList 가 deleted 계정을 거른다), 연결만 하고 해제를 안 하면 그 직원이 화면에
+  // 영영 '연동됨' 으로 남는다. 살아 있는 계정 목록에 없는 slackUserId 는 지운다.
+  // 목록을 한 건도 못 받았으면 위에서 이미 에러로 끝났으므로, 빈 목록 때문에 전원이
+  // 풀리는 일은 없다.
+  const liveIds = new Set(users.map((u) => u.id));
+  const unlinked: Array<{ name: string; active: boolean }> = [];
+  for (const e of employees) {
+    if (e.slackUserId && !liveIds.has(e.slackUserId)) {
+      await prisma.employee.update({ where: { id: e.id }, data: { slackUserId: null } });
+      (e as any).slackUserId = null; // 아래 매칭 로직이 같은 메모리 목록을 본다
+      unlinked.push({ name: e.name, active: e.active });
+    }
+  }
+
   const linkedIds = new Set(employees.map((e) => e.slackUserId).filter(Boolean) as string[]);
 
   const linked: Array<{ name: string; via: string; slackName: string }> = [];
   const takenEmpIds = new Set<number>();
 
-  // 1차: 이메일 매칭
+  // 1차: 이메일 매칭 — **재직자만**. 퇴직자를 풀에 두면 동명이인 새 계정이
+  // 퇴직자 카드에 붙거나, 방금 연동 해제한 퇴직자가 도로 잘못 연결된다.
   for (const u of users) {
     if (linkedIds.has(u.id) || !u.email) continue;
     const emp = employees.find(
       (e) =>
+        e.active &&
         !e.slackUserId &&
         !takenEmpIds.has(e.id) &&
         e.email &&
@@ -71,7 +89,7 @@ export async function POST() {
   // 2차: 이름 매칭 (직책 접미사 제거)
   for (const u of users) {
     if (linkedIds.has(u.id)) continue;
-    const pool = employees.filter((e) => !e.slackUserId && !takenEmpIds.has(e.id));
+    const pool = employees.filter((e) => e.active && !e.slackUserId && !takenEmpIds.has(e.id));
     if (!pool.length) break;
     const nameCandidates = [u.realName, u.displayName].filter(Boolean) as string[];
     for (const raw of nameCandidates) {
@@ -99,6 +117,7 @@ export async function POST() {
     linkedCount: linked.length,
     linked,
     alreadyLinked: after.filter((e) => !!e.slackUserId).length - linked.length,
+    unlinked,
     stillUnlinked,
     unmatchedSlack,
   });
