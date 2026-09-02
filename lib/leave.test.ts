@@ -347,3 +347,41 @@ describe("businessDaysFrom — 시작일부터 N 업무일", () => {
     expect(businessDaysFrom(d("2026-08-03"), -1)).toEqual([]);
   });
 });
+
+describe("지난 연차기간 날짜의 사용 — 이번 기간 잔여에 닿지 않는다", () => {
+  // 실제 겪은 혼동: 운영자가 '전년도 초과 사용 연차' 를 지난 기간 마지막 날(4/30) 날짜로
+  // 넣었는데 이번 기간 잔여(연차수당 상세 포함)가 그대로였다. 그 사용은 그 날짜에 유효했던
+  // 지난 기간 발생분이 흡수하고, 그 잔여는 어차피 기간 만료로 소멸 처리되기 때문 — 버그가
+  // 아니라 원장 규칙이다. 그래서 /api/leave/adjust 가 이 경우 경고를 띄운다.
+  it("지난 기간 발생분에 잔여가 있으면 그쪽이 흡수한다 — 이번 기간 잔여 불변", () => {
+    // 입사 2024-05-01, 기준 2026-08-31 → 이번 기간 2026-05-01~. 지난 기간(3년차 15일) 미사용.
+    const base = summarizeLeave(d("2024-05-01"), d("2026-08-31"), []);
+    const withPast = summarizeLeave(d("2024-05-01"), d("2026-08-31"), [
+      { date: d("2026-04-30"), days: -1.5, type: "USE" },
+    ]);
+    expect(withPast.period.remaining).toBe(base.period.remaining);
+    // 사라진 것이 아니라 소멸분이 그만큼 줄었을 뿐이다
+    expect(withPast.expired).toBe(base.expired - 1.5);
+  });
+
+  it("지난 기간 발생분을 다 썼으면 초과분이 최신 발생분에서 깎인다 (진짜 '초과 사용')", () => {
+    // 지난 기간 15일을 이미 다 쓴 상태에서 4/30 에 1.5일을 더 쓰면 이번 기간에서 나간다
+    const txns = [
+      { date: d("2025-06-02"), days: -15, type: "USE" as const },
+      { date: d("2026-04-30"), days: -1.5, type: "USE" as const },
+    ];
+    const s = summarizeLeave(d("2024-05-01"), d("2026-08-31"), txns);
+    const clean = summarizeLeave(d("2024-05-01"), d("2026-08-31"), [
+      { date: d("2025-06-02"), days: -15, type: "USE" },
+    ]);
+    expect(s.period.remaining).toBe(clean.period.remaining - 1.5);
+  });
+
+  it("이번 기간 날짜로 넣으면 잔여가 그대로 준다 (퇴사일 이후 날짜여도)", () => {
+    const base = summarizeLeave(d("2024-05-01"), d("2026-08-31"), []);
+    const s = summarizeLeave(d("2024-05-01"), d("2026-08-31"), [
+      { date: d("2026-07-10"), days: -1.5, type: "USE" },
+    ]);
+    expect(s.period.remaining).toBe(base.period.remaining - 1.5);
+  });
+});

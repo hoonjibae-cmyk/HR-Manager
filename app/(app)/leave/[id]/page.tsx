@@ -5,6 +5,7 @@ import { leaveSummaryFor } from "@/lib/repo";
 import { PageHeader, Pill, Empty } from "@/components/ui";
 import { LEAVE_TYPE_LABEL } from "@/lib/constants";
 import CompGrantButton from "@/components/CompGrantButton";
+import LeaveTxnDeleteButton from "@/components/LeaveTxnDeleteButton";
 
 export const dynamic = "force-dynamic";
 
@@ -207,11 +208,22 @@ export default async function EmployeeLeavePage({
                       <div className="text-xs text-slate-400 mt-0.5 break-words">{t.note}</div>
                     )}
                   </div>
-                  <div className="shrink-0 tnum font-bold text-sm">
+                  <div className="shrink-0 tnum font-bold text-sm flex items-center gap-1">
                     <span className={isUse ? "text-slate-400" : "text-brand-600"}>
                       {t.days > 0 ? "+" : "−"}
                       {Math.abs(t.days)}
                     </span>
+                    {/* 관리자 직접 반영분만 지울 수 있다 — 신청서에 매인 줄은 신청 반려로 되돌린다 */}
+                    {t.requestId == null && (
+                      <LeaveTxnDeleteButton
+                        txnId={t.id}
+                        desc={`${t.date.toISOString().slice(0, 10)} · ${txnLabel({
+                          days: t.days,
+                          type: t.type,
+                          category: t.category ?? "STATUTORY",
+                        })}${t.note ? ` (${t.note})` : ""}`}
+                      />
+                    )}
                   </div>
                 </li>
               );

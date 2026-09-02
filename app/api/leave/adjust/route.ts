@@ -4,7 +4,7 @@ import { isAuthed } from "@/lib/auth";
 import { adjustLeave } from "@/lib/leave-service";
 import { logActivity } from "@/lib/activity";
 import { postMessage, slackConfigured } from "@/lib/slack";
-import { businessDaysFrom } from "@/lib/leave";
+import { businessDaysFrom, currentLeavePeriod } from "@/lib/leave";
 import { ymd } from "@/lib/format";
 import { isContractorContract } from "@/lib/constants";
 
@@ -93,6 +93,27 @@ export async function POST(req: Request) {
 
   const note = b.note?.trim() || `관리자 직접 반영 — ${label}`;
 
+  // ⚠ **지난 연차기간 날짜로 넣는 사용(−)은 이번 기간 잔여에서 차감되지 않는다** —
+  // 그 날짜에 유효했던(지난 기간의) 발생분이 흡수하고, 그 잔여는 어차피 기간 만료로 소멸
+  // 처리되기 때문이다. 모르고 넣으면 '반영이 안 된다' 로 보인다(퇴직자 연차수당 상세도
+  // 이번 기간 잔여를 쓰므로 함께 안 움직인다). **막지는 않는다** — 지난 기간의 사용 기록을
+  // 사실대로 보정하려고 일부러 넣는 경우도 있다. 대신 미리보기·결과에 경고를 싣는다.
+  // 기준은 직원마다 다르다(입사일 기준 기간) — 퇴직자는 퇴사일에 멈춘 기간으로 본다.
+  let pastPeriodWarning: string | null = null;
+  if (sign < 0 && category === "STATUTORY") {
+    const now = new Date();
+    const lastDate = dates[dates.length - 1];
+    const past = targets.filter((e) => {
+      const asOf = e.resignDate && e.resignDate < now ? e.resignDate : now;
+      return lastDate < currentLeavePeriod(e.hireDate, asOf).start;
+    });
+    if (past.length)
+      pastPeriodWarning =
+        `${past.map((e) => e.name).join(", ")}: 선택한 날짜가 지난 연차기간에 속해 ` +
+        `이번 기간 잔여(연차수당 상세 포함)에서는 차감되지 않습니다 — 그 기간의 발생분이 흡수하고 ` +
+        `기간 만료로 소멸 처리됩니다. 이번 기간 잔여를 줄이려면 이번 연차기간 안의 날짜로 넣으세요.`;
+  }
+
   if (b.preview) {
     return NextResponse.json({
       ok: true,
@@ -104,6 +125,7 @@ export async function POST(req: Request) {
       dateText: dates.map(dayText).join(", "),
       targets: targets.map((e) => ({ id: e.id, name: e.name, hasSlack: !!e.slackUserId })),
       excluded: ratio.map((e) => e.name),
+      pastPeriodWarning,
     });
   }
 
@@ -196,6 +218,7 @@ export async function POST(req: Request) {
       totalDays,
       results,
       excluded: ratio.map((e) => e.name),
+      pastPeriodWarning,
       notified: b.notify ? notified : null,
       notifyFailed: b.notify ? notifyFailed : 0,
       notifyError,

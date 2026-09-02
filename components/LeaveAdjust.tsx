@@ -194,6 +194,9 @@ export default function LeaveAdjust({ employees }: { employees: Emp[] }) {
                 완전비율제(위탁) {result.excluded.length}명 제외: {result.excluded.join(", ")}
               </p>
             )}
+            {result.pastPeriodWarning && (
+              <p className="text-xs text-rose-600 leading-relaxed">⚠️ {result.pastPeriodWarning}</p>
+            )}
             <p className="text-xs text-slate-400">
               {result.notified == null
                 ? "슬랙 알림은 보내지 않았습니다."
@@ -358,6 +361,11 @@ export default function LeaveAdjust({ employees }: { employees: Emp[] }) {
                   {!!preview.excluded?.length && (
                     <div className="text-amber-600 mt-1">
                       완전비율제(위탁) 제외: {preview.excluded.join(", ")}
+                    </div>
+                  )}
+                  {preview.pastPeriodWarning && (
+                    <div className="text-rose-600 mt-1 leading-relaxed">
+                      ⚠️ {preview.pastPeriodWarning}
                     </div>
                   )}
                 </div>
