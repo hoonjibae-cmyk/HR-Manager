@@ -48,7 +48,8 @@ export default async function LeavePage({
     }),
     prisma.leaveTransaction.findMany(),
     prisma.leaveRequest.findMany({
-      where: { status: "PENDING" },
+      // 중간결재 대기(PRE_PENDING)도 승인 대기로 본다 — 결재함에 멈춘 건이 안 보이면 잊힌다
+      where: { status: { in: ["PRE_PENDING", "PENDING"] } },
       include: { employee: true },
       orderBy: { createdAt: "desc" },
     }),
@@ -126,6 +127,7 @@ export default async function LeavePage({
     reason: r.reason,
     workPlan: r.workPlan,
     source: r.source,
+    status: r.status,
     employee: { name: r.employee.name, department: r.employee.department },
   }));
 

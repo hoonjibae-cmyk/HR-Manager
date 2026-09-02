@@ -36,7 +36,7 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
     include: { employee: { select: { name: true } } },
   });
   if (!row) return NextResponse.json({ error: "신청을 찾을 수 없습니다." }, { status: 404 });
-  if (row.status !== "PENDING")
+  if (row.status !== "PENDING" && row.status !== "PRE_PENDING")
     return NextResponse.json(
       { error: "이미 처리된 신청은 지울 수 없습니다. 반려로 되돌려 주세요." },
       { status: 400 }

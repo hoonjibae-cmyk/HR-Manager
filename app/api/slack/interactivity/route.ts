@@ -68,6 +68,7 @@ import {
 import {
   leaveBalanceOf,
   submitLeaveRequest,
+  postLeaveApprovalCard,
   cancelableLeaves,
   rangeLabel,
   leaveBalanceText,
@@ -75,6 +76,7 @@ import {
   modalPeriod,
   RATIO_LEAVE_NOTICE,
 } from "@/lib/leave-slack";
+import { canPreDecide } from "@/lib/leave-approval";
 import { refreshHomeTab } from "@/lib/home-tab";
 import { createLeaveEvent, deleteLeaveEvent, gcalConfigured } from "@/lib/gcal";
 import { LEAVE_TYPE_LABEL } from "@/lib/constants";
@@ -292,14 +294,17 @@ export async function POST(req: Request) {
       });
     }
 
-    // 신청자에게 DM 확인
+    // 신청자에게 DM 확인 — 중간결재를 거치는 신청은 그 사실을 알린다
+    // (누가 들고 있는지 모르면 결재가 늦어질 때 물어볼 곳이 없다)
     await slackCall("chat.postMessage", {
       channel: userId,
       text:
         `✅ 휴가신청서가 접수되었습니다.\n` +
         `• 기간: ${ymd(start)}${res.days! > 1 ? ` ~ ${ymd(end)}` : ""} (${res.days}일)\n` +
         `• 현재 ${res.poolLabel} 잔여: ${res.remaining}일\n` +
-        `관리자 승인 후 반영됩니다.`,
+        (res.preApproverName
+          ? `${res.preApproverName} 님의 중간결재 확인 후 운영진 승인으로 넘어갑니다.`
+          : `관리자 승인 후 반영됩니다.`),
     }).catch(() => {});
     await refreshHomeTab(userId).catch(() => {});
 
@@ -815,6 +820,105 @@ export async function POST(req: Request) {
     reqRow.days > 1 ? `${ymd(reqRow.startDate)} ~ ${ymd(reqRow.endDate)}` : ymd(reqRow.startDate);
   const typeLabel = LEAVE_TYPE_LABEL[reqRow.leaveType] ?? "연차";
   const recordChannel = process.env.SLACK_RECORD_CHANNEL;
+
+  /* ---------- 중간결재 확인 / 반려 (부서 지정 결재자의 DM 버튼) ---------- */
+  // 운영진 권한 검사(approverAllowed)보다 **앞**에 있어야 한다 — 중간결재자는
+  // SLACK_APPROVERS 에 들어 있지 않은 사람이고, 권한 판정도 다르다(지정 결재자 또는 운영진 대행).
+  if (action.action_id === "pre_approve_leave" || action.action_id === "pre_reject_leave") {
+    const dept = reqRow.employee.department
+      ? await prisma.department
+          .findUnique({
+            where: { name: reqRow.employee.department },
+            include: { leaveApprover: { select: { name: true, slackUserId: true } } },
+          })
+          .catch(() => null)
+      : null;
+    if (!canPreDecide(userId, dept?.leaveApprover?.slackUserId, approverAllowed(userId))) {
+      await slackCall("chat.postEphemeral", {
+        channel,
+        user: userId,
+        text: "이 신청의 중간결재 권한이 없습니다.",
+      });
+      return new Response("", { status: 200 });
+    }
+    if (reqRow.status !== "PRE_PENDING") {
+      await slackCall("chat.postEphemeral", {
+        channel,
+        user: userId,
+        text: `이미 처리된 신청입니다 (${reqRow.status}).`,
+      });
+      return new Response("", { status: 200 });
+    }
+    const deciderName =
+      dept?.leaveApprover?.slackUserId === userId ? dept!.leaveApprover!.name : "운영진(대행)";
+
+    try {
+      if (action.action_id === "pre_approve_leave") {
+        await prisma.leaveRequest.update({
+          where: { id: requestId },
+          data: { status: "PENDING", preApproverId: userId, preDecidedAt: new Date() },
+        });
+        const { summary, comp } = await leaveBalanceOf(reqRow.employee as any);
+        const remaining = reqRow.leaveType === "COMP" ? comp.remaining : summary.remaining;
+        // 승인 채널 카드 게시 — slackChannel/slackTs 가 이 카드로 갈아 끼워진다
+        await postLeaveApprovalCard({
+          requestId,
+          name: reqRow.employee.name,
+          dept: reqRow.employee.department ?? "",
+          start: reqRow.startDate,
+          end: reqRow.endDate,
+          days: reqRow.days,
+          typeLabel,
+          reason: `[${typeLabel}] ${reqRow.reason ?? "개인사유"}`,
+          remaining,
+          workPlan: reqRow.workPlan,
+          preApprovedBy: deciderName,
+        });
+        // 결재자 DM 의 버튼을 결과 표시로 갈아 끼운다 (남겨 두면 두 번 눌린다)
+        if (channel && msgTs) {
+          await updateMessage(channel, msgTs, `중간결재 확인: ${reqRow.employee.name}`, [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `☑️ *중간결재 확인* — ${reqRow.employee.name} · ${range} (${reqRow.days}일)\n운영진 승인으로 넘어갔습니다.`,
+              },
+            },
+          ]).catch(() => {});
+        }
+        if (reqRow.employee.slackUserId) {
+          await slackCall("chat.postMessage", {
+            channel: reqRow.employee.slackUserId,
+            text: `☑️ ${typeLabel} 신청(${range})의 중간결재가 확인되었습니다. 운영진 승인 후 반영됩니다.`,
+          }).catch(() => {});
+        }
+      } else {
+        await rejectLeaveRequest(requestId, userId, `중간결재 반려 (${deciderName})`);
+        if (channel && msgTs) {
+          await updateMessage(channel, msgTs, `중간결재 반려: ${reqRow.employee.name}`, [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `❌ *중간결재 반려* — ${reqRow.employee.name} · ${range} (${reqRow.days}일)`,
+              },
+            },
+          ]).catch(() => {});
+        }
+        if (reqRow.employee.slackUserId) {
+          await slackCall("chat.postMessage", {
+            channel: reqRow.employee.slackUserId,
+            text: `❌ ${typeLabel} 신청(${range}, ${reqRow.days}일)이 중간결재에서 반려되었습니다. ${deciderName} 님에게 문의하세요.`,
+          }).catch(() => {});
+        }
+      }
+      if (reqRow.employee.slackUserId)
+        await refreshHomeTab(reqRow.employee.slackUserId).catch(() => {});
+    } catch (e: any) {
+      await slackCall("chat.postEphemeral", { channel, user: userId, text: `처리 실패: ${e.message}` });
+    }
+    return new Response("", { status: 200 });
+  }
 
   if (!approverAllowed(userId)) {
     await slackCall("chat.postEphemeral", {

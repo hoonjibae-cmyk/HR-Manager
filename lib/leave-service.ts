@@ -15,7 +15,11 @@ export async function approveLeaveRequest(requestId: number, approver = "admin")
     include: { employee: { select: { name: true } } },
   });
   if (!reqRow) throw new Error("신청 없음");
-  if (reqRow.status !== "PENDING") throw new Error("이미 처리된 신청입니다");
+  // PRE_PENDING(중간결재 대기)도 받는다 — 결재자가 부재중일 때 운영진이 웹 화면에서
+  // 바로 승인해 넘길 수 있어야 한다(모레 시작인 휴가가 결재함에 묶이면 안 된다).
+  // 슬랙 승인 버튼은 중간결재를 거친 뒤에만 채널에 올라오므로 이 완화가 우회로가 되지는 않는다.
+  if (reqRow.status !== "PENDING" && reqRow.status !== "PRE_PENDING")
+    throw new Error("이미 처리된 신청입니다");
 
   const isComp = reqRow.leaveType === "COMP";
   const ops: any[] = [];
@@ -134,7 +138,9 @@ export async function rejectLeaveRequest(
 ) {
   const reqRow = await prisma.leaveRequest.findUnique({ where: { id: requestId } });
   if (!reqRow) throw new Error("신청 없음");
-  if (reqRow.status !== "PENDING") throw new Error("이미 처리된 신청입니다");
+  // 중간결재 단계(PRE_PENDING)의 반려도 여기로 온다 (승인과 같은 이유)
+  if (reqRow.status !== "PENDING" && reqRow.status !== "PRE_PENDING")
+    throw new Error("이미 처리된 신청입니다");
   await prisma.leaveRequest.update({
     where: { id: requestId },
     data: { status: "REJECTED", approverId: approver, decidedAt: new Date(), decidedNote: note },

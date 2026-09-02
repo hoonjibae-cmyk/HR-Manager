@@ -273,6 +273,8 @@ export function approvalBlocks(args: {
   days: number;
   reason: string;
   remaining: number;
+  /** 중간결재를 거친 신청이면 「중간결재: ○○○ 확인」 줄을 붙인다 */
+  preApprovedBy?: string | null;
   workPlan?: string | null;
 }) {
   const range =
@@ -299,6 +301,14 @@ export function approvalBlocks(args: {
           },
         ]
       : []),
+    ...(args.preApprovedBy
+      ? [
+          {
+            type: "context",
+            elements: [{ type: "mrkdwn", text: `☑️ 중간결재: ${args.preApprovedBy} 확인` }],
+          },
+        ]
+      : []),
     {
       type: "actions",
       block_id: `leave_${args.requestId}`,
@@ -315,6 +325,75 @@ export function approvalBlocks(args: {
           style: "danger",
           text: { type: "plain_text", text: "반려", emoji: true },
           action_id: "reject_leave",
+          value: String(args.requestId),
+        },
+      ],
+    },
+  ];
+}
+
+/**
+ * 중간결재자에게 가는 DM — 확인하면 운영진 승인 채널로 넘어가고, 반려하면 거기서 끝난다.
+ * 승인 카드와 같은 정보를 싣되 버튼 문구를 「확인」으로 갈랐다 — 이 단계는 최종 승인이
+ * 아니라 '팀 사정상 보내도 되는가' 의 확인이라, 「승인」이라 적으면 이걸로 끝난 줄 안다.
+ */
+export function preApprovalBlocks(args: {
+  requestId: number;
+  name: string;
+  dept: string;
+  start: Date;
+  end: Date;
+  days: number;
+  reason: string;
+  remaining: number;
+  workPlan?: string | null;
+}) {
+  const range = args.days > 1 ? `${ymd(args.start)} ~ ${ymd(args.end)}` : ymd(args.start);
+  return [
+    {
+      type: "header",
+      text: { type: "plain_text", text: "🧾 연차 중간결재 요청", emoji: true },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `${args.dept} 연차 신청이 들어왔습니다. *확인*하면 운영진 승인으로 넘어갑니다.`,
+      },
+    },
+    {
+      type: "section",
+      fields: [
+        { type: "mrkdwn", text: `*신청자*\n${args.name} (${args.dept})` },
+        { type: "mrkdwn", text: `*기간*\n${range} · ${args.days}일` },
+        { type: "mrkdwn", text: `*사유*\n${args.reason}` },
+        { type: "mrkdwn", text: `*현재 잔여연차*\n${args.remaining}일` },
+      ],
+    },
+    ...(args.workPlan
+      ? [
+          {
+            type: "section",
+            text: { type: "mrkdwn", text: `*업무조치사항*\n${args.workPlan}` },
+          },
+        ]
+      : []),
+    {
+      type: "actions",
+      block_id: `leave_pre_${args.requestId}`,
+      elements: [
+        {
+          type: "button",
+          style: "primary",
+          text: { type: "plain_text", text: "확인 (운영진 승인으로)", emoji: true },
+          action_id: "pre_approve_leave",
+          value: String(args.requestId),
+        },
+        {
+          type: "button",
+          style: "danger",
+          text: { type: "plain_text", text: "반려", emoji: true },
+          action_id: "pre_reject_leave",
           value: String(args.requestId),
         },
       ],

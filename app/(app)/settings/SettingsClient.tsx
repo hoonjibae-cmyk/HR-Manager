@@ -646,6 +646,9 @@ function DepartmentCard() {
                   {f.label}
                 </th>
               ))}
+              <th className="text-center px-1" title="지정하면 이 부서의 연차 신청이 운영진 승인 전에 이 사람의 슬랙 확인을 먼저 거칩니다. 본인 신청은 건너뛰고 바로 운영진 승인으로 갑니다.">
+                연차 중간결재
+              </th>
               <th className="text-center">사용</th>
               <th />
             </tr>
@@ -665,6 +668,24 @@ function DepartmentCard() {
                     />
                   </td>
                 ))}
+                <td className="text-center">
+                  <select
+                    className="input py-0.5 px-1 text-xs w-28"
+                    value={d.leaveApproverId ?? ""}
+                    disabled={busy}
+                    onChange={(e) =>
+                      send("PATCH", { id: d.id, leaveApproverId: e.target.value || null })
+                    }
+                  >
+                    <option value="">없음 (바로 승인)</option>
+                    {(data.approverChoices ?? []).map((e: any) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name}
+                        {e.position ? ` ${e.position}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </td>
                 <td className="text-center">
                   <input
                     type="checkbox"
@@ -714,6 +735,12 @@ function DepartmentCard() {
           </div>
         ))}
         <div>· 쓰지 않을 부서는 삭제하지 말고 <b>사용</b> 을 끄세요 — 이미 그 부서인 직원의 서류 판정에는 계속 쓰입니다.</div>
+        <div>
+          · <b>연차 중간결재</b> — 지정한 부서의 연차 신청은 그 사람의 슬랙 확인(중간결재)을 거친 뒤
+          운영진 승인으로 넘어갑니다. 결재자 <b>본인 신청은 건너뛰고</b> 바로 운영진 승인으로 가며,
+          결재자가 부재중이면 운영진이 연차 화면의 승인 대기 목록에서 바로 처리할 수 있습니다.
+          슬랙 연동이 있는 재직자만 지정할 수 있습니다.
+        </div>
       </div>
     </div>
   );

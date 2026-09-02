@@ -106,8 +106,9 @@ export function leaveBriefText(days: LeaveDay[], dateYmd: string): string | null
   if (!today.length) return null;
 
   const sorted = [...today].sort((a, b) => a.name.localeCompare(b.name, "ko"));
-  const settled = sorted.filter((d) => d.status !== "PENDING" && d.status !== "CANCEL_PENDING");
-  const pending = sorted.filter((d) => d.status === "PENDING" || d.status === "CANCEL_PENDING");
+  const isPend = (s: string) => s === "PENDING" || s === "PRE_PENDING" || s === "CANCEL_PENDING";
+  const settled = sorted.filter((d) => !isPend(d.status));
+  const pending = sorted.filter((d) => isPend(d.status));
 
   const lines = [`🌴 *오늘 휴가* — ${dayLabel(dateYmd)} · ${today.length}명`];
   if (settled.length) lines.push(...settled.map(leaveLine));

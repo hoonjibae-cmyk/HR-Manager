@@ -171,8 +171,13 @@ export function buildLeaveCalendar(input: LeaveCalendarInput): LeaveDay[] {
 
   for (const r of input.requests) {
     if (r.status === "REJECTED" || r.status === "CANCELED") continue;
+    // 중간결재 대기(PRE_PENDING)도 달력에서는 승인 대기와 같은 노랑 ⚠ 이다 — 아직 확정 아님
     const status: LeaveStatus =
-      r.status === "PENDING" ? "PENDING" : r.status === "CANCEL_PENDING" ? "CANCEL_PENDING" : "APPROVED";
+      r.status === "PENDING" || r.status === "PRE_PENDING"
+        ? "PENDING"
+        : r.status === "CANCEL_PENDING"
+          ? "CANCEL_PENDING"
+          : "APPROVED";
     const half = isHalf(r.leaveType, r.days);
     // 반차는 언제나 하루다 — 기간을 펼치면 안 된다
     const dates = half ? [r.startDate] : spreadWorkdays(r.startDate, r.endDate, holidays);

@@ -258,7 +258,7 @@ export default async function EmployeeLeavePage({
                         kind={
                           r.status === "APPROVED"
                             ? "ACTIVE"
-                            : r.status === "PENDING"
+                            : r.status === "PENDING" || r.status === "PRE_PENDING"
                             ? "DRAFT"
                             : "EXPIRED"
                         }

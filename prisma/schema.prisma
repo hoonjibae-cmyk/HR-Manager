@@ -109,6 +109,11 @@ model Department {
   /// 보안서약서 자체는 전 직원이 쓰고, 이 조항만 부서에 따라 붙였다 뗀다.
   docNonCompete      Boolean @default(false)
 
+  /// 연차 중간결재자 — 지정된 부서의 연차 신청은 운영진 승인 전에 이 사람의 확인을 거친다.
+  /// 비어 있으면 예전처럼 바로 운영진 승인으로 간다(부서마다 켜고 끄는 스위치 역할).
+  leaveApproverId Int?
+  leaveApprover   Employee? @relation("DeptLeaveApprover", fields: [leaveApproverId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -199,6 +204,8 @@ model Employee {
   documents         Document[]
   makeups           MakeupSession[]
   timesheetDays     TimesheetDay[]
+  /// 이 직원이 연차 중간결재자로 지정된 부서들
+  leaveApproverOf   Department[]       @relation("DeptLeaveApprover")
   severanceBases    SeveranceMonthlyBase[]
   dayOffs           DayOff[]
   attachedFiles     AttachedFile[]
@@ -540,7 +547,7 @@ model LeaveRequest {
   leaveType    String    @default("ANNUAL") // ANNUAL(연차) | HALF(반차) | COMP | SICK | SPECIAL
   reason       String?
   workPlan     String? // 업무조치사항 (부재 중 수업·업무 처리 계획)
-  status       String    @default("PENDING") // PENDING | APPROVED | REJECTED | CANCEL_PENDING | CANCELED
+  status       String    @default("PENDING") // PRE_PENDING(중간결재 대기) | PENDING | APPROVED | REJECTED | CANCEL_PENDING | CANCELED
   source       String    @default("WEB") // WEB | SLACK
   slackChannel String?
   slackTs      String? // 슬랙 메시지 timestamp (승인버튼 갱신용)
@@ -550,6 +557,10 @@ model LeaveRequest {
 
   // 구글 캘린더 연동 (승인 시 생성, 취소 승인 시 삭제)
   calendarEventId String?
+
+  // 중간결재 (부서에 leaveApprover 가 지정된 경우 PRE_PENDING → 확인 후 PENDING)
+  preApproverId String? // 확인한 사람 (slack user id, 운영진 대행이면 "admin")
+  preDecidedAt  DateTime?
 
   // 취소 신청 (직원이 승인된 휴가를 취소 요청 → 운영진 승인 필요)
   cancelReason      String?

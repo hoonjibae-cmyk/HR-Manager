@@ -10,9 +10,10 @@ import {
   type CompSummary,
 } from "./leave";
 import { computeWeeklyHours } from "./payroll";
-import { postMessage, approvalBlocks } from "./slack";
+import { postMessage, approvalBlocks, preApprovalBlocks } from "./slack";
 import { ymd } from "./format";
 import { LEAVE_TYPE_LABEL, isHalfDayLeave, parseSchedule, isContractorContract } from "./constants";
+import { preApproverFor } from "./leave-approval";
 
 /** 연차 미적용 판정 근거 — 안내 문구에 사유를 정확히 쓰기 위해 함께 들고 다닌다 */
 export interface LeaveEligibility {
@@ -214,6 +215,54 @@ export interface LeaveSubmitResult {
   remaining?: number;
   poolLabel?: string;
   requestId?: number;
+  /** 중간결재를 거치는 신청이면 결재자 이름 — 신청자 DM 문구가 갈린다 */
+  preApproverName?: string;
+}
+
+/**
+ * 운영진 승인 카드 게시 — 신규 신청(직행)과 중간결재 확인 뒤, 두 경로가 같은 카드를 쓴다.
+ * 따로 만들면 한쪽만 문구를 고쳐 '같은 신청서' 로 안 읽힌다.
+ */
+export async function postLeaveApprovalCard(args: {
+  requestId: number;
+  name: string;
+  dept: string;
+  start: Date;
+  end: Date;
+  days: number;
+  typeLabel: string;
+  reason: string;
+  remaining: number;
+  workPlan?: string | null;
+  preApprovedBy?: string | null;
+  fallbackChannel?: string | null;
+}): Promise<boolean> {
+  const channel = process.env.SLACK_APPROVAL_CHANNEL || args.fallbackChannel;
+  if (!channel) return false;
+  const posted: any = await postMessage(
+    channel,
+    `${args.typeLabel} 신청: ${args.name} ${args.days}일`,
+    approvalBlocks({
+      requestId: args.requestId,
+      name: args.name,
+      dept: args.dept,
+      start: args.start,
+      end: args.end,
+      days: args.days,
+      reason: args.reason,
+      remaining: args.remaining,
+      workPlan: args.workPlan ?? undefined,
+      preApprovedBy: args.preApprovedBy ?? undefined,
+    })
+  ).catch(() => null);
+  if (posted?.ok) {
+    await prisma.leaveRequest.update({
+      where: { id: args.requestId },
+      data: { slackChannel: posted.channel, slackTs: posted.ts },
+    });
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -281,6 +330,23 @@ export async function submitLeaveRequest(
   const reasonFull =
     input.reason + (input.halfTimeNote ? ` (사용시간 ${input.halfTimeNote})` : "");
 
+  // 부서에 중간결재자가 지정돼 있으면 운영진 승인 전에 그 사람의 확인을 먼저 거친다.
+  // 본인 신청·퇴사자·슬랙 미연동 결재자는 preApproverFor 가 걸러 직행시킨다.
+  const dept = emp.department
+    ? await prisma.department
+        .findUnique({
+          where: { name: emp.department },
+          include: {
+            leaveApprover: {
+              select: { id: true, name: true, active: true, slackUserId: true },
+            },
+          },
+        })
+        .catch(() => null)
+    : null;
+  const preApprover = preApproverFor(dept?.leaveApprover ?? null, emp.id);
+
+  const typeLabel = LEAVE_TYPE_LABEL[input.leaveType] ?? "연차";
   const reqRow = await prisma.leaveRequest.create({
     data: {
       employeeId: emp.id,
@@ -290,18 +356,18 @@ export async function submitLeaveRequest(
       leaveType: input.leaveType,
       reason: reasonFull || "개인사유",
       workPlan: input.workPlan?.trim() || null,
-      status: "PENDING",
+      status: preApprover ? "PRE_PENDING" : "PENDING",
       source: input.source ?? "SLACK",
     },
   });
 
-  const channel = process.env.SLACK_APPROVAL_CHANNEL || input.channel;
-  if (channel) {
-    const typeLabel = LEAVE_TYPE_LABEL[input.leaveType] ?? "연차";
+  if (preApprover) {
+    // 중간결재자 DM — 확인·반려 버튼. slackChannel/slackTs 에는 이 DM 을 담아 두고,
+    // 확인되면 승인 채널 카드로 갈아 끼운다(단계마다 '지금 버튼이 살아 있는 메시지' 하나만 가리킨다).
     const posted: any = await postMessage(
-      channel,
-      `${typeLabel} 신청: ${emp.name} ${days}일`,
-      approvalBlocks({
+      preApprover.slackUserId!,
+      `연차 중간결재 요청: ${emp.name} ${days}일`,
+      preApprovalBlocks({
         requestId: reqRow.id,
         name: emp.name,
         dept: emp.department ?? "",
@@ -312,14 +378,39 @@ export async function submitLeaveRequest(
         remaining: poolRemaining,
         workPlan: input.workPlan,
       })
-    );
+    ).catch(() => null);
     if (posted?.ok) {
       await prisma.leaveRequest.update({
         where: { id: reqRow.id },
         data: { slackChannel: posted.channel, slackTs: posted.ts },
       });
+      return {
+        ok: true,
+        days,
+        remaining: poolRemaining,
+        poolLabel,
+        requestId: reqRow.id,
+        preApproverName: preApprover.name,
+      };
     }
+    // DM 을 못 보냈으면(연동 계정 삭제 등) 중간결재에 걸어 두지 않고 직행으로 되돌린다 —
+    // 아무도 못 받는 결재함에 넣어 두면 신청이 조용히 멈춘다.
+    await prisma.leaveRequest.update({ where: { id: reqRow.id }, data: { status: "PENDING" } });
   }
+
+  await postLeaveApprovalCard({
+    requestId: reqRow.id,
+    name: emp.name,
+    dept: emp.department ?? "",
+    start: input.start,
+    end: input.end,
+    days,
+    typeLabel,
+    reason: `[${typeLabel}] ${reasonFull || "개인사유"}`,
+    remaining: poolRemaining,
+    workPlan: input.workPlan,
+    fallbackChannel: input.channel,
+  });
 
   return { ok: true, days, remaining: poolRemaining, poolLabel, requestId: reqRow.id };
 }

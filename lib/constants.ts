@@ -160,10 +160,12 @@ export const LEAVE_STATUS = {
   CANCELED: "CANCELED",
 } as const;
 export const LEAVE_STATUS_LABEL: Record<string, string> = {
+  PRE_PENDING: "중간결재 대기",
   PENDING: "승인대기",
   APPROVED: "승인",
   REJECTED: "반려",
   CANCELED: "취소",
+  CANCEL_PENDING: "취소 승인대기",
 };
 
 /**

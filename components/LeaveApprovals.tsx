@@ -15,6 +15,8 @@ interface Req {
   reason: string | null;
   workPlan: string | null;
   source: string;
+  /** PRE_PENDING(중간결재 대기)이면 배지로 표시 — 지금 누구 손에 있는지 보여야 한다 */
+  status: string;
   employee: { name: string; department: string | null };
 }
 
@@ -65,7 +67,17 @@ export default function LeaveApprovals({ requests }: { requests: Req[] }) {
       <tbody>
         {requests.map((r) => (
           <tr key={r.id}>
-            <td className="td font-semibold">{r.employee.name}</td>
+            <td className="td font-semibold">
+              {r.employee.name}
+              {r.status === "PRE_PENDING" && (
+                <span
+                  className="ml-1.5 text-[11px] font-normal text-amber-600"
+                  title="부서 중간결재자의 확인을 기다리는 중입니다. 여기서 승인하면 중간결재를 건너뛰고 바로 반영됩니다."
+                >
+                  중간결재 대기
+                </span>
+              )}
+            </td>
             <td className="td tnum">
               {ymd(r.startDate)}
               {r.days > 1 ? ` ~ ${ymd(r.endDate)}` : ""}

@@ -28,7 +28,8 @@ export default async function Dashboard() {
       prisma.employee.count({ where: { active: true } }),
       prisma.employee.groupBy({ by: ["payScheme"], _count: true }),
       prisma.leaveRequest.findMany({
-        where: { status: "PENDING" },
+        // 중간결재 대기도 함께 — 결재자 부재로 멈춘 건이 대시보드에서 보여야 한다
+        where: { status: { in: ["PRE_PENDING", "PENDING"] } },
         include: { employee: true },
         orderBy: { createdAt: "desc" },
         take: 5,

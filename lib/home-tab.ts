@@ -12,7 +12,7 @@ async function upcomingLeaves(employeeId: number) {
     Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate())
   );
   const rows = await prisma.leaveRequest.findMany({
-    where: { employeeId, endDate: { gte: today }, status: { in: ["PENDING", "APPROVED", "CANCEL_PENDING"] } },
+    where: { employeeId, endDate: { gte: today }, status: { in: ["PRE_PENDING", "PENDING", "APPROVED", "CANCEL_PENDING"] } },
     orderBy: { startDate: "asc" },
     take: 10,
   });

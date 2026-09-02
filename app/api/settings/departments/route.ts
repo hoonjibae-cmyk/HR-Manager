@@ -16,9 +16,21 @@ export async function GET() {
     where: { active: true },
   });
   const used = new Map(counts.map((c) => [c.department ?? "", c._count._all]));
+  // 연차 중간결재자 후보 — 슬랙 DM 을 받을 수 있어야 하므로 연동된 재직자만 고를 수 있다
+  const approverChoices = await prisma.employee.findMany({
+    where: { active: true, slackUserId: { not: null } },
+    select: { id: true, name: true, department: true, position: true },
+    orderBy: { name: "asc" },
+  });
+  const approverName = new Map(approverChoices.map((e) => [e.id, e.name]));
   return NextResponse.json({
-    departments: rows.map((d) => ({ ...d, employeeCount: used.get(d.name) ?? 0 })),
+    departments: rows.map((d: any) => ({
+      ...d,
+      employeeCount: used.get(d.name) ?? 0,
+      leaveApproverName: d.leaveApproverId ? (approverName.get(d.leaveApproverId) ?? null) : null,
+    })),
     docFields: DEPT_DOC_FIELDS,
+    approverChoices,
     /// 부서가 비어 있는 직원 — 이들은 서류 발급이 막히므로 화면에서 짚어 준다
     missingDept: used.get("") ?? 0,
   });
@@ -71,6 +83,26 @@ export async function PATCH(req: Request) {
 
   const data: any = policyFrom(body);
   if (typeof body.active === "boolean") data.active = body.active;
+  // 연차 중간결재자 — 지정하면 이 부서의 연차 신청이 운영진 승인 전에 이 사람의 확인을 거친다.
+  // 슬랙 연동이 없는 직원은 DM 을 못 받아 신청이 조용히 멈추므로 지정 자체를 막는다.
+  if ("leaveApproverId" in body) {
+    if (body.leaveApproverId == null || body.leaveApproverId === "") {
+      data.leaveApproverId = null;
+    } else {
+      const approver = await prisma.employee.findUnique({
+        where: { id: Number(body.leaveApproverId) },
+        select: { active: true, slackUserId: true, name: true },
+      });
+      if (!approver || !approver.active)
+        return NextResponse.json({ error: "재직 중인 직원만 중간결재자로 지정할 수 있습니다" }, { status: 400 });
+      if (!approver.slackUserId)
+        return NextResponse.json(
+          { error: `${approver.name} 님은 슬랙 연동이 없어 중간결재 DM 을 받을 수 없습니다. 직원 관리에서 슬랙 계정을 먼저 연결하세요.` },
+          { status: 400 }
+        );
+      data.leaveApproverId = Number(body.leaveApproverId);
+    }
+  }
   if (body.name != null && String(body.name).trim() && String(body.name).trim() !== cur.name) {
     const name = String(body.name).trim();
     // 이름을 바꾸면 그 부서로 등록된 직원의 부서 문자열도 함께 옮겨야 한다 —
