@@ -26,7 +26,9 @@ export default async function Dashboard() {
     await Promise.all([
       prisma.employee.count(),
       prisma.employee.count({ where: { active: true } }),
-      prisma.employee.groupBy({ by: ["payScheme"], _count: true }),
+      // 급여형태 분포는 **재직자만** 센다 — 퇴사자까지 섞으면 분포 합계가 '재직 중' 카드와
+      // 어긋나 어느 쪽이 지금 인원인지 알 수 없다 (퇴사자 몫은 이미 '전체 직원' 카드에 있다)
+      prisma.employee.groupBy({ by: ["payScheme"], _count: true, where: { active: true } }),
       prisma.leaveRequest.findMany({
         // 중간결재 대기도 함께 — 결재자 부재로 멈춘 건이 대시보드에서 보여야 한다
         where: { status: { in: ["PRE_PENDING", "PENDING"] } },
@@ -201,11 +203,14 @@ export default async function Dashboard() {
       <div className="grid lg:grid-cols-2 xl:grid-cols-3 gap-6">
         {/* 급여형태 분포 */}
         <div className="card p-5">
-          <h2 className="font-bold text-slate-800 mb-4">급여형태 분포</h2>
+          <h2 className="font-bold text-slate-800 mb-4">
+            급여형태 분포 <span className="text-xs font-normal text-slate-400">재직 {active}명 기준</span>
+          </h2>
           <div className="space-y-3">
             {Object.entries(PAY_SCHEME_LABEL).map(([k, label]) => {
               const n = schemeMap[k] ?? 0;
-              const pct = total ? Math.round((n / total) * 100) : 0;
+              // 분모도 재직자 — 전체(퇴사자 포함)로 나누면 막대 합이 100% 에 못 미친다
+              const pct = active ? Math.round((n / active) * 100) : 0;
               return (
                 <div key={k}>
                   <div className="flex justify-between text-sm mb-1">
