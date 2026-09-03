@@ -246,6 +246,33 @@ function monthDaysFor(date: string): string[] {
  * ⚠ **공휴일 표를 반드시 넘긴다**(기본값을 두지 않은 이유). 안 넘기면 공휴일 생일이
  * 평일로 잡혀 쉬는 날 알림이 나가고, 그 사실이 조용히 묻힌다.
  */
+/**
+ * **1주일 내 생일** — 오늘부터 `days`일 안(오늘 포함)에 생일인 재직자. 대시보드 카드용.
+ *
+ * 슬랙 생일 알림(`birthdaysOn`)과 달리 **평일 앞당김을 하지 않는다** — 알림은 쉬는 날
+ * 보내면 안 읽혀서 앞당기지만, 대시보드는 사람이 열어 보는 화면이라 실제 생일 날짜
+ * 그대로가 맞다. 2월 29일생을 평년에 2월 28일로 보는 규칙(`monthDaysFor`)은 같이 쓴다 —
+ * 두 자리를 따로 두면 언젠가 한쪽만 고쳐 갈라진다. 연말(12월 말)에는 창이 해를 넘어
+ * 1월 초 생일도 잡는다(`addDays` 가 해 넘김을 처리한다).
+ */
+export function upcomingBirthdays(
+  rows: Array<Pick<BirthdayRow, "name" | "department" | "birth">>,
+  today: string,
+  days = 7
+): Array<{ name: string; department: string | null; date: string; isToday: boolean }> {
+  const out: Array<{ name: string; department: string | null; date: string; isToday: boolean }> = [];
+  for (let i = 0; i <= days; i++) {
+    const d = addDays(today, i);
+    const mds = monthDaysFor(d);
+    for (const r of rows) {
+      const md = birthMonthDay(r.birth);
+      if (md && mds.includes(md))
+        out.push({ name: r.name, department: r.department ?? null, date: d, isToday: i === 0 });
+    }
+  }
+  return out;
+}
+
 export function birthdaysOn(
   rows: BirthdayRow[],
   now: Date,

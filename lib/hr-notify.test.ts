@@ -16,6 +16,7 @@ import {
   DEFAULT_BIRTHDAY_TIMING,
   type ContractRow,
   type BirthdayRow,
+  upcomingBirthdays,
 } from "./hr-notify";
 
 /** KST 벽시계 → UTC Date (앱이 UTC 로 도는 것을 흉내 낸다) */
@@ -381,5 +382,33 @@ describe("날짜 도구", () => {
 
   it("오늘은 KST 기준이다", () => {
     expect(kstToday(kst("2026-08-11T00:10"))).toBe("2026-08-11");
+  });
+});
+
+describe("upcomingBirthdays — 대시보드 '1주일 내 생일'", () => {
+  const rows = [
+    { name: "오늘생일", department: "교수부", birth: "1990-09-03" },
+    { name: "일주일뒤", department: null, birth: "1995-09-10" },
+    { name: "여드레뒤", department: null, birth: "1995-09-11" }, // 창 밖
+    { name: "두자리연도", department: null, birth: "900905" }, // YYMMDD 도 MM-DD 로 읽는다
+    { name: "생일없음", department: null, birth: null },
+  ];
+
+  it("오늘 포함 7일 안의 생일만, 날짜순으로 낸다", () => {
+    const list = upcomingBirthdays(rows, "2026-09-03");
+    expect(list.map((b) => b.name)).toEqual(["오늘생일", "두자리연도", "일주일뒤"]);
+    expect(list[0].isToday).toBe(true);
+    expect(list[1].date).toBe("2026-09-05");
+    expect(list.find((b) => b.name === "여드레뒤")).toBeUndefined();
+  });
+
+  it("연말에는 해를 넘어 1월 초 생일도 잡는다", () => {
+    const list = upcomingBirthdays([{ name: "신정생일", department: null, birth: "1990-01-02" }], "2026-12-28");
+    expect(list[0]?.date).toBe("2027-01-02");
+  });
+
+  it("2월 29일생은 평년에 2월 28일로 본다 (슬랙 알림과 같은 규칙)", () => {
+    const list = upcomingBirthdays([{ name: "윤년생", department: null, birth: "2000-02-29" }], "2026-02-25");
+    expect(list[0]?.date).toBe("2026-02-28");
   });
 });

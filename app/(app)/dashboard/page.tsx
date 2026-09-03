@@ -14,6 +14,7 @@ import {
 import { listHolidays } from "@/lib/holiday-service";
 import { listDayOffs } from "@/lib/dayoff-service";
 import { renewalAlerts, daysLabel, renewalKindLabel, RENEWAL_LEAD_DAYS } from "@/lib/renewal";
+import { upcomingBirthdays } from "@/lib/hr-notify";
 
 export const dynamic = "force-dynamic";
 
@@ -22,13 +23,18 @@ const ymdUtc = (d: Date) => d.toISOString().slice(0, 10);
 
 export default async function Dashboard() {
   const now = new Date();
-  const [total, active, byScheme, pendingLeaves, staffForRenewal, company] =
+  const [birthRows, active, byScheme, byDept, pendingLeaves, staffForRenewal, company] =
     await Promise.all([
-      prisma.employee.count(),
+      // '1주일 내 생일' 카드용 — 재직자의 이름·부서·생일만
+      prisma.employee.findMany({
+        where: { active: true },
+        select: { name: true, department: true, birth: true },
+      }),
       prisma.employee.count({ where: { active: true } }),
-      // 급여형태 분포는 **재직자만** 센다 — 퇴사자까지 섞으면 분포 합계가 '재직 중' 카드와
-      // 어긋나 어느 쪽이 지금 인원인지 알 수 없다 (퇴사자 몫은 이미 '전체 직원' 카드에 있다)
+      // 급여형태·부서 분포는 **재직자만** 센다 — 퇴사자까지 섞으면 분포 합계가 '재직 중' 카드와
+      // 어긋나 어느 쪽이 지금 인원인지 알 수 없다
       prisma.employee.groupBy({ by: ["payScheme"], _count: true, where: { active: true } }),
+      prisma.employee.groupBy({ by: ["department"], _count: true, where: { active: true } }),
       prisma.leaveRequest.findMany({
         // 중간결재 대기도 함께 — 결재자 부재로 멈춘 건이 대시보드에서 보여야 한다
         where: { status: { in: ["PRE_PENDING", "PENDING"] } },
@@ -170,6 +176,21 @@ export default async function Dashboard() {
   const schemeMap: Record<string, number> = {};
   byScheme.forEach((s) => (schemeMap[s.payScheme] = s._count));
 
+  // 부서별 분포 — 인원 많은 순, 부서가 빈 사람은 '미지정' 으로 맨 뒤에
+  const deptRows = byDept
+    .map((d) => ({ label: d.department?.trim() || "미지정", n: d._count }))
+    .sort((a, b) => (a.label === "미지정" ? 1 : b.label === "미지정" ? -1 : b.n - a.n));
+
+  // 1주일 내 생일 — 실제 생일 날짜 그대로 (슬랙 알림의 평일 앞당김과 다른 용도)
+  const bdays = upcomingBirthdays(birthRows, ymdUtc(now));
+  const bdayLabel = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+  const bdaySub = bdays.length
+    ? bdays
+        .slice(0, 3)
+        .map((b) => `${bdayLabel(b.date)} ${b.name}`)
+        .join(" · ") + (bdays.length > 3 ? ` 외 ${bdays.length - 3}명` : "")
+    : undefined;
+
   return (
     <div>
       <PageHeader
@@ -178,8 +199,15 @@ export default async function Dashboard() {
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard label="전체 직원" value={`${total}명`} href="/employees" />
-        <StatCard label="재직 중" value={`${active}명`} accent="text-emerald-600" />
+        <StatCard label="재직 중" value={`${active}명`} href="/employees" accent="text-emerald-600" />
+        {/* '전체 직원(퇴사자 포함)' 은 뺐다 — 매일 보는 화면에서 판단에 쓰이는 수가 아니다.
+            퇴사자 수는 직원 관리의 재직상태 필터로 본다. */}
+        <StatCard
+          label="1주일 내 생일"
+          value={`${bdays.length}명`}
+          sub={bdaySub}
+          accent={bdays.length ? "text-brand-600" : ""}
+        />
         <StatCard
           label="연차 승인대기"
           value={`${pendingLeaves.length}건`}
@@ -197,37 +225,21 @@ export default async function Dashboard() {
         <PayrollTrendChart records={trendRecords} />
       </div>
 
-      {/* 셋을 한 줄에 두어 **연차 승인 대기 옆에 '곧 자리를 비울 사람'** 이 붙게 한다 —
+      {/* 넷을 한 줄에 두되 **연차 승인 대기 옆에 '곧 자리를 비울 사람'** 이 붙게 한다 —
           결재할 것과 그 결과로 생기는 공백은 함께 봐야 판단이 된다.
-          좁은 화면에서는 두 줄로 접히고, 그때도 두 연차 카드가 이웃한다. */}
-      <div className="grid lg:grid-cols-2 xl:grid-cols-3 gap-6">
+          좁은 화면(lg)에서는 2×2 로 접히고, 그때도 두 분포 카드끼리·두 연차 카드끼리 이웃한다. */}
+      <div className="grid lg:grid-cols-2 xl:grid-cols-4 gap-6">
         {/* 급여형태 분포 */}
-        <div className="card p-5">
-          <h2 className="font-bold text-slate-800 mb-4">
-            급여형태 분포 <span className="text-xs font-normal text-slate-400">재직 {active}명 기준</span>
-          </h2>
-          <div className="space-y-3">
-            {Object.entries(PAY_SCHEME_LABEL).map(([k, label]) => {
-              const n = schemeMap[k] ?? 0;
-              // 분모도 재직자 — 전체(퇴사자 포함)로 나누면 막대 합이 100% 에 못 미친다
-              const pct = active ? Math.round((n / active) * 100) : 0;
-              return (
-                <div key={k}>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-slate-600">{label}</span>
-                    <span className="font-semibold tnum">{n}명</span>
-                  </div>
-                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-brand-500 rounded-full"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <DistributionCard
+          title="급여형태 분포"
+          active={active}
+          rows={Object.entries(PAY_SCHEME_LABEL).map(([k, label]) => ({
+            label,
+            n: schemeMap[k] ?? 0,
+          }))}
+        />
+        {/* 부서별 분포 — 같은 골격 */}
+        <DistributionCard title="부서별 분포" active={active} rows={deptRows} />
 
         {/* 연차 승인 대기 */}
         <div className="card p-5">
@@ -377,6 +389,42 @@ export default async function Dashboard() {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+/** 분포 카드 — 급여형태·부서가 같은 골격을 쓴다 (두 벌로 두면 한쪽만 고쳐 갈라진다) */
+function DistributionCard({
+  title,
+  active,
+  rows,
+}: {
+  title: string;
+  active: number;
+  rows: Array<{ label: string; n: number }>;
+}) {
+  return (
+    <div className="card p-5">
+      <h2 className="font-bold text-slate-800 mb-4">
+        {title} <span className="text-xs font-normal text-slate-400">재직 {active}명 기준</span>
+      </h2>
+      <div className="space-y-3">
+        {rows.map(({ label, n }) => {
+          // 분모도 재직자 — 전체(퇴사자 포함)로 나누면 막대 합이 100% 에 못 미친다
+          const pct = active ? Math.round((n / active) * 100) : 0;
+          return (
+            <div key={label}>
+              <div className="flex justify-between text-sm mb-1">
+                <span className="text-slate-600">{label}</span>
+                <span className="font-semibold tnum">{n}명</span>
+              </div>
+              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-brand-500 rounded-full" style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
