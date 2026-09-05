@@ -6,6 +6,7 @@
 // 적립액이 옛 금액으로 남아 누계가 조용히 어긋난다.
 
 import { prisma } from "./db";
+import { tenureOf } from "./format";
 import { parseSchedule, isContractorContract, PAY_SCHEME_LABEL } from "./constants";
 import { computeWeeklyHours } from "./payroll";
 import {
@@ -109,17 +110,8 @@ export interface SeveranceRow {
   estimatedMonths: number;
 }
 
-function serviceLabelOf(hireDate: Date, asOf: Date): { label: string; months: number } {
-  let months =
-    (asOf.getUTCFullYear() - hireDate.getUTCFullYear()) * 12 +
-    (asOf.getUTCMonth() - hireDate.getUTCMonth());
-  if (asOf.getUTCDate() < hireDate.getUTCDate()) months -= 1;
-  months = Math.max(months, 0);
-  const y = Math.floor(months / 12);
-  const m = months % 12;
-  const label = y ? (m ? `${y}년 ${m}개월` : `${y}년`) : `${m}개월`;
-  return { label, months };
-}
+// 직원 관리 명단의 '근속' 열과 같은 함수를 쓴다 — 두 벌로 두면 두 화면의 근속이 갈라진다
+const serviceLabelOf = tenureOf;
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 

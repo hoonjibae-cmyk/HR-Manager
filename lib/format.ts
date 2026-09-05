@@ -76,3 +76,36 @@ export function wonToKorean(n: number): string {
 export function kstTodayYmd(now: Date = new Date()): string {
   return new Date(now.getTime() + 9 * 3600000).toISOString().slice(0, 10);
 }
+
+/**
+ * 근속 — 달력 월 기준(입사기념일이 지나야 한 달로 센다). 퇴직자는 퇴사일까지다.
+ * 퇴직급여 화면(severance-service)과 같은 계산이라 두 화면의 근속이 갈라지지 않는다.
+ */
+export function tenureOf(hire: Date, until: Date): { label: string; months: number } {
+  let months =
+    (until.getUTCFullYear() - hire.getUTCFullYear()) * 12 +
+    (until.getUTCMonth() - hire.getUTCMonth());
+  if (until.getUTCDate() < hire.getUTCDate()) months -= 1;
+  months = Math.max(months, 0);
+  const y = Math.floor(months / 12);
+  const m = months % 12;
+  const label = y ? (m ? `${y}년 ${m}개월` : `${y}년`) : `${m}개월`;
+  return { label, months };
+}
+
+/** `1990-03-15`·`1990.03.15`·`19900315` 을 ISO 로 — 두 자리 연도(YYMMDD)는 세기를 몰라 null */
+export function birthIsoOf(birth: string | null | undefined): string | null {
+  const m = String(birth ?? "").trim().match(/^(\d{4})[-./]?(\d{2})[-./]?(\d{2})$/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+/** 만 나이 — 생년월일(YYYY-MM-DD)과 기준일로. 생일이 안 지났으면 한 살 뺀다 */
+export function ageOf(birthIso: string | null, todayYmd: string): number | null {
+  if (!birthIso) return null;
+  const [by, bm, bd] = birthIso.split("-").map(Number);
+  const [ty, tm, td] = todayYmd.split("-").map(Number);
+  if (!by || by < 1900 || by > 2100) return null;
+  let age = ty - by;
+  if (tm < bm || (tm === bm && td < bd)) age -= 1;
+  return age >= 0 && age < 130 ? age : null;
+}

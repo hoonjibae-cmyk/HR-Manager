@@ -32,6 +32,21 @@ export interface EmployeeRow {
   active: boolean;
   hasSlack: boolean;
   contractIssueCount: number;
+  /** 표시용 생년월일 (YYYY.MM.DD, 두 자리 연도 등 못 읽는 값은 원문 그대로) */
+  birth: string | null;
+  /** 정렬용 ISO — 못 읽는 생년월일은 null 로 두어 맨 뒤로 보낸다 */
+  birthIso: string | null;
+  /** 만 나이 — 두 자리 연도는 세기를 알 수 없어 비운다 (생일 알림과 같은 규칙) */
+  age: number | null;
+  /** 근속 "1년 6개월" — 퇴직자는 퇴사일에 멈춘 값 */
+  tenureLabel: string;
+  /** 정렬용 근속 개월수 */
+  tenureMonths: number;
+  /** 지배 계약의 만료일 (YYYY.MM.DD) — 기한 없는 계약은 null + contractEndless */
+  contractEnd: string | null;
+  contractEndless: boolean;
+  /** 서버가 구한 오늘(KST, YYYY.MM.DD) — 만료 지남 판정용. 클라이언트 시계를 믿지 않는다 */
+  today: string;
 }
 
 /** 정렬 키 → 비교할 값 */
@@ -47,6 +62,13 @@ function pick(e: EmployeeRow, key: string): any {
     // 금액 기준으로 정렬하고 비율제는 0 으로 모인다.
     case "amount":
       return e.payScheme === "RATIO" ? 0 : e.baseWage;
+    case "birth":
+      return e.birthIso; // null 은 맨 뒤로 (sortRows 규칙)
+    case "tenure":
+      return e.tenureMonths;
+    case "contractEnd":
+      // 기한 없는 계약은 '만료가 없다' — 날짜들 뒤로 보낸다 (빈 값 규칙에 태운다)
+      return e.contractEnd;
     case "slack":
       return e.hasSlack;
     case "active":
@@ -73,7 +95,10 @@ const SORT_LABELS: Record<string, string> = {
   incomeType: "구분",
   payScheme: "급여형태",
   amount: "기준액",
+  birth: "생년월일",
   hireDate: "입사일",
+  tenure: "근속",
+  contractEnd: "계약만료일",
   slack: "슬랙",
   active: "상태",
 };
@@ -184,7 +209,6 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
           <table className="w-full">
             <thead className="sticky-head">
               <tr>
-                <SortTh label="사번" sortKey="empNo" sort={sort} onSort={toggle} />
                 <SortTh label="성명" sortKey="name" sort={sort} onSort={toggle} />
                 <SortTh label="부서 / 직책" sortKey="department" sort={sort} onSort={toggle} />
                 <SortTh label="구분" sortKey="incomeType" sort={sort} onSort={toggle} />
@@ -197,7 +221,28 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
                   align="right"
                   title="금액 기준 정렬 — 완전비율제는 매출 대비 %라 함께 줄 세우지 않습니다"
                 />
+                <SortTh
+                  label="생년월일"
+                  sortKey="birth"
+                  sort={sort}
+                  onSort={toggle}
+                  title="만 나이는 4자리 연도가 있을 때만 계산합니다 (두 자리 연도는 세기를 알 수 없음)"
+                />
                 <SortTh label="입사일" sortKey="hireDate" sort={sort} onSort={toggle} />
+                <SortTh
+                  label="근속"
+                  sortKey="tenure"
+                  sort={sort}
+                  onSort={toggle}
+                  title="퇴직자는 퇴사일에 멈춘 근속입니다"
+                />
+                <SortTh
+                  label="계약만료일"
+                  sortKey="contractEnd"
+                  sort={sort}
+                  onSort={toggle}
+                  title="오늘 시점 지배 계약의 종료일 — 기한 없는 계약은 '기한 없음'"
+                />
                 <SortTh label="슬랙" sortKey="slack" sort={sort} onSort={toggle} />
                 <SortTh label="상태" sortKey="active" sort={sort} onSort={toggle} />
               </tr>
@@ -205,7 +250,6 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
             <tbody>
               {sorted.map((e) => (
                 <tr key={e.id} className="hover:bg-slate-50">
-                  <td className="td tnum text-slate-400">{e.empNo}</td>
                   <td className="td">
                     <Link
                       href={`/employees/${e.id}`}
@@ -234,7 +278,27 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
                       ? `${won(e.baseWage)}/h`
                       : `${won(e.baseWage)}`}
                   </td>
+                  <td className="td tnum text-slate-500">
+                    {e.birth ?? "-"}
+                    {e.age != null && <div className="text-xs text-slate-400">만 {e.age}세</div>}
+                  </td>
                   <td className="td tnum text-slate-500">{e.hireDate}</td>
+                  <td className="td text-slate-600 whitespace-nowrap">{e.tenureLabel}</td>
+                  <td className="td tnum whitespace-nowrap">
+                    {e.contractEnd ? (
+                      // 만료가 지났는데 재직 중이면 계약 공백 — 붉게 띄운다 (대시보드 재계약 알림과 같은 신호)
+                      <span className={e.active && e.contractEnd < e.today ? "text-red-600 font-semibold" : "text-slate-500"}>
+                        {e.contractEnd}
+                        {e.active && e.contractEnd < e.today && (
+                          <div className="text-[11px] font-normal">만료 지남</div>
+                        )}
+                      </span>
+                    ) : e.contractEndless ? (
+                      <span className="text-slate-400">기한 없음</span>
+                    ) : (
+                      <span className="text-slate-300">-</span>
+                    )}
+                  </td>
                   <td className="td">
                     {e.hasSlack ? (
                       <span className="pill bg-emerald-50 text-emerald-700">연동됨</span>
