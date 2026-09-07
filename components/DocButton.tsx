@@ -42,6 +42,13 @@ export default function DocButton({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      if (res.status === 401) {
+        // 세션 만료 — 'unauthorized' 원문을 띄우면 영문을 알 수 없다. 안내하고 로그인으로 보낸다
+        closePdfTab(win);
+        alert("로그인이 만료되었습니다. 다시 로그인해 주세요.");
+        window.location.href = "/login";
+        return;
+      }
       if (!res.ok) {
         closePdfTab(win);
         alert("생성 실패: " + (await res.text()));

@@ -864,6 +864,14 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - 4대보험/세율은 하드코딩 금지 — `InsuranceRate`(설정 화면에서 수정). 세액표는 `TaxBracket`.
 - 계산식 변경 시 `lib/*.test.ts` 를 먼저 갱신하고 `npm test` 로 검증.
 - 관리자 로그인은 비밀번호 공유(`ADMIN_PASSWORD`) 방식이라 화면 작업의 '누가' 는 남지 않는다.
+  **세션은 쓰는 동안 미끄러지듯 연장된다**(`middleware.ts` + `lib/auth-edge.ts` 순수 함수·테스트) —
+  7일 고정이던 시절, 만료 순간 열려 있던 화면은 멀쩡한데 버튼만 전부 'unauthorized' 로
+  떨어졌다(신규입사 패키지 발급에서 겪었다). 하루 넘은 세션의 요청이 오면 새 7일짜리로
+  갈아 끼우고, 미인증 페이지 요청은 미들웨어가 /login 으로 보낸다. **API 는 미들웨어가
+  자르지 않는다** — 슬랙·크론은 쿠키가 아니라 자체 서명 인증이다. 엣지는 node crypto 가
+  없어 Web Crypto 로 같은 HMAC 을 한 벌 더 두었다 — **두 구현의 호환을 테스트가 못박으므로
+  쿠키 모양을 바꾸면 양쪽을 함께 바꾼다**. 클라이언트는 401 을 받으면 '로그인이 만료되었습니다'
+  로 안내하고 로그인 화면으로 보낸다(DocButton).
   슬랙 경유 작업만 사용자까지 기록된다. 개인 구분이 필요해지면 계정 모델을 도입해야 한다.
 - **Supabase 의 `public` 스키마는 공개 API(PostgREST)로 자동 노출된다 — RLS 로 막아 둔다.**
   `https://<ref>.supabase.co/rest/v1/...` 는 `anon` 키만 있으면 열리고, 그 키는 원래
