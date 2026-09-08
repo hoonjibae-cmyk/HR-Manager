@@ -20,8 +20,11 @@ export const dynamic = "force-dynamic";
  *
  * **주민번호·급여·계좌·연락처는 내보내지 않는다.** 받는 쪽이 쓸 일이 없다.
  *
- * 이메일을 주는 것은 그것이 로그인 신원이기 때문이다(구글 계정). 슬랙 아이디를
- * 주는 것은 아니라 — 안내는 이 프로그램이 대신 보낸다(/api/slack/notify).
+ * 이메일은 **업무용 구글메일(workEmail)** 을 준다. 이것이 슬랙·구글 로그인
+ * 신원이다. 급여명세서 발송용 이메일(email)은 개인 메일인 경우가 많아 로그인
+ * 신원이 아니고, 그것을 보내면 슬랙 계정과 대조되지 않아 아무도 못 들어온다.
+ *
+ * 슬랙 아이디는 주지 않는다 — 안내는 이 프로그램이 대신 보낸다(/api/slack/notify).
  * 대신 **슬랙 계정이 연결돼 있는지 여부(slackLinked)** 만 알려, 받는 쪽이
  * "아직 안내를 못 보낸 사람"을 셀 수 있게 한다.
  *
@@ -65,7 +68,8 @@ export async function GET(req: Request) {
       empNo: true,
       name: true,
       department: true,
-      email: true,
+      // 로그인 신원은 업무용 구글메일이다. 급여명세서용(email)이 아니다.
+      workEmail: true,
       slackUserId: true,
     },
     orderBy: [{ department: "asc" }, { name: "asc" }],
@@ -75,9 +79,9 @@ export async function GET(req: Request) {
     empNo: r.empNo,
     name: r.name,
     department: r.department ?? "",
-    // 로그인 신원. 비어 있으면 받는 쪽이 계정을 만들 수 없으므로 그대로 넘겨
-    // 그쪽 화면에서 "이메일이 없어 계정을 못 만든 사람"으로 보이게 한다.
-    email: (r.email ?? "").trim().toLowerCase(),
+    // 로그인 신원(업무용 구글메일). 비어 있으면 받는 쪽이 계정을 만들 수 없으므로
+    // 그대로 넘겨 그쪽 화면에서 "이메일이 없어 계정을 못 만든 사람"으로 보이게 한다.
+    email: (r.workEmail ?? "").trim().toLowerCase(),
     role: access[r.department ?? ""] ?? "user",
     // 슬랙 안내를 지금 보낼 수 있는지. 신규 입사자는 아직 슬랙에 가입하지
     // 않았을 수 있고, 그러면 가입한 뒤에 보내야 한다.
