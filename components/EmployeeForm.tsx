@@ -38,6 +38,7 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     address: initial?.address ?? "",
     phone: initial?.phone ?? "",
     email: initial?.email ?? "",
+    workEmail: initial?.workEmail ?? "",
     slackUserId: initial?.slackUserId ?? "",
     bankName: initial?.bankName ?? "",
     bankAccount: initial?.bankAccount ?? "",
@@ -142,7 +143,8 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           <Field label="생년월일"><input type="date" className="input" value={f.birth} onChange={(e) => set("birth", e.target.value)} /></Field>
           <Field label="주민등록번호"><input className="input" placeholder="900101-1234567" value={f.rrn} onChange={(e) => set("rrn", e.target.value)} /></Field>
           <Field label="연락처"><input className="input" placeholder="010-0000-0000" value={f.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
-          <Field label="이메일 (명세서 발송)"><input type="email" className="input" value={f.email} onChange={(e) => set("email", e.target.value)} /></Field>
+          <Field label="업무용 구글메일"><input type="email" className="input" value={f.workEmail} onChange={(e) => set("workEmail", e.target.value)} placeholder="슬랙·구글 연동에 쓰는 계정" /></Field>
+          <Field label="급여명세서 발송용 이메일" hint="비워 두면 업무용 구글메일로 발송됩니다"><input type="email" className="input" value={f.email} onChange={(e) => set("email", e.target.value)} /></Field>
           <Field label="슬랙 User ID (연차신청)"><input className="input" placeholder="U01234ABC" value={f.slackUserId} onChange={(e) => set("slackUserId", e.target.value)} /></Field>
           <Field label="주소" full><input className="input" value={f.address} onChange={(e) => set("address", e.target.value)} /></Field>
         </div>
@@ -376,11 +378,12 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
   );
 }
 
-function Field({ label, children, full }: { label: string; children: React.ReactNode; full?: boolean }) {
+function Field({ label, children, full, hint }: { label: string; children: React.ReactNode; full?: boolean; hint?: string }) {
   return (
     <div className={full ? "md:col-span-3" : ""}>
       <label className="label">{label}</label>
       {children}
+      {hint && <p className="text-[11px] text-slate-400 mt-1">{hint}</p>}
     </div>
   );
 }

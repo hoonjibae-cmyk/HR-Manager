@@ -125,7 +125,10 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
               <Row k="입사일">{ymd(emp.hireDate)}</Row>
               <Row k="재직상태">{emp.active ? "재직중" : `퇴직 (${ymd(emp.resignDate)})`}</Row>
               <Row k="연락처">{emp.phone ?? "-"}</Row>
-              <Row k="이메일">{emp.email ?? "-"}</Row>
+              <Row k="업무용 구글메일">{(emp as any).workEmail ?? "-"}</Row>
+              <Row k="명세서 발송용">
+                {emp.email ?? ((emp as any).workEmail ? <span className="text-slate-400">(업무용으로 발송)</span> : "-")}
+              </Row>
               <Row k="슬랙 ID">{emp.slackUserId ?? "-"}</Row>
               <Row k="부양가족">{emp.dependents}명</Row>
             </dl>

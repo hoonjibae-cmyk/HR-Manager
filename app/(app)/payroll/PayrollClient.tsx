@@ -13,7 +13,7 @@ import { resignStatusOf, resignBadgeLabel, resignedSummary } from "@/lib/payroll
 import { isEstimatedHourly } from "@/lib/payroll";
 import { openPdfTab, closePdfTab, deliverPdf } from "@/lib/open-pdf";
 import { payoutNotice, type PayoutSuggestion } from "@/lib/leave-payout";
-import { planPayslipSend, sendConfirmText, nothingToSendNotice } from "@/lib/payslip-send";
+import { planPayslipSend, sendConfirmText, nothingToSendNotice, payslipEmailOf } from "@/lib/payslip-send";
 import {
   useTableSort,
   useStoredState,
@@ -80,8 +80,10 @@ interface Rec {
     isContractor?: boolean;
     parkingFee?: number;
     resignDate?: string | null;
-    /** 없으면 명세서가 나가지 않는다 — 발송 확인창이 이름을 따로 세어 보여준다 */
+    /** 명세서 발송용 이메일 — 비어 있으면 workEmail 로 발송된다 (payslipEmailOf) */
     email?: string | null;
+    /** 업무용 구글메일 — 발송용이 빌 때의 대체 주소 */
+    workEmail?: string | null;
   };
 }
 
@@ -459,7 +461,7 @@ export default function PayrollClient({ today }: { today: string }) {
       recs.map((r) => ({
         id: r.id,
         name: r.employee.name,
-        email: r.employee.email ?? null,
+        email: payslipEmailOf(r.employee),
         status: r.status,
       })),
     [recs]
@@ -1051,8 +1053,8 @@ export default function PayrollClient({ today }: { today: string }) {
                       title={
                         r.status === "SENT"
                           ? "이미 발송돼 잠긴 기록입니다 — «🔓 발송 잠금 해제» 를 먼저 거치세요"
-                          : r.employee.email
-                            ? `${r.employee.name} <${r.employee.email}>`
+                          : payslipEmailOf(r.employee)
+                            ? `${r.employee.name} <${payslipEmailOf(r.employee)}>`
                             : `${r.employee.name} — 메일 주소가 없어 발송되지 않습니다`
                       }
                     />

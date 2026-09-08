@@ -9,6 +9,7 @@ import {
   sendConfirmText,
   nothingToSendNotice,
   type SendCandidate,
+  payslipEmailOf,
 } from "./payslip-send";
 
 let seq = 1;
@@ -113,5 +114,19 @@ describe("보낼 것이 없을 때 안내", () => {
 
   it("그 달 기록 자체가 없으면 그렇게 적는다", () => {
     expect(nothingToSendNotice(planPayslipSend([]), { selective: false })).toContain("급여 기록이 없습니다");
+  });
+});
+
+describe("payslipEmailOf — 명세서를 받을 주소", () => {
+  it("발송용 이메일이 있으면 그쪽", () => {
+    expect(payslipEmailOf({ email: "pay@a.com", workEmail: "work@gmail.com" })).toBe("pay@a.com");
+  });
+  it("발송용이 비어 있으면 업무용 구글메일로", () => {
+    expect(payslipEmailOf({ email: null, workEmail: "work@gmail.com" })).toBe("work@gmail.com");
+    expect(payslipEmailOf({ email: "  ", workEmail: "work@gmail.com" })).toBe("work@gmail.com");
+  });
+  it("둘 다 없으면 null — 발송 계획이 '메일 없음' 으로 가른다", () => {
+    expect(payslipEmailOf({ email: null, workEmail: null })).toBeNull();
+    expect(payslipEmailOf({ email: "", workEmail: "  " })).toBeNull();
   });
 });

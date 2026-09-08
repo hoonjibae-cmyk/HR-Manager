@@ -130,7 +130,10 @@ model Employee {
   duty        String? // 업무 (강의(학급관리) 등)
   address     String?
   phone       String?
+  /// 급여명세서 발송용 이메일 — 비어 있으면 workEmail(업무용 구글메일)로 발송한다
   email       String?
+  /// 업무용 구글메일 계정 (슬랙·구글 연동 계정과 대개 같다)
+  workEmail   String?
   slackUserId String? // 슬랙 연차신청 연동용
   bankName    String? // 급여 입금은행
   bankAccount String? // 급여 입금계좌번호 (숫자만 — 은행 대량이체 파일이 구분자를 받지 않는다)

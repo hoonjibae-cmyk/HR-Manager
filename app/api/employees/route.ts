@@ -35,6 +35,7 @@ export async function POST(req: Request) {
     address: body.address || null,
     phone: body.phone || null,
     email: body.email || null,
+    workEmail: body.workEmail || null,
     slackUserId: body.slackUserId || null,
     bankName: body.bankName || null,
     bankAccount: body.bankAccount || null,

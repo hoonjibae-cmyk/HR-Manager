@@ -18,6 +18,7 @@ export interface ImportRow {
   address?: string;
   phone?: string;
   email?: string;
+  workEmail?: string;
   bankName?: string;
   bankAccount?: string;
   hireDate: string; // YYYY-MM-DD
@@ -94,7 +95,8 @@ export const IMPORT_COLUMNS: Array<{ key: string; header: string; alias: string[
   { key: "rrn", header: "주민등록번호", alias: ["주민번호"] },
   { key: "birth", header: "생년월일", alias: ["생일"] },
   { key: "phone", header: "연락처", alias: ["휴대폰", "전화번호", "핸드폰"] },
-  { key: "email", header: "이메일", alias: ["메일", "이메일주소"], note: "명세서 발송·슬랙 연동에 사용" },
+  { key: "email", header: "이메일", alias: ["메일", "이메일주소", "명세서이메일", "발송용이메일"], note: "급여명세서 발송용 — 비면 업무용 구글메일로 발송" },
+  { key: "workEmail", header: "업무용 이메일", alias: ["업무용구글메일", "구글메일", "업무용메일", "업무이메일"], note: "업무용 구글메일 계정 (슬랙 연동 대조에도 사용)" },
   { key: "address", header: "주소", alias: ["거주지"] },
   { key: "bankName", header: "은행", alias: ["은행명"] },
   { key: "bankAccount", header: "계좌번호", alias: ["계좌"] },
@@ -346,6 +348,7 @@ export function parseEmployeeWorkbook(
       address: str("address"),
       phone: str("phone"),
       email: str("email"),
+      workEmail: str("workEmail"),
       bankName: str("bankName"),
       bankAccount: str("bankAccount"),
       hireDate: hireDate ?? "",
@@ -487,7 +490,8 @@ export const FILL_FIELDS: Array<{
   { key: "position", label: "직책", kind: "text" },
   { key: "duty", label: "업무", kind: "text" },
   { key: "phone", label: "연락처", kind: "text" },
-  { key: "email", label: "이메일", kind: "text" },
+  { key: "email", label: "이메일(명세서 발송용)", kind: "text" },
+  { key: "workEmail", label: "업무용 구글메일", kind: "text" },
   { key: "address", label: "주소", kind: "text" },
   { key: "bankName", label: "은행", kind: "text" },
   { key: "bankAccount", label: "계좌번호", kind: "text", sensitive: true },

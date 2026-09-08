@@ -201,6 +201,7 @@ export async function POST(req: Request) {
         address: r.address ?? null,
         phone: r.phone ?? null,
         email: r.email ?? null,
+        workEmail: r.workEmail ?? null,
         bankName: r.bankName ?? null,
         bankAccount: r.bankAccount ?? null,
         hireDate: new Date(r.hireDate),

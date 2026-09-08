@@ -12,6 +12,18 @@
  *  - `alreadySent` — 이미 발송(SENT)돼 잠긴 사람. 잠금 해제를 거쳐야 다시 나간다.
  */
 
+/**
+ * **명세서를 받을 주소** — 발송용 이메일(email)이 비어 있으면 업무용 구글메일(workEmail)로.
+ * 발송(email.ts)·급여 화면의 확인창·체크칸 툴팁이 모두 이 함수를 쓴다 —
+ * 따로 두면 화면은 "메일 없음" 이라는데 실제로는 업무용으로 나가는(또는 그 반대) 일이 생긴다.
+ */
+export function payslipEmailOf(e: {
+  email?: string | null;
+  workEmail?: string | null;
+}): string | null {
+  return e.email?.trim() || e.workEmail?.trim() || null;
+}
+
 export interface SendCandidate {
   /** PayrollRecord.id */
   id: number;

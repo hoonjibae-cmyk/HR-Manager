@@ -2,7 +2,7 @@ import nodemailer, { type Transporter } from "nodemailer";
 import { prisma } from "./db";
 import { genPayslip } from "./doc-service";
 import { ymd } from "./format";
-import { planPayslipSend } from "./payslip-send";
+import { planPayslipSend, payslipEmailOf } from "./payslip-send";
 
 let _transporter: Transporter | null = null;
 
@@ -67,7 +67,7 @@ export async function sendPayslipsForMonth(
   });
 
   const plan = planPayslipSend(
-    all.map((r) => ({ id: r.id, name: r.employee.name, email: r.employee.email, status: r.status }))
+    all.map((r) => ({ id: r.id, name: r.employee.name, email: payslipEmailOf(r.employee), status: r.status }))
   );
   const sendable = new Set(plan.targets.map((r) => r.id));
   // 메일 주소가 없는 건도 예전처럼 실패로 기록해 남긴다(조용히 빠지면 아무도 모른다)
@@ -79,7 +79,8 @@ export async function sendPayslipsForMonth(
   const results: { name: string; ok: boolean; error?: string }[] = [];
 
   for (const r of recs) {
-    const to = r.employee.email;
+    // 발송용이 비어 있으면 업무용 구글메일로 — 판정은 payslipEmailOf 한곳
+    const to = payslipEmailOf(r.employee);
     const log = await prisma.emailLog.create({
       data: {
         to: to || "(없음)",

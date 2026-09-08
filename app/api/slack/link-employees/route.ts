@@ -75,8 +75,9 @@ export async function POST() {
         e.active &&
         !e.slackUserId &&
         !takenEmpIds.has(e.id) &&
-        e.email &&
-        e.email.toLowerCase() === u.email!.toLowerCase()
+        // 업무용 구글메일이 슬랙 가입 계정인 경우가 많다 — 발송용과 둘 다 대조한다
+        ((e.email && e.email.toLowerCase() === u.email!.toLowerCase()) ||
+          ((e as any).workEmail && (e as any).workEmail.toLowerCase() === u.email!.toLowerCase()))
     );
     if (emp) {
       await prisma.employee.update({ where: { id: emp.id }, data: { slackUserId: u.id } });
