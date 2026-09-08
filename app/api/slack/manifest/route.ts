@@ -25,6 +25,21 @@ export async function GET(req: Request) {
   // ("주식회사 …") 붙여넣는 순간 앱 이름이 바뀌므로 고정값을 쓴다.
   const appName = process.env.SLACK_APP_NAME || "유쌤에듀 HR";
 
+  // 슬랙으로 로그인하는 사내 프로그램들의 콜백 주소.
+  // 쉼표로 여러 개를 넣을 수 있다(SLACK_LOGIN_APPS="https://report.yussam.com").
+  // 비어 있으면 매니페스트에서 이 항목이 통째로 빠져, 기존 앱의 설정을 지우지 않는다.
+  const loginApps = (process.env.SLACK_LOGIN_APPS || "")
+    .split(",")
+    .map((url) => url.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+  // 값이 없으면 이 항목을 통째로 뺀다. 빈 목록(`[]`)을 넣으면 슬랙이 기존에
+  // 등록된 주소를 지워 버려, 이미 쓰던 로그인이 조용히 끊긴다.
+  const redirectBlock = loginApps.length
+    ? `  redirect_urls:\n${loginApps
+        .map((url) => `    - ${url}/api/auth/slack/callback`)
+        .join("\n")}\n`
+    : "";
+
   const yaml = `# ${appName} — 슬랙 앱 매니페스트
 # 이 배포 주소(${origin})가 이미 채워져 있습니다. 그대로 복사해서
 # https://api.slack.com/apps → 앱 선택 → App Manifest → YAML 에 붙여넣고 저장하세요.
@@ -63,7 +78,15 @@ features:
       should_escape: false
 
 oauth_config:
-  scopes:
+  # 사내 프로그램의 '슬랙으로 로그인'이 돌아올 주소.
+  # 슬랙 워크스페이스 멤버십이 곧 회사 경계이므로, 별도 허용 명단 없이
+  # 이 워크스페이스 사람만 사내 프로그램에 들어온다.
+${redirectBlock}  scopes:
+    # 로그인한 사람의 신원만 받는다. 슬랙 대화를 읽는 권한은 없다.
+    user:
+      - openid # 로그인 신원(id_token)
+      - email # 인사 명부의 직원 이메일과 대조
+      - profile # 이름 표시용
     bot:
       - commands # 슬래시 명령 수신
       - chat:write # 승인 요청·결과 메시지 게시
