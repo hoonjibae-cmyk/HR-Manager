@@ -1,4 +1,4 @@
-# 유쌤에듀 HR — 슬랙 앱 매니페스트
+# 유쌤 알리미 — 슬랙 앱 매니페스트
 #
 # 사용법
 #  1) https://api.slack.com/apps → [Create New App] → [From an app manifest]
@@ -13,18 +13,18 @@
 #  4) 생성 후 [Install to Workspace] → 권한 허용
 #  5) Basic Information → Signing Secret  → 환경변수 SLACK_SIGNING_SECRET
 #     OAuth & Permissions → Bot User OAuth Token(xoxb-...) → SLACK_BOT_TOKEN
-#  6) 세 채널(#휴가-신청 / #알림-운영진 / #휴가-기록)에서 `/invite @유쌤에듀 HR` 로 봇 초대 후
+#  6) 세 채널(#휴가-신청 / #알림-운영진 / #휴가-기록)에서 `/invite @유쌤 알리미` 로 봇 초대 후
 #     채널 ID를 SLACK_APPROVAL_CHANNEL(운영진) · SLACK_RECORD_CHANNEL(기록) 에 입력
 
 display_information:
-  name: 유쌤에듀 HR
-  description: 연차 신청·승인 및 급여명세서 발송 알림
+  name: 유쌤 알리미
+  description: 연차·보강 신청과 급여명세서 알림, 사내 프로그램 계정 안내
   background_color: "#1f45f5"
 
 features:
   bot_user:
-    # 봇 표시명은 사용자명으로 변환되므로 한글 불가 (앱 이름은 한글 가능)
-    display_name: Yussam HR
+    # 봇 표시명은 사용자명으로 변환되므로 한글 불가 (앱 이름은 한글 가능) — 알리미의 로마자 표기
+    display_name: Yussam Alimi
     always_online: true
   app_home:
     # 사이드바에서 앱을 누르면 나오는 상시 화면 (채널 메시지처럼 위로 밀리지 않음)

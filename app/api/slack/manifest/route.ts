@@ -21,9 +21,9 @@ export async function GET(req: Request) {
   if (!(await isAuthed())) return new Response("unauthorized", { status: 401 });
 
   const origin = publicOrigin(req);
-  // 앱 이름은 이미 슬랙에 만들어 둔 앱과 같아야 한다 — 회사명에서 만들어내면
-  // ("주식회사 …") 붙여넣는 순간 앱 이름이 바뀌므로 고정값을 쓴다.
-  const appName = process.env.SLACK_APP_NAME || "유쌤에듀 HR";
+  // 앱 이름 — HR 를 넘어 사내 프로그램 안내·계정 전달까지 맡게 되어 '유쌤 알리미' 로 부른다.
+  // (매니페스트를 붙여넣는 순간 슬랙 앱 이름이 이 값으로 바뀐다. 다른 이름을 쓰려면 SLACK_APP_NAME)
+  const appName = process.env.SLACK_APP_NAME || "유쌤 알리미";
 
   // 슬랙으로 로그인하는 사내 프로그램들의 콜백 주소.
   // 쉼표로 여러 개를 넣을 수 있다(SLACK_LOGIN_APPS="https://report.yussam.com").
@@ -47,13 +47,13 @@ export async function GET(req: Request) {
 
 display_information:
   name: ${appName}
-  description: 연차 신청·승인 및 급여명세서 발송 알림
+  description: 연차·보강 신청과 급여명세서 알림, 사내 프로그램 계정 안내
   background_color: "#1f45f5"
 
 features:
   bot_user:
-    # 봇 표시명은 사용자명으로 변환되므로 한글 불가 (앱 이름은 한글 가능)
-    display_name: Yussam HR
+    # 봇 표시명은 사용자명으로 변환되므로 한글 불가 (앱 이름은 한글 가능) — 알리미의 로마자 표기
+    display_name: Yussam Alimi
     always_online: true
   app_home:
     # 사이드바에서 앱을 누르면 나오는 상시 화면 (채널 메시지처럼 위로 밀리지 않음)
