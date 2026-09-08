@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="유쌤 알리미">
+  <!-- 유쌤 알리미 — 슬랙 앱 아이콘. 웹 앱 아이콘(app/icon.svg)과 같은 파란 그라데이션·흰 실루엣
+       계열이라 한 식구로 읽히되, 얼굴은 '알림 종 + 배지' 로 갈랐다.
+       슬랙이 모서리를 스스로 둥글리므로 배경은 모서리까지 꽉 채운 정사각형이다(rx 없음).
+       사이드바(20px)에서도 읽히게 요소는 종·추·배지 셋만 굵게 둔다. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3366ff"/>
+      <stop offset="1" stop-color="#1733e1"/>
+    </linearGradient>
+    <linearGradient id="bell" x1="0.25" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dbe6ff"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+
+  <!-- 울림 호 — 종 양옆, 얇게 -->
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="18" stroke-linecap="round">
+    <path d="M96 178a170 170 0 0 0-26 74"/>
+    <path d="M416 178a170 170 0 0 1 26 74"/>
+  </g>
+
+  <!-- 종 -->
+  <g fill="url(#bell)">
+    <!-- 손잡이 -->
+    <circle cx="256" cy="96" r="22"/>
+    <!-- 몸통: 돔 + 벌어지는 치마 + 아랫단 -->
+    <path d="M256 112c-73 0-118 52-118 124v52c0 30-20 44-40 62a14 14 0 0 0 9 24h298a14 14 0 0 0 9-24c-20-18-40-32-40-62v-52c0-72-45-124-118-124z"/>
+    <!-- 추 -->
+    <circle cx="256" cy="416" r="30"/>
+  </g>
+
+  <!-- 알림 배지 — 종 오른쪽 위. 배경색으로 한 번 끊어 종과 뭉치지 않게 -->
+  <circle cx="374" cy="150" r="66" fill="url(#bg)"/>
+  <circle cx="374" cy="150" r="52" fill="#ffcf3f"/>
+</svg>
