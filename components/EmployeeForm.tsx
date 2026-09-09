@@ -63,6 +63,7 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     dependents: initial?.dependents ?? 1,
     nonTaxTotal: initial?.nonTaxTotal ?? 0,
     parkingFee: initial?.parkingFee ?? 0,
+    severanceSettled: initial?.severanceSettled ?? false,
     incThreshold: initial?.incThreshold ?? "",
     incPerStudent: initial?.incPerStudent ?? "",
     ratioPercent: initial?.ratioPercent != null ? initial.ratioPercent * 100 : "",
@@ -226,6 +227,20 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
             </select>
           </Field>
           )}
+          <Field label="퇴직정산 완료">
+            <label className="flex items-center gap-2 text-sm text-slate-600 mt-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!f.severanceSettled}
+                onChange={(e) => set("severanceSettled", e.target.checked)}
+              />
+              퇴직급여 정산(지급·납입) 완료
+            </label>
+            <p className="text-[11px] text-slate-400 mt-1">
+              체크하면 퇴직급여 화면의 <b>적립 누계</b> 집계에서 빠집니다. 그 달 새로 발생하는
+              부담금·충당금은 그대로 잡힙니다.
+            </p>
+          </Field>
           <Field label="부양가족수(본인포함)"><input type="number" min={1} className="input" value={f.dependents} onChange={(e) => set("dependents", e.target.value)} /></Field>
           <Field label="월 정기주차 비용 (원)">
             {/* (−) 를 허용한다 — 매달 돌려줄 몫이 있으면 음수로 넣어 두면 공제가 (−)로 잡힌다 */}

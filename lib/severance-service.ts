@@ -104,6 +104,8 @@ export interface SeveranceRow {
   cumulative: number;
   /** 그중 DC 가입 전 충당금 누계 = **DC 전환 시 소급 납입할 몫** */
   cumulativeProvision: number;
+  /** 퇴직정산 완료 — 누계 집계에서 빠진다 (직원 정보의 체크칸) */
+  settled: boolean;
   /** DC 부담금 누계 */
   cumulativeDc: number;
   /** 누계에 섞인 '계약 추산' 달 수 — 실제 급여가 아니라는 것을 화면이 알려야 한다 */
@@ -266,6 +268,7 @@ export async function severanceMonth(year: number, month: number) {
       cumulativeProvision,
       cumulativeDc,
       estimatedMonths,
+      settled: !!(e as any).severanceSettled,
     });
   }
 
@@ -279,8 +282,10 @@ export interface SeveranceTotals {
   provision: number;
   /** 이 달 인센티브 퇴직유보금 합계 — 퇴직급여의 다른 갈래 */
   retention: number;
-  /** 충당금 누계 합계 = DC 전환 때 소급 납입할 몫 */
-  provisionCumulative: number;
+  /** 적립 누계 합계 = 재직자 전체의 충당금 누계 + DC 부담금 누계. **정산 완료자는 뺀다** */
+  cumulativeAll: number;
+  /** 퇴직정산 완료로 누계에서 뺀 인원 */
+  settledCount: number;
   dcCount: number;
   provisionCount: number;
   excludedCount: number;
@@ -296,7 +301,8 @@ const emptyTotals = (): SeveranceTotals => ({
   dc: 0,
   provision: 0,
   retention: 0,
-  provisionCumulative: 0,
+  cumulativeAll: 0,
+  settledCount: 0,
   dcCount: 0,
   provisionCount: 0,
   excludedCount: 0,
@@ -318,7 +324,10 @@ function totalsOf(rows: SeveranceRow[]): SeveranceTotals {
     } else if (r.status === "UNKNOWN") t.unknownCount++;
     else t.excludedCount++;
     t.retention += r.retention;
-    t.provisionCumulative += r.cumulativeProvision;
+    // 적립 누계 — 충당금·DC 가리지 않고 지금까지 쌓인 전부. 정산 완료(severanceSettled)한
+    // 직원은 이미 지급·납입이 끝난 몫이라 더하면 부채가 아닌 돈이 부채처럼 보인다.
+    if (r.settled) t.settledCount++;
+    else t.cumulativeAll += r.cumulative;
     if (r.status === "DC" || r.status === "PROVISION") {
       if (r.baseSource === "NONE") t.noPayrollCount++;
       else if (r.baseSource === "ESTIMATED") t.estimatedCount++;

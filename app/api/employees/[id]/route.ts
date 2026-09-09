@@ -36,6 +36,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   // parkingFee(월 정기주차 비용)는 보수조건이 아니라 복리후생이라 여기서 받는다.
   // 매달 돌려줄 몫이 있는 경우가 있어 **음수를 허용**한다.
   if ("parkingFee" in body) data.parkingFee = Math.round(Number(body.parkingFee) || 0);
+  // 퇴직정산 완료 — 퇴직급여 화면의 적립 누계 집계에서 빼는 표시
+  if ("severanceSettled" in body) data.severanceSettled = !!body.severanceSettled;
   if ("hireDate" in body && body.hireDate) data.hireDate = new Date(body.hireDate);
   if ("resignDate" in body) data.resignDate = body.resignDate ? new Date(body.resignDate) : null;
   if ("active" in body) data.active = !!body.active;

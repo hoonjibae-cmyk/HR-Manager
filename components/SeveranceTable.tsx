@@ -132,15 +132,20 @@ export default function SeveranceTable({
     // DC 로 넘어간 사람 옆에 붙는 '소급' 몫 — 누계 안에 든 값이라 따로 세어 밑줄에 적는다
     let cumulativeProvision = 0;
     let estimatedCount = 0;
+    let settledCount = 0;
     for (const r of sorted) {
       if (r.status === "DC") dc += r.amount;
       else if (r.status === "PROVISION") provision += r.amount;
       retention += r.retention;
-      cumulative += r.cumulative;
-      if (r.status === "DC") cumulativeProvision += r.cumulativeProvision;
+      // 정산 완료자는 누계에서 뺀다 — 카드와 같은 규칙 (이미 지급·납입이 끝난 몫)
+      if (r.settled) settledCount++;
+      else {
+        cumulative += r.cumulative;
+        if (r.status === "DC") cumulativeProvision += r.cumulativeProvision;
+      }
       if (r.estimatedMonths > 0) estimatedCount++;
     }
-    return { dc, provision, retention, cumulative, cumulativeProvision, estimatedCount };
+    return { dc, provision, retention, cumulative, cumulativeProvision, estimatedCount, settledCount };
   }, [sorted]);
 
   return (
@@ -159,9 +164,12 @@ export default function SeveranceTable({
           tone="amber"
         />
         <Card
-          label="충당금 누계"
-          value={won(totals.provisionCumulative)}
-          sub="DC 전환 시 소급 납입할 몫"
+          label="적립 누계 (충당금+DC)"
+          value={won(totals.cumulativeAll)}
+          sub={
+            "재직자 전체가 지금까지 쌓은 몫" +
+            (totals.settledCount ? ` · 정산 완료 ${totals.settledCount}명 제외` : "")
+          }
           tone="amber"
         />
         <Card
@@ -281,8 +289,18 @@ export default function SeveranceTable({
                     {r.retention ? won(r.retention) : <span className="text-slate-300">—</span>}
                   </td>
                   <td className="td text-right tnum text-slate-500">
-                    {r.cumulative ? won(r.cumulative) : <span className="text-slate-300">—</span>}
-                    {r.cumulativeProvision > 0 && r.status === "DC" && (
+                    <span className={r.settled ? "line-through text-slate-300" : ""}>
+                      {r.cumulative ? won(r.cumulative) : <span className="text-slate-300">—</span>}
+                    </span>
+                    {r.settled && (
+                      <div
+                        className="text-[11px] text-emerald-600"
+                        title="직원 정보의 '퇴직정산 완료' 가 체크된 직원 — 적립 누계 집계에서 빠집니다"
+                      >
+                        정산 완료 · 누계 제외
+                      </div>
+                    )}
+                    {!r.settled && r.cumulativeProvision > 0 && r.status === "DC" && (
                       <div
                         className="text-[11px] text-amber-600"
                         title="DC 가입 전 기간에 쌓은 충당금 — 소급 납입 대상입니다"
