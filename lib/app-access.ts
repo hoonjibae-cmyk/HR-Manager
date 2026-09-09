@@ -18,6 +18,12 @@ export type AppRole = "admin" | "user";
  * 알아챌 수 있게 응답에 기준 부서를 함께 실어 보낸다.
  */
 export const APP_ACCESS: Record<string, Record<string, AppRole>> = {
+  // 시험지 생성 시스템 — HR 명부를 공유하고 앱별 권한은 별도로 관리한다.
+  "exam-generator": {
+    교수부: "user",
+    교육운영팀: "user",
+    경영지원: "admin",
+  },
   // 성적표 프로그램(omr-report) — 교수부·교육운영팀은 성적표를 만들고,
   // 경영지원은 계정과 설정까지 본다.
   "omr-report": {
