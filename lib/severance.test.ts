@@ -8,6 +8,7 @@ import {
   accrualNote,
   underMinimumWarning,
   overtimeSplit,
+  isSeveranceTotalsExempt,
   estimateContractBase,
   type ContractWageTerms,
   type SeverancePayItems,
@@ -44,6 +45,22 @@ const pay = (over: Partial<SeverancePayItems> = {}): SeverancePayItems => ({
   holidayOverHours: 0,
   hourlyWage: 0,
   ...over,
+});
+
+describe("isSeveranceTotalsExempt — 합계 제외 부서", () => {
+  it("경영지원(원장·부원장)은 모든 합계에서 뺀다", () => {
+    expect(isSeveranceTotalsExempt("경영지원")).toBe(true);
+  });
+  it("다른 부서는 그대로 합산한다", () => {
+    expect(isSeveranceTotalsExempt("교수부")).toBe(false);
+    expect(isSeveranceTotalsExempt("조교팀")).toBe(false);
+    expect(isSeveranceTotalsExempt("교육운영팀")).toBe(false);
+  });
+  it("부서 미지정(null·빈 문자열)은 제외가 아니다 — 모르는 사람을 조용히 빼면 합이 새는 걸 모른다", () => {
+    expect(isSeveranceTotalsExempt(null)).toBe(false);
+    expect(isSeveranceTotalsExempt(undefined)).toBe(false);
+    expect(isSeveranceTotalsExempt("")).toBe(false);
+  });
 });
 
 describe("dcStartsAt — 근속 1년이 되는 날", () => {

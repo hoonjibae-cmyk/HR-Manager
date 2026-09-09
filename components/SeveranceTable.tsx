@@ -133,7 +133,13 @@ export default function SeveranceTable({
     let cumulativeProvision = 0;
     let estimatedCount = 0;
     let settledCount = 0;
+    let deptExemptCount = 0;
     for (const r of sorted) {
+      // 합계 제외 부서(경영지원) — 카드와 같은 규칙으로 소계의 모든 합에서 뺀다
+      if (r.totalsExempt) {
+        deptExemptCount++;
+        continue;
+      }
       if (r.status === "DC") dc += r.amount;
       else if (r.status === "PROVISION") provision += r.amount;
       retention += r.retention;
@@ -145,7 +151,16 @@ export default function SeveranceTable({
       }
       if (r.estimatedMonths > 0) estimatedCount++;
     }
-    return { dc, provision, retention, cumulative, cumulativeProvision, estimatedCount, settledCount };
+    return {
+      dc,
+      provision,
+      retention,
+      cumulative,
+      cumulativeProvision,
+      estimatedCount,
+      settledCount,
+      deptExemptCount,
+    };
   }, [sorted]);
 
   return (
@@ -167,7 +182,8 @@ export default function SeveranceTable({
           label="적립 누계 (충당금+DC)"
           value={won(totals.cumulativeAll)}
           sub={
-            "재직자 전체가 지금까지 쌓은 몫" +
+            "재직자가 지금까지 쌓은 몫" +
+            (totals.deptExemptCount ? ` · 경영지원 ${totals.deptExemptCount}명 제외` : "") +
             (totals.settledCount ? ` · 정산 완료 ${totals.settledCount}명 제외` : "")
           }
           tone="amber"
@@ -300,6 +316,14 @@ export default function SeveranceTable({
                         정산 완료 · 누계 제외
                       </div>
                     )}
+                    {r.totalsExempt && (
+                      <div
+                        className="text-[11px] text-slate-400"
+                        title="경영지원(원장·부원장)은 위 카드·소계의 모든 합계에서 빠집니다 — 개인별 수치는 그대로 보여줍니다"
+                      >
+                        경영지원 · 합계 제외
+                      </div>
+                    )}
                     {!r.settled && r.cumulativeProvision > 0 && r.status === "DC" && (
                       <div
                         className="text-[11px] text-amber-600"
@@ -354,6 +378,14 @@ export default function SeveranceTable({
                         title="급여 레코드가 없어 계약에서 추산한 달이 섞인 직원 수"
                       >
                         추산 포함 {sub.estimatedCount}명
+                      </div>
+                    )}
+                    {sub.deptExemptCount > 0 && (
+                      <div
+                        className="text-[11px] font-normal text-slate-400"
+                        title="경영지원(원장·부원장)은 모든 합계에서 빠집니다"
+                      >
+                        경영지원 {sub.deptExemptCount}명 제외
                       </div>
                     )}
                   </td>

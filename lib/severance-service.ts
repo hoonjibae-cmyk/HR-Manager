@@ -16,6 +16,7 @@ import {
   monthlyAccrual,
   accrualNote,
   underMinimumWarning,
+  isSeveranceTotalsExempt,
   type SeverancePolicy,
   type SeveranceStatus,
   type SeverancePayItems,
@@ -106,6 +107,8 @@ export interface SeveranceRow {
   cumulativeProvision: number;
   /** 퇴직정산 완료 — 누계 집계에서 빠진다 (직원 정보의 체크칸) */
   settled: boolean;
+  /** 합계 제외 부서(경영지원) — 행은 그대로 보이고 **모든 합계**에서만 빠진다 */
+  totalsExempt: boolean;
   /** DC 부담금 누계 */
   cumulativeDc: number;
   /** 누계에 섞인 '계약 추산' 달 수 — 실제 급여가 아니라는 것을 화면이 알려야 한다 */
@@ -203,9 +206,11 @@ export async function severanceMonth(year: number, month: number) {
     const b = cur.breakdown ?? severanceBase(payItemsOf(cur.rec ?? {}), policy);
     const amount = accrues && cur.source !== "NONE" ? monthlyAccrual(cur.base, policy) : 0;
     // 경고는 급여 레코드로 산정한 달에만 뜻이 있다 — 지정·추산값은 항목별 내역이 없다
+    const totalsExempt = isSeveranceTotalsExempt(e.department);
     const warning =
       accrues && cur.source === "PAYROLL" ? underMinimumWarning(b, policy) : null;
-    if (warning) warnings.push(`${e.name}: ${warning}`);
+    // 합계 제외 부서 건은 상단 경고 목록에도 올리지 않는다 — 행의 상세에는 그대로 남는다
+    if (warning && !totalsExempt) warnings.push(`${e.name}: ${warning}`);
 
     // --- 누계 — 입사한 달부터 이 달까지 **모든 달**을 돈다 ---
     // 급여 레코드만 훑으면 도입 이전(추산으로 메운) 달이 통째로 빠진다.
@@ -269,6 +274,7 @@ export async function severanceMonth(year: number, month: number) {
       cumulativeDc,
       estimatedMonths,
       settled: !!(e as any).severanceSettled,
+      totalsExempt,
     });
   }
 
@@ -286,6 +292,8 @@ export interface SeveranceTotals {
   cumulativeAll: number;
   /** 퇴직정산 완료로 누계에서 뺀 인원 */
   settledCount: number;
+  /** 합계 제외 부서(경영지원)라 모든 합계에서 뺀 인원 */
+  deptExemptCount: number;
   dcCount: number;
   provisionCount: number;
   excludedCount: number;
@@ -303,6 +311,7 @@ const emptyTotals = (): SeveranceTotals => ({
   retention: 0,
   cumulativeAll: 0,
   settledCount: 0,
+  deptExemptCount: 0,
   dcCount: 0,
   provisionCount: 0,
   excludedCount: 0,
@@ -315,6 +324,12 @@ const emptyTotals = (): SeveranceTotals => ({
 function totalsOf(rows: SeveranceRow[]): SeveranceTotals {
   const t = emptyTotals();
   for (const r of rows) {
+    // 합계 제외 부서(경영지원) — 금액·인원 어느 합계에도 넣지 않는다.
+    // 대표자 몫이 섞이면 실무자가 챙길 적립·납입 규모를 읽을 수 없다.
+    if (r.totalsExempt) {
+      t.deptExemptCount++;
+      continue;
+    }
     if (r.status === "DC") {
       t.dc += r.amount;
       t.dcCount++;

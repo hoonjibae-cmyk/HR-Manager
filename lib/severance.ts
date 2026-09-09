@@ -66,6 +66,23 @@ export const DEFAULT_SEVERANCE_POLICY: SeverancePolicy = {
   includeMealCar: true,
 };
 
+/* ───────────── 합계 제외 부서 ───────────── */
+
+/**
+ * 퇴직급여 화면의 **모든 합계**(이번 달 DC·충당금·유보금·적립 누계·소계)에서 빼는 부서.
+ *
+ * 경영지원은 원장·부원장뿐이라(lib/constants.ts 의 부서 주석) 그 몫까지 합산하면
+ * 실무자가 챙겨야 할 적립·납입 규모가 대표자 근속만큼 부풀어 읽을 수 없게 된다.
+ * **행에서 지우지는 않는다** — 개인별 수치는 그대로 보이고 합계에서만 뺀 것을 배지로 적는다
+ * (조용히 빠지면 왜 세로 합이 카드와 안 맞는지 알 수 없다).
+ * 재계약 알림의 `RENEWAL_EXEMPT_DEPTS` 와 같은 방식이라, **부서 이름을 바꾸면 여기도 고쳐야 한다.**
+ */
+export const SEVERANCE_TOTALS_EXEMPT_DEPTS = ["경영지원"];
+
+export function isSeveranceTotalsExempt(department: string | null | undefined): boolean {
+  return SEVERANCE_TOTALS_EXEMPT_DEPTS.includes(department ?? "");
+}
+
 /* ───────────── 대상 판정 ───────────── */
 
 /**
