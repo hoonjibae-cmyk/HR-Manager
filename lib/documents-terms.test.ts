@@ -156,6 +156,50 @@ describe("기간의 정함이 없는 계약 — 예전 그대로", () => {
   });
 });
 
+describe("제3조 — 토요일 당번제 조항은 교육운영팀에만 들어간다", () => {
+  const html = (over: Partial<DocEmployee>) =>
+    text(contractHtml({ employee: emp(over), contract: ct(), company }));
+  const DUTY = "토요일 근무의 경우 당번제로 실시";
+
+  it("교육운영팀 월급제 계약서에는 들어간다", () => {
+    const t = html({ department: "교육운영팀" });
+    expect(t).toContain(DUTY);
+    expect(t).toContain("해당 주 수요일 근무는 면제");
+  });
+
+  it("**교수부 계약서에는 들어가지 않는다** — 시키지 않는 토요일 근무를 명시하게 된다", () => {
+    expect(html({ department: "교수부" })).not.toContain(DUTY);
+  });
+
+  it("조교팀·경영지원에도 들어가지 않는다 (교육운영팀만의 제도다)", () => {
+    expect(html({ department: "조교팀" })).not.toContain(DUTY);
+    expect(html({ department: "경영지원" })).not.toContain(DUTY);
+  });
+
+  it("시급제는 부서와 무관하게 예전처럼 빠진다", () => {
+    const t = text(
+      contractHtml({
+        employee: emp({ department: "교육운영팀", payScheme: "HOURLY", baseWage: 12000 }),
+        contract: ct({ templateKey: "HOURLY", baseWage: 12000 }),
+        company,
+      })
+    );
+    expect(t).not.toContain(DUTY);
+  });
+
+  it("재택근무 조항은 부서와 무관하게 남는다", () => {
+    for (const dept of ["교수부", "교육운영팀"])
+      expect(html({ department: dept })).toContain("재택에서 근무할 수 있도록 한다");
+  });
+
+  it("조항이 빠져도 번호가 건너뛰지 않는다 (①~⑤ 로 당겨진다)", () => {
+    const t = html({ department: "교수부" });
+    const art3 = t.slice(t.indexOf("제 3조"), t.indexOf("제 4조"));
+    for (const n of ["①", "②", "③", "④", "⑤"]) expect(art3).toContain(n);
+    expect(art3).not.toContain("⑥");
+  });
+});
+
 describe("개인정보 국외 처리 고지", () => {
   const html = () => text(consentPrivacyHtml({ employee: emp(), company }));
 
