@@ -94,16 +94,24 @@ export async function autoLinkEmployeeBySlack(slackUserId: string): Promise<{
 
   let emp = null;
   if (profile.email) {
-    // 이메일은 대소문자 무시하고 매칭 (가장 확실한 식별자)
+    // 급여 발송용 이메일과 업무용 이메일을 모두 대조한다.
     emp = await prisma.employee.findFirst({
-      where: { email: { equals: profile.email, mode: "insensitive" } },
+      where: {
+        active: true,
+        resignDate: null,
+        slackUserId: null,
+        OR: [
+          { email: { equals: profile.email, mode: "insensitive" } },
+          { workEmail: { equals: profile.email, mode: "insensitive" } },
+        ],
+      },
     });
   }
   // 이메일이 없거나(권한 미부여) 매칭 실패 시 이름으로 보조 매칭.
   // 슬랙 표시명에 '_부원장', '조교' 등이 붙어도 인식하도록 시간기록표와 같은 규칙 사용.
   if (!emp && profile.realName) {
     const candidates = await prisma.employee.findMany({
-      where: { slackUserId: null, active: true },
+      where: { slackUserId: null, active: true, resignDate: null },
     });
     const matched = matchEmployee(profile.realName, candidates);
     if (matched.emp) emp = matched.emp;

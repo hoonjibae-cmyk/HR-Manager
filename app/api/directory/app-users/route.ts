@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { appAccessMap } from "@/lib/app-access";
+import { directoryApiKey, directoryRequestAuthorized } from "@/lib/directory-api-auth";
+import { autoLinkEmployeeBySlack } from "@/lib/slack";
 
 export const dynamic = "force-dynamic";
 
@@ -30,11 +32,14 @@ export const dynamic = "force-dynamic";
  *
  * 인증
  * ----
- *   x-api-key: <DIRECTORY_API_KEY>   (또는 Authorization: Bearer <키>)
+ *   x-api-key: <앱 전용 키 또는 DIRECTORY_API_KEY>   (또는 Authorization: Bearer <키>)
  * 서버끼리 부르는 창구다. 키가 없으면 창구를 닫는다.
  */
 export async function GET(req: Request) {
-  const key = process.env.DIRECTORY_API_KEY || "";
+  const requestUrl = new URL(req.url);
+  const app = requestUrl.searchParams.get("app") || "";
+  const slackUserId = (requestUrl.searchParams.get("slackUserId") || "").trim();
+  const key = directoryApiKey(app);
   if (!key) {
     return NextResponse.json(
       { error: "명부 API가 켜져 있지 않습니다. DIRECTORY_API_KEY를 설정하세요." },
@@ -44,11 +49,10 @@ export async function GET(req: Request) {
 
   const auth = req.headers.get("authorization") || "";
   const provided = req.headers.get("x-api-key") || auth.replace(/^Bearer\s+/i, "");
-  if (provided !== key) {
+  if (!directoryRequestAuthorized(app, provided)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const app = new URL(req.url).searchParams.get("app") || "";
   const access = appAccessMap(app);
   if (!access) {
     return NextResponse.json(
@@ -58,11 +62,12 @@ export async function GET(req: Request) {
   }
 
   const departments = Object.keys(access);
-  const rows = await prisma.employee.findMany({
+  const loadRows = () => prisma.employee.findMany({
     where: {
       active: true,
       resignDate: null,
       department: { in: departments },
+      ...(slackUserId ? { slackUserId } : {}),
     },
     select: {
       empNo: true,
@@ -74,6 +79,11 @@ export async function GET(req: Request) {
     },
     orderBy: [{ department: "asc" }, { name: "asc" }],
   });
+  let rows = await loadRows();
+  if (slackUserId && rows.length === 0) {
+    await autoLinkEmployeeBySlack(slackUserId);
+    rows = await loadRows();
+  }
 
   const items = rows.map((r) => ({
     empNo: r.empNo,

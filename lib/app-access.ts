@@ -31,6 +31,13 @@ export const APP_ACCESS: Record<string, Record<string, AppRole>> = {
     교육운영팀: "user",
     경영지원: "admin",
   },
+  // 유쌤보카 — 수업 운영 부서는 교사용 기능을 쓰고,
+  // 경영지원은 직원 계정과 전체 설정을 관리한다.
+  "yussam-voca": {
+    교수부: "user",
+    교육운영팀: "user",
+    경영지원: "admin",
+  },
 };
 
 export function appAccessMap(app: string): Record<string, AppRole> | null {
