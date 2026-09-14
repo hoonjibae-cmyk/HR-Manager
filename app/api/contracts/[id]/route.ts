@@ -49,6 +49,12 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     "fixedNightHours",
   ])
     if (f in body) data[f] = numOrNull(body[f]);
+  // 인원 기준 인센티브의 산정 대상 — 방식(incCountMethod)은 ACADEMY 일 때만 뜻이 있어 함께 정리한다
+  if ("incScope" in body) {
+    data.incScope = body.incScope === "ACADEMY" ? "ACADEMY" : null;
+    data.incCountMethod =
+      body.incScope === "ACADEMY" ? body.incCountMethod || "SNAPSHOT15" : null;
+  }
   if ("payScheme" in body) data.templateKey = templateKeyOf(body.payScheme);
   if ("incomeType" in body) data.incomeType = body.incomeType || null;
   if ("stage" in body) data.stage = body.stage;

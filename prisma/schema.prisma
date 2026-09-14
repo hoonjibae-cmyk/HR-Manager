@@ -249,6 +249,12 @@ model Contract {
   incPerStudent     Int?
   /// 매출 비율 인센티브 (0.15 = 15%) — 인원 기준과 별개 갈래
   incRevenuePercent Float?
+  /// 인원 기준 인센티브의 산정 대상 — null/"OWN"=담당 원생(강사),
+  /// "ACADEMY"=학원 전체 재원생(교수부장). 별지 「인센티브 산정 계약서」 제1·3조 문구가 갈린다.
+  incScope          String?
+  /// 재원생 수 산정 방식 (incScope=ACADEMY 일 때) — "SNAPSHOT15"=매월 15일 재원생 기준,
+  /// null/"WEIGHTED"=가중인원(수업 회차 비례). 라벨은 lib/constants.ts.
+  incCountMethod    String?
   ratioPercent      Float?
   ratioMinGuarantee Int? // 위탁 최저보장액(월)
   /// 위탁계약(프리랜서) — 주휴·연차·퇴직금·4대보험 등 근로기준법 항목을 일절 적용하지 않는다.

@@ -71,6 +71,10 @@ export interface DocContract {
   incPerStudent?: number | null;
   /** 매출 비율 인센티브 (0.15 = 15%) — 인원 기준과 다른 갈래 */
   incRevenuePercent?: number | null;
+  /** 인원 기준 인센티브 산정 대상 — null/"OWN"=담당 원생, "ACADEMY"=학원 전체 재원생(교수부장) */
+  incScope?: string | null;
+  /** 재원생 수 산정 방식 (ACADEMY) — "SNAPSHOT15"=매월 15일 기준, null/"WEIGHTED"=가중인원 */
+  incCountMethod?: string | null;
   /** 위탁계약(프리랜서) — 개인사업자 지위 확인서가 함께 나간다 */
   isContractor?: boolean | null;
   /** 포괄임금 — 기본급 산정시간(월). 없으면 근로시간표에서 환산 */
@@ -592,27 +596,83 @@ export function incentiveContractHtml(args: {
   const revPct = ct.incRevenuePercent ?? null;
   const revPctTxt = revPct != null ? `${(revPct * 100).toFixed(2).replace(/\.?0+$/, "")}%` : null;
 
-  return `<div class="compact">${companyHead(c)}
-  <div class="doc-title">인센티브 산정 계약서</div>
-  <p><b>${esc(c.name)}</b> (이하 "갑"이라 한다) 과 근로자 <b>${esc(e.name)}</b> (이하 "을"이라 한다) 은 다음과 같은 조건으로 인센티브 계약을 체결하고, 상호 신의의 원칙 하에 성실하게 이행, 준수할 것을 합의한다.</p>
-  <p style="text-align:center" class="muted">- 다&nbsp;&nbsp;음 -</p>
+  // **산정 대상이 갈린다** — 강사(기본)는 '을이 담당한 원생', 교수부장(ACADEMY)은 **학원 전체
+  // 재원생**이 기준이다. 강사용 원문은 실제 서명된 계약서를 재현하는 문구라 한 글자도 건드리지
+  // 않고, 교수부장용을 따로 짠다(2026-09). 재원생 산정 방식(매월 15일 스냅숏 ↔ 가중인원)은
+  // 계약의 incCountMethod 로 관리자가 고른다.
+  const academy = ct.incScope === "ACADEMY";
+  const kvTable = `<table class="kv"><tr><th>기준 인원수</th><td>${threshold != null ? `${threshold}명` : blank(8)}</td><th>기준 금액</th><td>${perStudent != null ? `${won(perStudent)}원` : blank(10)}</td></tr></table>`;
 
-  <div class="clause"><h3>제 1조 (목적)</h3>
-    <p class="sub">이 규정은 "을"의 인센티브에 관한 사항을 정함을 목적으로 한다.</p></div>
+  const art1 = academy
+    ? `<div class="clause"><h3>제 1조 (목적)</h3>
+    <p class="sub">① 이 규정은 "을"의 인센티브에 관한 사항을 정함을 목적으로 한다.</p>
+    <p class="sub">② 본 인센티브는 학원 전체 재원생의 증감이라는 성과를 "갑"과 "을"이 함께 나누어, 학원의 성장과 "을"의 보상이 함께 커지는 <b>동반성장</b>을 도모하고 "을"의 교육·운영 기여에 보답함을 그 취지로 한다.</p></div>`
+    : `<div class="clause"><h3>제 1조 (목적)</h3>
+    <p class="sub">이 규정은 "을"의 인센티브에 관한 사항을 정함을 목적으로 한다.</p></div>`;
 
-  <div class="clause"><h3>제 2조 (인센티브 약정 기간)</h3>
-    <p class="sub"><b>${ymdKo(ct.startDate)}</b> 부터 신규 계약 체결일 까지로 한다.</p></div>
-
-  <div class="clause"><h3>제 3조 (인센티브의 산정방법)</h3>
+  let art3: string;
+  if (academy) {
+    // 기준 인원 600명·1명당 20,000원이면 (700 − 600) × 20,000 = 2,000,000원 — 표만으로는
+    // 계단식 표(700명=200만…)에 익숙한 눈에 안 읽혀 예시 한 줄을 함께 적는다.
+    const example =
+      threshold != null && perStudent != null
+        ? `<p class="small muted">예: 해당 월 재원생 ${threshold + 100}명 → (${threshold + 100} − ${threshold}) × ${won(perStudent)}원 = ${won(100 * perStudent)}원</p>`
+        : "";
+    const countRule =
+      ct.incCountMethod === "SNAPSHOT15"
+        ? `재원생 수는 <b>매월 15일 현재</b> 재원 중인 원생 수를 기준으로 산정한다.`
+        : `재원생 수는 해당 월 실제 수업 회차에 비례한 <b>가중 인원</b>으로 산정한다.`;
+    // 번호는 CIRC 로 이어 붙인다 — 매출 조항 유무로 뒤 번호가 저절로 밀리게
+    const subs: Array<{ text: string; after?: string }> = [
+      {
+        text: `"갑" 학원의 <b>전체 재원생 수</b>가 "갑"과 "을"의 협의에 따라 정한 기준 인원수를 초과한 경우 초과 재원생 수 1인당 기준금액을 곱한 금액에서 퇴직금 귀속분을 제외한 나머지 금액을 인센티브로 지급한다. 산정 대상은 "을"이 담당한 원생에 한정하지 아니하고 <b>학원 전체 재원생</b>으로 한다.`,
+        after: kvTable + example,
+      },
+      { text: countRule },
+      {
+        text: `재원생 수 산정 시 해당 월 <b>주 2회</b> 수업을 수강하는 원생은 <b>1명</b>, <b>주 1회</b> 수업을 수강하는 원생은 <b>0.5명</b>으로 환산한다.`,
+      },
+      {
+        text: `담임이 배정된 <b>정규반</b>의 원생만 산정에 포함하며, 특강 수강생은 산정에 포함하지 아니한다.`,
+      },
+      ...(revPctTxt
+        ? [
+            {
+              text: `"을"이 담당한 원생의 해당 월 수강료 매출에 아래 배분율을 곱한 금액을 인센티브로 지급한다. 월 중간에 입학·전출·퇴원한 원생의 수강료는 실제 수업 회차에 비례하여 산정한다.`,
+              after: `<table class="kv"><tr><th>매출 배분율</th><td colspan="3"><b>${esc(revPctTxt)}</b> <span class="muted">(담당 원생 수강료 매출 × ${esc(revPctTxt)})</span></td></tr></table>`,
+            },
+          ]
+        : []),
+      {
+        text: `상기 인센티브 측정 단가는 "갑"과 "을"의 합의에 따라 변경될 수 있으며, 인센티브 변경 시 본 계약서를 갱신 작성하기로 한다.`,
+      },
+    ];
+    art3 = `<div class="clause"><h3>제 3조 (인센티브의 산정방법)</h3>
+    ${subs.map((s, i) => `<p class="sub">${CIRC[i]} ${s.text}</p>${s.after ?? ""}`).join("\n    ")}</div>`;
+  } else {
+    art3 = `<div class="clause"><h3>제 3조 (인센티브의 산정방법)</h3>
     <p class="sub">① "을"이 담당한 원생 중 "갑"과 "을"의 협의에 따라 정한 기준 인원수를 초과한 경우 초과 원생수 1인당 기준금액을 곱한 금액에서 퇴직금 귀속분을 제외한 나머지 금액을 인센티브로 지급한다.</p>
-    <table class="kv"><tr><th>기준 인원수</th><td>${threshold != null ? `${threshold}명` : blank(8)}</td><th>기준 금액</th><td>${perStudent != null ? `${won(perStudent)}원` : blank(10)}</td></tr></table>
+    ${kvTable}
     ${
       revPctTxt
         ? `<p class="sub">② "을"이 담당한 원생의 해당 월 수강료 매출에 아래 배분율을 곱한 금액을 인센티브로 지급한다. 월 중간에 입학·전출·퇴원한 원생의 수강료는 실제 수업 회차에 비례하여 산정한다.</p>
     <table class="kv"><tr><th>매출 배분율</th><td colspan="3"><b>${esc(revPctTxt)}</b> <span class="muted">(담당 원생 수강료 매출 × ${esc(revPctTxt)})</span></td></tr></table>
     <p class="sub">③ 상기 인센티브 측정 단가는 "갑"과 "을"의 합의에 따라 변경될 수 있으며, 인센티브 변경 시 본 계약서를 갱신 작성하기로 한다.</p>`
         : `<p class="sub">② 상기 인센티브 측정 단가는 "갑"과 "을"의 합의에 따라 변경될 수 있으며, 인센티브 변경 시 본 계약서를 갱신 작성하기로 한다.</p>`
-    }</div>
+    }</div>`;
+  }
+
+  return `<div class="compact">${companyHead(c)}
+  <div class="doc-title">인센티브 산정 계약서</div>
+  <p><b>${esc(c.name)}</b> (이하 "갑"이라 한다) 과 근로자 <b>${esc(e.name)}</b> (이하 "을"이라 한다) 은 다음과 같은 조건으로 인센티브 계약을 체결하고, 상호 신의의 원칙 하에 성실하게 이행, 준수할 것을 합의한다.</p>
+  <p style="text-align:center" class="muted">- 다&nbsp;&nbsp;음 -</p>
+
+  ${art1}
+
+  <div class="clause"><h3>제 2조 (인센티브 약정 기간)</h3>
+    <p class="sub"><b>${ymdKo(ct.startDate)}</b> 부터 신규 계약 체결일 까지로 한다.</p></div>
+
+  ${art3}
 
   <div class="clause"><h3>제 4조 (인센티브의 지급방법)</h3>
     <p class="sub">① "갑"은 "을"에게 제3조 제1항에 따라 산정된 인센티브를 매월 초일부터 말일까지 기산하여, 익월 ${payday}일에 "을" 명의의 통장으로 지급한다. 단, 해당 지급일이 휴일인 경우 지급일 전일에 지급하기로 한다.</p>
@@ -663,7 +723,13 @@ export function contractGroups(args: {
   //    쪽번호가 별지까지 이어져 `2 / 3` 처럼 매겨진다.
   const groups: DocGroup[] = [{ bodies: [contractHtml(args)], opts: bilateralOpts ?? {} }];
   if (scheme === "INCENTIVE")
-    groups.push({ bodies: [incentiveContractHtml(args)], opts: bilateralOpts ?? {} });
+    groups.push({
+      bodies: [incentiveContractHtml(args)],
+      // 별지는 **한 장짜리 서식**이라 1장에 맞춰 줄인다(근로계약서의 2장 맞춤과 다르다).
+      // 교수부장(ACADEMY) 변형은 조항이 넷 늘어 그대로 두면 제6조 ③과 서명란만 2쪽으로
+      // 밀려 거의 빈 장이 붙었다(실측). 강사용은 원래 1장이라 이 값이 아무것도 안 바꾼다.
+      opts: { ...(bilateralOpts ?? {}), fitPages: 1 },
+    });
 
   // ② 확인서 — 을이 혼자 내는 서류라 갑의 서명이 없다. 이니셜란·쪽번호를 붙이지 않는다.
   const solo: string[] = [];

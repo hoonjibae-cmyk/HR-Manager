@@ -52,6 +52,9 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
     incThreshold: emp.incThreshold ?? "",
     incPerStudent: emp.incPerStudent ?? "",
     incRevenuePercent: emp.incRevenuePercent != null ? emp.incRevenuePercent * 100 : "",
+    // 직원 카드에는 없는 계약 전용 값 — 갱신 계약도 여기서 다시 고른다 (기본: 담당 원생 기준)
+    incScope: "",
+    incCountMethod: "SNAPSHOT15",
     ratioPercent: emp.ratioPercent != null ? emp.ratioPercent * 100 : "",
     ratioMinGuarantee: emp.ratioMinGuarantee ?? "",
     isContractor: !!(emp as any).isContractor,
@@ -86,6 +89,8 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
         incThreshold: f.incThreshold === "" ? null : Number(f.incThreshold),
         incPerStudent: f.incPerStudent === "" ? null : Number(f.incPerStudent),
         incRevenuePercent: f.incRevenuePercent === "" ? null : Number(f.incRevenuePercent) / 100,
+        incScope: f.incScope || null,
+        incCountMethod: f.incCountMethod || null,
         ratioPercent: f.ratioPercent === "" ? null : Number(f.ratioPercent) / 100,
         ratioMinGuarantee: f.ratioMinGuarantee === "" ? null : Number(f.ratioMinGuarantee),
         isContractor: f.payScheme === "RATIO" ? true : !!f.isContractor,
@@ -196,6 +201,21 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
             <L label="인센티브 기준 학생수"><input type="number" className="input" value={f.incThreshold} onChange={(e) => set("incThreshold", e.target.value)} /></L>
             <L label="초과 1명당 금액 (원)"><input type="number" className="input" value={f.incPerStudent} onChange={(e) => set("incPerStudent", e.target.value)} /></L>
             <L label="매출 비율 인센티브 (%)"><input type="number" step="0.1" className="input" placeholder="없으면 비움" value={f.incRevenuePercent} onChange={(e) => set("incRevenuePercent", e.target.value)} /></L>
+            {/* 산정 대상 — 교수부장은 담당 원생이 아니라 학원 전체 재원생 기준. 별지 제1·3조 문구가 갈린다 */}
+            <L label="인센티브 산정 대상">
+              <select className="input" value={f.incScope} onChange={(e) => set("incScope", e.target.value)}>
+                <option value="">담당 원생 기준 (강사)</option>
+                <option value="ACADEMY">학원 전체 재원생 기준 (교수부장)</option>
+              </select>
+            </L>
+            {f.incScope === "ACADEMY" && (
+              <L label="재원생 수 산정 방식">
+                <select className="input" value={f.incCountMethod} onChange={(e) => set("incCountMethod", e.target.value)}>
+                  <option value="SNAPSHOT15">매월 15일 재원생 기준</option>
+                  <option value="WEIGHTED">가중인원 (수업 회차 비례)</option>
+                </select>
+              </L>
+            )}
           </>
         )}
         {f.payScheme === "RATIO" && (

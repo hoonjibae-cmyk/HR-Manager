@@ -385,6 +385,8 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                         incThreshold: c.incThreshold,
                         incPerStudent: c.incPerStudent,
                         incRevenuePercent: c.incRevenuePercent,
+                        incScope: (c as any).incScope ?? null,
+                        incCountMethod: (c as any).incCountMethod ?? null,
                         ratioPercent: c.ratioPercent,
                         ratioMinGuarantee: c.ratioMinGuarantee,
                         fixedBaseHours: c.fixedBaseHours,

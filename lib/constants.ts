@@ -28,6 +28,18 @@ export const PAY_SCHEME_LABEL: Record<string, string> = {
   RATIO: "완전비율제(위탁)",
 };
 
+/** 인원 기준 인센티브의 산정 대상 — 별지 「인센티브 산정 계약서」 문구가 갈린다 */
+export const INC_SCOPE_LABEL: Record<string, string> = {
+  OWN: "담당 원생 기준 (강사)",
+  ACADEMY: "학원 전체 재원생 기준 (교수부장)",
+};
+
+/** 학원 전체 재원생 수의 산정 방식 (incScope=ACADEMY) — 관리자가 계약마다 고른다 */
+export const INC_COUNT_METHOD_LABEL: Record<string, string> = {
+  SNAPSHOT15: "매월 15일 재원생 기준",
+  WEIGHTED: "가중인원 (수업 회차 비례)",
+};
+
 /**
  * **위탁계약(프리랜서)인가 — 근로기준법 항목을 일절 적용하지 않는 대상인가.**
  *

@@ -153,6 +153,8 @@ export function contractToDoc(ct: any): DocContract {
     incThreshold: ct.incThreshold,
     incPerStudent: ct.incPerStudent,
     incRevenuePercent: ct.incRevenuePercent,
+    incScope: ct.incScope,
+    incCountMethod: ct.incCountMethod,
     isContractor: ct.isContractor ?? false,
     fixedBaseHours: ct.fixedBaseHours,
     fixedOtHours: ct.fixedOtHours,

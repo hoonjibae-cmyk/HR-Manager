@@ -21,6 +21,10 @@ export interface ContractSnapshot {
   incThreshold: number | null;
   incPerStudent: number | null;
   incRevenuePercent: number | null; // 0~1
+  /** 인원 기준 인센티브 산정 대상 — null/"OWN"=담당 원생, "ACADEMY"=학원 전체 재원생(교수부장) */
+  incScope: string | null;
+  /** 재원생 수 산정 방식 (ACADEMY) — "SNAPSHOT15" | "WEIGHTED" */
+  incCountMethod: string | null;
   ratioPercent: number | null; // 0~1
   ratioMinGuarantee: number | null;
   isContractor: boolean;
@@ -50,6 +54,8 @@ export default function ContractEditForm({
     incThreshold: contract.incThreshold ?? "",
     incPerStudent: contract.incPerStudent ?? "",
     incRevenuePercent: contract.incRevenuePercent != null ? contract.incRevenuePercent * 100 : "",
+    incScope: contract.incScope ?? "",
+    incCountMethod: contract.incCountMethod ?? "SNAPSHOT15",
     ratioPercent: contract.ratioPercent != null ? contract.ratioPercent * 100 : "",
     ratioMinGuarantee: contract.ratioMinGuarantee ?? "",
     fixedBaseHours: contract.fixedBaseHours ?? "",
@@ -79,6 +85,8 @@ export default function ContractEditForm({
         incThreshold: f.incThreshold === "" ? null : Number(f.incThreshold),
         incPerStudent: f.incPerStudent === "" ? null : Number(f.incPerStudent),
         incRevenuePercent: f.incRevenuePercent === "" ? null : Number(f.incRevenuePercent) / 100,
+        incScope: f.incScope || null,
+        incCountMethod: f.incCountMethod || null,
         ratioPercent: f.ratioPercent === "" ? null : Number(f.ratioPercent) / 100,
         ratioMinGuarantee: f.ratioMinGuarantee === "" ? null : Number(f.ratioMinGuarantee),
         isContractor: f.payScheme === "RATIO" ? true : !!f.isContractor,
@@ -193,6 +201,21 @@ export default function ContractEditForm({
             <L label="인센티브 기준 학생수"><input type="number" className="input" value={f.incThreshold} onChange={(e) => set("incThreshold", e.target.value)} /></L>
             <L label="기준 금액 (원)"><input type="number" className="input" value={f.incPerStudent} onChange={(e) => set("incPerStudent", e.target.value)} /></L>
             <L label="매출 비율 인센티브 (%)"><input type="number" step="0.1" className="input" placeholder="없으면 비움" value={f.incRevenuePercent} onChange={(e) => set("incRevenuePercent", e.target.value)} /></L>
+            {/* 산정 대상 — 교수부장은 담당 원생이 아니라 학원 전체 재원생 기준. 별지 제1·3조 문구가 갈린다 */}
+            <L label="인센티브 산정 대상">
+              <select className="input" value={f.incScope} onChange={(e) => set("incScope", e.target.value)}>
+                <option value="">담당 원생 기준 (강사)</option>
+                <option value="ACADEMY">학원 전체 재원생 기준 (교수부장)</option>
+              </select>
+            </L>
+            {f.incScope === "ACADEMY" && (
+              <L label="재원생 수 산정 방식">
+                <select className="input" value={f.incCountMethod} onChange={(e) => set("incCountMethod", e.target.value)}>
+                  <option value="SNAPSHOT15">매월 15일 재원생 기준</option>
+                  <option value="WEIGHTED">가중인원 (수업 회차 비례)</option>
+                </select>
+              </L>
+            )}
           </>
         )}
         <L label="비고"><input className="input" value={f.note} onChange={(e) => set("note", e.target.value)} /></L>

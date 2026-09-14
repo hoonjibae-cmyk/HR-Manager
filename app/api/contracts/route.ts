@@ -72,6 +72,11 @@ export async function POST(req: Request) {
         incThreshold: numOrNull(body.incThreshold, emp.incThreshold),
         incPerStudent: numOrNull(body.incPerStudent, emp.incPerStudent),
         incRevenuePercent: numOrNull(body.incRevenuePercent, emp.incRevenuePercent),
+        // 인원 기준 인센티브의 산정 대상·재원생 산정 방식 (교수부장 = ACADEMY).
+        // 방식은 ACADEMY 일 때만 뜻이 있다 — 담당 원생 기준으로 되돌리면 함께 비운다.
+        incScope: body.incScope === "ACADEMY" ? "ACADEMY" : null,
+        incCountMethod:
+          body.incScope === "ACADEMY" ? body.incCountMethod || "SNAPSHOT15" : null,
         ratioPercent: numOrNull(body.ratioPercent, emp.ratioPercent),
         ratioMinGuarantee: numOrNull(body.ratioMinGuarantee, emp.ratioMinGuarantee),
         // 위탁계약(프리랜서) — 주휴·연차·퇴직금·4대보험 미적용
