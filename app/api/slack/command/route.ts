@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import {
   verifySlackSignature,
   slackConfigured,
@@ -126,7 +127,8 @@ export async function POST(req: Request) {
   const parsed = parseLeaveText(text);
   if (!parsed) return ephemeral("날짜를 인식하지 못했습니다. 예: `/연차 8/14 개인사유`");
 
-  // 신청 생성·승인카드 게시는 모달과 동일한 경로를 탄다
+  // 신청 생성·승인카드 게시는 모달과 동일한 경로를 탄다.
+  // 저장까지만 하고 3초 안에 응답한다 — 승인 요청 발송은 응답 뒤로(waitUntil).
   const res = await submitLeaveRequest(emp, {
     leaveType: parsed.leaveType,
     start: parsed.start,
@@ -135,6 +137,15 @@ export async function POST(req: Request) {
     channel: form.get("channel_id") || undefined,
   });
   if (!res.ok) return ephemeral(`❌ ${res.error}`);
+
+  // 명령을 다시 친 재제출 — 새로 만들지 않았음을 그대로 알린다 (모달과 달리 명령은
+  // 사용자가 일부러 다시 친 것이라 조용히 넘기면 접수가 안 된 줄 안다)
+  if (res.duplicate)
+    return ephemeral(
+      `이미 접수된 신청입니다 — ${rangeLabel(parsed.start, parsed.end, res.days!)} (${res.days}일). 중복으로 만들지 않았습니다.`
+    );
+
+  waitUntil(res.notify!().catch((e) => console.error("휴가 신청(명령) 후처리 실패:", e)));
 
   return ephemeral(
     `✅ ${res.poolLabel} 신청이 접수되었습니다.\n• 기간: ${rangeLabel(

@@ -279,6 +279,8 @@ export async function POST(req: Request) {
       meta = JSON.parse(payload.view.private_metadata || "{}");
     } catch {}
 
+    // 검증 + 저장까지만 하고 3초 안에 응답한다 — 중간결재 DM·승인 카드·신청자 DM·홈탭 갱신은
+    // 응답 뒤(waitUntil)로 미룬다. 보강 신청과 같은 원인(타임아웃 → 재제출 → 중복)·같은 구조다.
     const res = await submitLeaveRequest(emp, {
       leaveType: f.kind,
       start,
@@ -296,19 +298,30 @@ export async function POST(req: Request) {
       });
     }
 
-    // 신청자에게 DM 확인 — 중간결재를 거치는 신청은 그 사실을 알린다
-    // (누가 들고 있는지 모르면 결재가 늦어질 때 물어볼 곳이 없다)
-    await slackCall("chat.postMessage", {
-      channel: userId,
-      text:
-        `✅ 휴가신청서가 접수되었습니다.\n` +
-        `• 기간: ${ymd(start)}${res.days! > 1 ? ` ~ ${ymd(end)}` : ""} (${res.days}일)\n` +
-        `• 현재 ${res.poolLabel} 잔여: ${res.remaining}일\n` +
-        (res.preApproverName
-          ? `${res.preApproverName} 님의 중간결재 확인 후 운영진 승인으로 넘어갑니다.`
-          : `관리자 승인 후 반영됩니다.`),
-    }).catch(() => {});
-    await refreshHomeTab(userId).catch(() => {});
+    // 재제출(타임아웃 뒤 다시 누름) — 첫 제출이 접수 DM·승인 요청까지 처리했거나 처리 중이다.
+    // 모달만 닫고 아무것도 반복하지 않는다(DM 이 두 번 가면 두 건 접수된 줄 안다).
+    if (res.duplicate) return Response.json({ response_action: "clear" });
+
+    waitUntil(
+      (async () => {
+        // 발송 결과가 정한 **최종** 경로로 문구를 가른다 — 결재자 DM 이 실패하면 직행으로
+        // 바뀌므로, 발송 전 예정값으로 적으면 오지 않을 중간결재를 기다리게 만든다.
+        const { preApproverName } = await res.notify!();
+        // 신청자에게 DM 확인 — 중간결재를 거치는 신청은 그 사실을 알린다
+        // (누가 들고 있는지 모르면 결재가 늦어질 때 물어볼 곳이 없다)
+        await slackCall("chat.postMessage", {
+          channel: userId,
+          text:
+            `✅ 휴가신청서가 접수되었습니다.\n` +
+            `• 기간: ${ymd(start)}${res.days! > 1 ? ` ~ ${ymd(end)}` : ""} (${res.days}일)\n` +
+            `• 현재 ${res.poolLabel} 잔여: ${res.remaining}일\n` +
+            (preApproverName
+              ? `${preApproverName} 님의 중간결재 확인 후 운영진 승인으로 넘어갑니다.`
+              : `관리자 승인 후 반영됩니다.`),
+        }).catch(() => {});
+        await refreshHomeTab(userId).catch(() => {});
+      })().catch((e) => console.error("휴가 신청 후처리 실패:", e))
+    );
 
     return Response.json({ response_action: "clear" });
   }

@@ -217,6 +217,19 @@ export interface LeaveSubmitResult {
   requestId?: number;
   /** 중간결재를 거치는 신청이면 결재자 이름 — 신청자 DM 문구가 갈린다 */
   preApproverName?: string;
+  /**
+   * **같은 기간·같은 종류의 살아 있는 신청이 이미 있어 새로 만들지 않았다.**
+   * 슬랙이 3초 안에 응답을 못 받으면 오류를 띄우고 다시 제출하게 하는데, 첫 제출은 이미
+   * 저장된 뒤라 그대로 두 건이 됐다(보강 신청과 같은 원인). 재제출이면 알림도 반복하지 않는다.
+   */
+  duplicate?: boolean;
+  /**
+   * 승인 요청 발송(중간결재자 DM 또는 승인 채널 카드) — `ok && !duplicate` 일 때만 있다.
+   * **슬랙 응답(3초)을 돌려준 뒤에 부른다**(waitUntil). DM 실패 시 직행 전환까지 여기서
+   * 처리하므로, 신청자 안내 문구는 이 함수가 돌려주는 **최종** preApproverName 으로 갈라야
+   * 한다(결과의 preApproverName 은 발송 전 예정값이다).
+   */
+  notify?: () => Promise<{ preApproverName: string | null }>;
 }
 
 /**
@@ -287,6 +300,20 @@ export async function submitLeaveRequest(
   if (input.end < input.start) {
     return { ok: false, error: "종료일이 시작일보다 빠릅니다.", field: "end" };
   }
+
+  // 중복 방어 — 같은 직원·같은 기간·같은 종류의 살아 있는 신청(반려·취소 제외)이 있으면
+  // 새로 만들지 않는다. 슬랙 3초 타임아웃 뒤 재제출이 두 건이 되는 것을 막는다(보강과 같은
+  // 원인·같은 방식). 반려·취소된 신청을 같은 날짜로 다시 내는 것은 정상 경로라 그대로 된다.
+  const dup = await prisma.leaveRequest.findFirst({
+    where: {
+      employeeId: emp.id,
+      startDate: input.start,
+      endDate: input.end,
+      leaveType: input.leaveType,
+      status: { notIn: ["REJECTED", "CANCELED"] },
+    },
+  });
+  if (dup) return { ok: true, duplicate: true, requestId: dup.id, days: dup.days };
 
   const isHalf = isHalfDayLeave(input.leaveType);
   const holidays = (await prisma.holiday.findMany()).map((h) => h.date);
@@ -361,58 +388,66 @@ export async function submitLeaveRequest(
     },
   });
 
-  if (preApprover) {
-    // 중간결재자 DM — 확인·반려 버튼. slackChannel/slackTs 에는 이 DM 을 담아 두고,
-    // 확인되면 승인 채널 카드로 갈아 끼운다(단계마다 '지금 버튼이 살아 있는 메시지' 하나만 가리킨다).
-    const posted: any = await postMessage(
-      preApprover.slackUserId!,
-      `연차 중간결재 요청: ${emp.name} ${days}일`,
-      preApprovalBlocks({
-        requestId: reqRow.id,
-        name: emp.name,
-        dept: emp.department ?? "",
-        start: input.start,
-        end: input.end,
-        days,
-        reason: `[${typeLabel}] ${reasonFull || "개인사유"}`,
-        remaining: poolRemaining,
-        workPlan: input.workPlan,
-      })
-    ).catch(() => null);
-    if (posted?.ok) {
-      await prisma.leaveRequest.update({
-        where: { id: reqRow.id },
-        data: { slackChannel: posted.channel, slackTs: posted.ts },
-      });
-      return {
-        ok: true,
-        days,
-        remaining: poolRemaining,
-        poolLabel,
-        requestId: reqRow.id,
-        preApproverName: preApprover.name,
-      };
+  // **발송은 여기서 하지 않고 notify 로 미룬다** — 슬랙 모달·슬래시 명령은 3초 안에 응답해야
+  // 하는데, 중간결재 DM·승인 카드 게시가 응답 앞에 있으면 그 시간만큼 3초를 갉아먹어
+  // 타임아웃 → 재제출 → 중복의 원인이 됐다. 저장까지 끝났으므로 발송이 잠시 늦어도
+  // 신청은 이미 화면 승인 대기 목록에 있다(발송이 아예 실패해도 관리자가 거기서 처리할 수 있다).
+  const notify = async (): Promise<{ preApproverName: string | null }> => {
+    if (preApprover) {
+      // 중간결재자 DM — 확인·반려 버튼. slackChannel/slackTs 에는 이 DM 을 담아 두고,
+      // 확인되면 승인 채널 카드로 갈아 끼운다(단계마다 '지금 버튼이 살아 있는 메시지' 하나만 가리킨다).
+      const posted: any = await postMessage(
+        preApprover.slackUserId!,
+        `연차 중간결재 요청: ${emp.name} ${days}일`,
+        preApprovalBlocks({
+          requestId: reqRow.id,
+          name: emp.name,
+          dept: emp.department ?? "",
+          start: input.start,
+          end: input.end,
+          days,
+          reason: `[${typeLabel}] ${reasonFull || "개인사유"}`,
+          remaining: poolRemaining,
+          workPlan: input.workPlan,
+        })
+      ).catch(() => null);
+      if (posted?.ok) {
+        await prisma.leaveRequest.update({
+          where: { id: reqRow.id },
+          data: { slackChannel: posted.channel, slackTs: posted.ts },
+        });
+        return { preApproverName: preApprover.name };
+      }
+      // DM 을 못 보냈으면(연동 계정 삭제 등) 중간결재에 걸어 두지 않고 직행으로 되돌린다 —
+      // 아무도 못 받는 결재함에 넣어 두면 신청이 조용히 멈춘다.
+      await prisma.leaveRequest.update({ where: { id: reqRow.id }, data: { status: "PENDING" } });
     }
-    // DM 을 못 보냈으면(연동 계정 삭제 등) 중간결재에 걸어 두지 않고 직행으로 되돌린다 —
-    // 아무도 못 받는 결재함에 넣어 두면 신청이 조용히 멈춘다.
-    await prisma.leaveRequest.update({ where: { id: reqRow.id }, data: { status: "PENDING" } });
-  }
 
-  await postLeaveApprovalCard({
-    requestId: reqRow.id,
-    name: emp.name,
-    dept: emp.department ?? "",
-    start: input.start,
-    end: input.end,
+    await postLeaveApprovalCard({
+      requestId: reqRow.id,
+      name: emp.name,
+      dept: emp.department ?? "",
+      start: input.start,
+      end: input.end,
+      days,
+      typeLabel,
+      reason: `[${typeLabel}] ${reasonFull || "개인사유"}`,
+      remaining: poolRemaining,
+      workPlan: input.workPlan,
+      fallbackChannel: input.channel,
+    });
+    return { preApproverName: null };
+  };
+
+  return {
+    ok: true,
     days,
-    typeLabel,
-    reason: `[${typeLabel}] ${reasonFull || "개인사유"}`,
     remaining: poolRemaining,
-    workPlan: input.workPlan,
-    fallbackChannel: input.channel,
-  });
-
-  return { ok: true, days, remaining: poolRemaining, poolLabel, requestId: reqRow.id };
+    poolLabel,
+    requestId: reqRow.id,
+    preApproverName: preApprover?.name,
+    notify,
+  };
 }
 
 /** 표시용 기간 라벨 */
