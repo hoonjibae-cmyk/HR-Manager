@@ -1,44 +1,58 @@
-import { createHmac, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
+import { prisma } from "./db";
+import { matchesHrManagementEmployee, type HrIdentity } from "./hr-access";
+import { signHrSession, verifyHrSession } from "./hr-session";
 
-const COOKIE = "yh_session";
-const SECRET = process.env.SESSION_SECRET || "dev-secret-change-me";
+export const SESSION_COOKIE = "yh_session";
 
-function sign(value: string): string {
-  const mac = createHmac("sha256", SECRET).update(value).digest("hex");
-  return `${value}.${mac}`;
+function sessionSecret() {
+  const secret = process.env.SESSION_SECRET?.trim();
+  return secret && secret.length >= 32 ? secret : null;
 }
 
-function verify(signed: string | undefined): boolean {
-  if (!signed) return false;
-  const idx = signed.lastIndexOf(".");
-  if (idx < 0) return false;
-  const value = signed.slice(0, idx);
-  const mac = signed.slice(idx + 1);
-  const expected = createHmac("sha256", SECRET).update(value).digest("hex");
+export function makeSessionCookie(identity: HrIdentity): string {
+  const secret = sessionSecret();
+  if (!secret) throw new Error("SESSION_SECRET is not configured securely");
+  return signHrSession(identity, secret);
+}
+
+/**
+ * 서명된 사람 정보와 현재 HR 원장을 매 요청마다 대조한다.
+ * 세션이 남아 있어도 퇴사·부서 변경·Slack 연결 해제 뒤에는 즉시 false가 된다.
+ */
+export async function currentHrUser(): Promise<HrIdentity | null> {
+  const secret = sessionSecret();
+  if (!secret) return null;
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  const claims = verifyHrSession(token, secret);
+  if (!claims) return null;
   try {
-    return (
-      mac.length === expected.length &&
-      timingSafeEqual(Buffer.from(mac), Buffer.from(expected)) &&
-      value.startsWith("admin:")
-    );
+    const employee = await prisma.employee.findUnique({
+      where: { empNo: claims.empNo },
+      select: {
+        empNo: true,
+        name: true,
+        email: true,
+        workEmail: true,
+        slackUserId: true,
+        department: true,
+        active: true,
+        resignDate: true,
+      },
+    });
+    if (!employee || !matchesHrManagementEmployee(claims, employee)) return null;
+    return {
+      empNo: employee.empNo,
+      name: employee.name,
+      email: (employee.workEmail || employee.email || "").trim().toLowerCase(),
+      slackUserId: employee.slackUserId!,
+      department: employee.department!,
+    };
   } catch {
-    return false;
+    return null;
   }
 }
 
-export function makeSessionCookie(): string {
-  return sign(`admin:${Date.now()}`);
-}
-
-export function checkPassword(pw: string): boolean {
-  const expected = process.env.ADMIN_PASSWORD || "yoossam2025";
-  return pw === expected;
-}
-
 export async function isAuthed(): Promise<boolean> {
-  const c = await cookies();
-  return verify(c.get(COOKIE)?.value);
+  return Boolean(await currentHrUser());
 }
-
-export const SESSION_COOKIE = COOKIE;

@@ -57,7 +57,8 @@ npm run seed            # 회사정보·요율·간이세액표·공휴일·데�
    |---|---|
    | `DATABASE_URL` | Supabase 풀링(6543) 문자열 + `?pgbouncer=true` |
    | `DIRECT_URL` | Supabase 다이렉트(5432) 문자열 |
-   | `ADMIN_PASSWORD` | 관리자 로그인 비밀번호 (변경) |
+   | `PORTAL_ORIGIN` | `https://portal.yussam.com` |
+   | `HR_SSO_SECRET` | 포털과 HR에 동일하게 넣는 32자 이상의 전용 서명키 |
    | `SESSION_SECRET` | 긴 임의 문자열 |
    | `CRON_SECRET` | 긴 임의 문자열 (자동발송 보안) |
    | `ENABLE_SCHEDULER` | `false` (Vercel은 Cron 사용) |
@@ -65,7 +66,7 @@ npm run seed            # 회사정보·요율·간이세액표·공휴일·데�
    | `SLACK_BOT_TOKEN` 등 | 슬랙 설정 (docs/SETUP.md) |
 
 5. **Deploy** 클릭 → 1~2분 후 배포 완료. `https://hr-manager-xxxx.vercel.app` 주소가 생깁니다.
-6. 그 주소로 접속 → `ADMIN_PASSWORD` 로 로그인 → 데이터가 보이면 성공입니다.
+6. 유쌤 워크스페이스의 HR Manager 카드를 눌러 경영지원 재직자만 입장되는지 확인합니다.
 
 > 이후에는 **코드를 GitHub에 push할 때마다 Vercel이 자동 재배포**합니다.
 > **DB 스키마도 배포할 때 자동으로 맞춰집니다** — 아래 3-A 참고.
