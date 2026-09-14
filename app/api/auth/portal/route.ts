@@ -12,7 +12,6 @@ function portalOrigin() {
 
 type DenialReason =
   | "missing_secret"
-  | "origin_mismatch"
   | "missing_token"
   | "invalid_token"
   | "employee_not_found"
@@ -29,7 +28,21 @@ export async function POST(req: Request) {
   const secret = process.env.HR_SSO_SECRET?.trim();
   if (!secret || secret.length < 32) return denied(req, "missing_secret");
   const origin = req.headers.get("origin");
-  if (origin && origin !== portalOrigin()) return denied(req, "origin_mismatch");
+  // 모바일 PWA와 일부 인앱 브라우저는 교차 출처 폼 전송 시 Origin을
+  // 배포 별칭이나 null로 보낼 수 있다. Origin은 진단에만 쓰고, 접근 권한은
+  // 1분짜리 HMAC 토큰과 아래 HR 원장 대조로 결정한다.
+  if (origin && origin !== portalOrigin()) {
+    console.warn("[HR_PORTAL_SSO_ORIGIN_VARIATION]", {
+      expectedHost: new URL(portalOrigin()).host,
+      receivedHost: (() => {
+        try {
+          return new URL(origin).host;
+        } catch {
+          return "opaque";
+        }
+      })(),
+    });
+  }
 
   const form = await req.formData().catch(() => null);
   const token = form?.get("token");
