@@ -41,7 +41,7 @@ npm install
 cp .env.example .env
 #   → .env 에 PostgreSQL 접속정보(DATABASE_URL, DIRECT_URL)를 입력.
 #     Supabase 무료 DB를 쓰거나, 로컬 Postgres를 사용하세요(.env.example 예시 참고).
-#     ADMIN_PASSWORD, SESSION_SECRET 등도 변경 권장.
+#     PORTAL_ORIGIN, HR_SSO_SECRET, SESSION_SECRET을 설정하세요.
 
 # 3) 데이터베이스 스키마 생성 + 기초 데이터 시딩
 npm run db:push      # Postgres 스키마 생성
@@ -49,7 +49,7 @@ npm run seed         # 회사정보·4대보험요율·간이세액표·공휴�
 
 # 4) 개발 서버 실행
 npm run dev
-#   → http://localhost:3000  (기본 비밀번호: .env 의 ADMIN_PASSWORD)
+#   → http://localhost:3000  (포털의 경영지원 계정 확인 후 입장)
 ```
 
 > **가장 쉬운 체험**: GitHub 저장소 → `Code ▸ Codespaces ▸ Create` 하면
@@ -131,7 +131,7 @@ docs/SETUP.md       연동 설정 가이드
 
 ## 보안 유의사항
 
-- 배포 전 `.env`의 `ADMIN_PASSWORD`, `SESSION_SECRET`, `CRON_SECRET`을 반드시 변경하세요.
+- 배포 전 포털과 HR에 같은 `HR_SSO_SECRET`을 설정하고, HR 전용 `SESSION_SECRET`과 `CRON_SECRET`도 긴 임의 값으로 설정하세요.
 - 주민등록번호 등 민감정보는 운영 환경에서 암호화 저장을 권장합니다(현재는 평문 저장).
 - `dev.db`(SQLite)와 `.env`, `storage/`(생성 PDF)는 Git에 커밋되지 않습니다.
 

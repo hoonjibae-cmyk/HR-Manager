@@ -14,7 +14,7 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 - `npm run db:holidays-sync` — 공휴일 표 채우기 (올해·내년. `YEARS=2026,2027`). `HOLIDAY_API_KEY` 필요. 멱등.
 - `node scripts/db-deploy.mjs` — 배포용 스키마 반영 (Vercel 빌드가 자동 실행. 안전장치 포함)
 - `npx tsc --noEmit` — 타입 체크
-- 로그인 비밀번호: `.env` 의 `ADMIN_PASSWORD` (기본 `yoossam2025`)
+- 로그인: 유쌤 워크스페이스가 확인한 경영지원 재직자만 허용 (`PORTAL_ORIGIN`, `HR_SSO_SECRET`)
 
 ## 아키텍처
 - **엔진(순수 함수, DB 무관, 테스트 있음)**: `lib/payroll.ts`(급여), `lib/leave.ts`(연차, 근로기준법 §60),
@@ -908,16 +908,13 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   **0시간도 추정으로 본다** — 0을 '실제로 0시간 일했다' 로 읽으면 기록이 없는 달이 검게 나간다.
 - 4대보험/세율은 하드코딩 금지 — `InsuranceRate`(설정 화면에서 수정). 세액표는 `TaxBracket`.
 - 계산식 변경 시 `lib/*.test.ts` 를 먼저 갱신하고 `npm test` 로 검증.
-- 관리자 로그인은 비밀번호 공유(`ADMIN_PASSWORD`) 방식이라 화면 작업의 '누가' 는 남지 않는다.
-  **세션은 쓰는 동안 미끄러지듯 연장된다**(`middleware.ts` + `lib/auth-edge.ts` 순수 함수·테스트) —
-  7일 고정이던 시절, 만료 순간 열려 있던 화면은 멀쩡한데 버튼만 전부 'unauthorized' 로
-  떨어졌다(신규입사 패키지 발급에서 겪었다). 하루 넘은 세션의 요청이 오면 새 7일짜리로
-  갈아 끼우고, 미인증 페이지 요청은 미들웨어가 /login 으로 보낸다. **API 는 미들웨어가
-  자르지 않는다** — 슬랙·크론은 쿠키가 아니라 자체 서명 인증이다. 엣지는 node crypto 가
-  없어 Web Crypto 로 같은 HMAC 을 한 벌 더 두었다 — **두 구현의 호환을 테스트가 못박으므로
-  쿠키 모양을 바꾸면 양쪽을 함께 바꾼다**. 클라이언트는 401 을 받으면 '로그인이 만료되었습니다'
-  로 안내하고 로그인 화면으로 보낸다(DocButton).
-  슬랙 경유 작업만 사용자까지 기록된다. 개인 구분이 필요해지면 계정 모델을 도입해야 한다.
+- 관리자 로그인은 유쌤 워크스페이스의 Slack 신원을 이어 받는다. 포털은 HR 카드 클릭 때
+  경영지원 재직자를 다시 확인하고 1분짜리 서명을 POST로 보낸다. HR은 자기 Employee 원장에서
+  사번·업무용 이메일·Slack ID·경영지원 소속·재직 상태를 다시 대조한 뒤 12시간 개인 세션을
+  발급한다. `isAuthed()`도 매 요청마다 같은 원장을 확인하므로 퇴사·부서 변경·Slack 연결 해제는
+  남은 세션 시간과 무관하게 즉시 차단된다. 예전 `ADMIN_PASSWORD` 로그인과 `admin:<timestamp>`
+  공용 쿠키는 받지 않는다. 미인증 페이지는 미들웨어가 `/login`으로 보내며, API는 각 라우트의
+  `isAuthed()` 또는 Slack·cron·directory 전용 서명으로 보호한다.
 - **Supabase 의 `public` 스키마는 공개 API(PostgREST)로 자동 노출된다 — RLS 로 막아 둔다.**
   `https://<ref>.supabase.co/rest/v1/...` 는 `anon` 키만 있으면 열리고, 그 키는 원래
   브라우저에 심으라고 주는 **공개 키**다. RLS 가 꺼져 있으면 그 키를 가진 누구나 전 직원의
