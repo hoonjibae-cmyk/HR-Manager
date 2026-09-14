@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { postMessage, slackConfigured } from "@/lib/slack";
+import { directoryApiKey, directoryRequestAuthorized } from "@/lib/directory-api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -26,10 +27,12 @@ export const dynamic = "force-dynamic";
  *
  * 요청:
  *   POST { empNo?: string, email?: string, text: string }
- *   x-api-key: <DIRECTORY_API_KEY>
+ *   x-app: yussam-voca 등 호출 프로그램 키
+ *   x-api-key: <앱 전용 키 또는 DIRECTORY_API_KEY>
  */
 export async function POST(req: Request) {
-  const key = process.env.DIRECTORY_API_KEY || "";
+  const app = (req.headers.get("x-app") || "").trim();
+  const key = directoryApiKey(app);
   if (!key) {
     return NextResponse.json(
       { error: "명부 API가 켜져 있지 않습니다. DIRECTORY_API_KEY를 설정하세요." },
@@ -38,7 +41,7 @@ export async function POST(req: Request) {
   }
   const auth = req.headers.get("authorization") || "";
   const provided = req.headers.get("x-api-key") || auth.replace(/^Bearer\s+/i, "");
-  if (provided !== key) {
+  if (!directoryRequestAuthorized(app, provided)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
