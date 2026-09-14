@@ -56,6 +56,7 @@ export async function POST(req: Request) {
   const employee = await prisma.employee.findUnique({
     where: { empNo: claims.empNo },
     select: {
+      id: true,
       empNo: true,
       name: true,
       email: true,
@@ -93,6 +94,8 @@ export async function POST(req: Request) {
     summary: "포털을 통한 경영지원 로그인",
     actor: "PORTAL",
     actorName: identity.name,
+    employeeId: employee.id,
+    meta: { slackUserId: identity.slackUserId },
   });
   const response = NextResponse.redirect(new URL("/dashboard", req.url), 303);
   response.cookies.set(SESSION_COOKIE, makeSessionCookie(identity), {

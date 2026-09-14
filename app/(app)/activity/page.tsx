@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 const ACTOR_LABEL: Record<string, string> = {
   ADMIN: "관리자",
   SLACK: "슬랙",
+  PORTAL: "포털",
   CRON: "자동(예약)",
   system: "시스템",
   admin: "관리자",
@@ -19,6 +20,16 @@ function kst(d: Date): string {
   return `${t.getUTCFullYear()}.${p(t.getUTCMonth() + 1)}.${p(t.getUTCDate())} ${p(
     t.getUTCHours()
   )}:${p(t.getUTCMinutes())}`;
+}
+
+function portalSlackUserId(actor: string, detail: string): string | null {
+  if (actor !== "PORTAL") return null;
+  try {
+    const value = JSON.parse(detail)?.slackUserId;
+    return typeof value === "string" && value.trim() ? value.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 export default async function ActivityPage({
@@ -34,6 +45,8 @@ export default async function ActivityPage({
     where.OR = [
       { summary: { contains: searchParams.q } },
       { target: { contains: searchParams.q } },
+      { actorName: { contains: searchParams.q } },
+      { detail: { contains: searchParams.q } },
     ];
 
   const rows = await prisma.auditLog.findMany({
@@ -93,47 +106,51 @@ export default async function ActivityPage({
                 <th className="th w-36">일시 (KST)</th>
                 <th className="th w-32">작업</th>
                 <th className="th">내용</th>
-                <th className="th w-28">실행</th>
+                <th className="th w-40">실행</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.id} className="hover:bg-slate-50 align-top">
-                  <td className="td tnum text-slate-500 whitespace-nowrap">{kst(r.createdAt)}</td>
-                  <td className="td">
-                    <Pill kind={r.action.startsWith("PAYROLL") || r.action.startsWith("PAYSLIP") ? "INCENTIVE" : "DRAFT"}>
-                      {ACTION_LABEL[r.action] ?? r.action}
-                    </Pill>
-                  </td>
-                  <td className="td">
-                    <div className="text-slate-700">
-                      {r.summary ?? `${ACTION_LABEL[r.action] ?? r.action}${r.target ? ` — ${r.target}` : ""}`}
-                    </div>
-                    {r.employeeId && (
-                      <Link
-                        href={`/employees/${r.employeeId}`}
-                        className="text-xs text-brand-600 hover:underline"
-                      >
-                        직원 카드 보기 →
-                      </Link>
-                    )}
-                  </td>
-                  <td className="td text-xs text-slate-500">
-                    {ACTOR_LABEL[r.actor] ?? r.actor}
-                    {r.actorName && r.actor === "SLACK" && (
-                      <div className="text-slate-400">{r.actorName}</div>
-                    )}
-                    {r.ip && <div className="text-slate-300 tnum">{r.ip}</div>}
-                  </td>
-                </tr>
-              ))}
+              {rows.map((r) => {
+                const slackUserId = portalSlackUserId(r.actor, r.detail);
+                return (
+                  <tr key={r.id} className="hover:bg-slate-50 align-top">
+                    <td className="td tnum text-slate-500 whitespace-nowrap">{kst(r.createdAt)}</td>
+                    <td className="td">
+                      <Pill kind={r.action.startsWith("PAYROLL") || r.action.startsWith("PAYSLIP") ? "INCENTIVE" : "DRAFT"}>
+                        {ACTION_LABEL[r.action] ?? r.action}
+                      </Pill>
+                    </td>
+                    <td className="td">
+                      <div className="text-slate-700">
+                        {r.summary ?? `${ACTION_LABEL[r.action] ?? r.action}${r.target ? ` — ${r.target}` : ""}`}
+                      </div>
+                      {r.employeeId && (
+                        <Link
+                          href={`/employees/${r.employeeId}`}
+                          className="text-xs text-brand-600 hover:underline"
+                        >
+                          직원 카드 보기 →
+                        </Link>
+                      )}
+                    </td>
+                    <td className="td text-xs text-slate-500">
+                      {ACTOR_LABEL[r.actor] ?? r.actor}
+                      {r.actorName && (r.actor === "SLACK" || r.actor === "PORTAL") && (
+                        <div className="text-slate-400">{r.actorName}</div>
+                      )}
+                      {slackUserId && (
+                        <div className="text-slate-400 tnum">Slack {slackUserId}</div>
+                      )}
+                      {r.ip && <div className="text-slate-300 tnum">{r.ip}</div>}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
         <p className="text-xs text-slate-400 px-5 py-3 border-t border-slate-100">
-          · 최근 300건까지 표시합니다. &nbsp; · 관리자 로그인은 <b>비밀번호 공유</b> 방식이라
-          화면에서 한 작업은 <b>'관리자'</b> 로만 남고 개인은 구분되지 않습니다
-          (구분이 필요하면 계정별 로그인으로 전환해야 합니다). &nbsp;
+          · 최근 300건까지 표시합니다. &nbsp; · 포털 로그인은 직원명과 Slack 사용자 ID가 남습니다. &nbsp;
           · 슬랙에서 승인·반려한 작업은 슬랙 사용자까지 남습니다.
         </p>
       </div>
