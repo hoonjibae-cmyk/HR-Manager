@@ -8,7 +8,7 @@
 // 움직인다.
 
 /** 프로그램 안에서의 자리. 받는 쪽이 자기 권한 체계로 옮겨 쓴다. */
-export type AppRole = "admin" | "user";
+export type AppRole = "admin" | "operations" | "teacher" | "user";
 
 /**
  * 프로그램별 부서 → 자리.
@@ -18,6 +18,13 @@ export type AppRole = "admin" | "user";
  * 알아챌 수 있게 응답에 기준 부서를 함께 실어 보낸다.
  */
 export const APP_ACCESS: Record<string, Record<string, AppRole>> = {
+  // 학생 카드 — Slack 은 신원만 확인하고, 실제 권한은 이 소속값을 Student Card가
+  // admin / operations / teacher 로 옮겨 적용한다.
+  "student-card": {
+    경영지원: "admin",
+    교육운영팀: "operations",
+    교수부: "teacher",
+  },
   // 시험지 생성 시스템 — HR 명부를 공유하고 앱별 권한은 별도로 관리한다.
   "exam-generator": {
     교수부: "user",

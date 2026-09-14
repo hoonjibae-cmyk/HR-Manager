@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 
 const APP_KEY_ENV: Record<string, string> = {
+  "student-card": "STUDENT_CARD_DIRECTORY_API_KEY",
   "yussam-voca": "VOCA_DIRECTORY_API_KEY",
 };
 

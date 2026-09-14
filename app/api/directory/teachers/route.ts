@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { appAccessMap } from "@/lib/app-access";
+import { directoryApiKey, directoryRequestAuthorized } from "@/lib/directory-api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +14,8 @@ export const dynamic = "force-dynamic";
  * 보내려면 그 선생님의 슬랙 아이디를 알아야 한다. 사람이 두 프로그램에 각각 적어 두면
  * 반드시 한쪽이 낡는다. 직원 정보는 여기가 원본이므로 여기서 읽어 가게 한다.
  *
- * 누구를 주나 — **교수부** 재직자 중 슬랙 아이디가 있는 사람
- * ---------------------------------------------------------
+ * 누구를 주나 — 요청한 허용 부서의 재직자 중 슬랙 아이디가 있는 사람
+ * ----------------------------------------------------------------
  * 직책(`position`)은 자유 입력이라("선임강사", "조교", "팀장" …) 그걸로 "선생님"을
  * 판정하면 글자 하나 다를 때마다 조용히 빠진다. 부서가 훨씬 안정적이다.
  * 누가 어느 반 담임인지는 받는 쪽이 자기 담임 명단과 **이름으로** 맞춘다.
@@ -26,15 +28,17 @@ export const dynamic = "force-dynamic";
  *
  * 인증
  * ----
- *   x-api-key: <DIRECTORY_API_KEY>   (또는 Authorization: Bearer <키>)
+ *   x-api-key: <STUDENT_CARD_DIRECTORY_API_KEY 또는 DIRECTORY_API_KEY>
+ *   (또는 Authorization: Bearer <키>)
  * 로그인 세션이 아니라 **서버끼리** 부르는 창구다. 키가 설정되지 않았으면 창구를 닫는다
  * (열어 두면 아무나 직원 명부를 가져갈 수 있으므로).
  */
-/** 선생님이 속한 부서. 부서명이 바뀌면 여기만 고치면 된다. */
+/** 기존 호출자가 부서를 생략하면 예전대로 교수부 명부를 돌려준다. */
 const TEACHER_DEPT = "교수부";
+const STUDENT_CARD_APP = "student-card";
 
 export async function GET(req: Request) {
-  const key = process.env.DIRECTORY_API_KEY || "";
+  const key = directoryApiKey(STUDENT_CARD_APP);
   if (!key) {
     return NextResponse.json(
       { error: "명부 API가 켜져 있지 않습니다. DIRECTORY_API_KEY를 설정하세요." },
@@ -44,15 +48,25 @@ export async function GET(req: Request) {
 
   const auth = req.headers.get("authorization") || "";
   const provided = req.headers.get("x-api-key") || auth.replace(/^Bearer\s+/i, "");
-  if (provided !== key) {
+  if (!directoryRequestAuthorized(STUDENT_CARD_APP, provided)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const requestUrl = new URL(req.url);
+  const department = (requestUrl.searchParams.get("department") || TEACHER_DEPT).trim();
+  const allowed = appAccessMap(STUDENT_CARD_APP) || {};
+  if (!Object.hasOwn(allowed, department)) {
+    return NextResponse.json(
+      { error: `'${department || "소속 없음"}' 은 학생 카드 접근 대상 소속이 아닙니다.` },
+      { status: 400 },
+    );
   }
 
   const rows = await prisma.employee.findMany({
     where: {
       active: true,
       resignDate: null,
-      department: TEACHER_DEPT,
+      department,
       NOT: { slackUserId: null },
     },
     select: {
@@ -80,7 +94,8 @@ export async function GET(req: Request) {
   // 받는 쪽이 "왜 비었지?"를 알 수 있도록 조건을 함께 돌려준다.
   return NextResponse.json({
     updatedAt: new Date().toISOString(),
-    department: TEACHER_DEPT,
+    department,
+    role: allowed[department],
     count: items.length,
     items,
   });
