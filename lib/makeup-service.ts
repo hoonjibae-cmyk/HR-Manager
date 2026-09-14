@@ -372,8 +372,25 @@ export interface MakeupCreateInput {
   slackUserId?: string | null;
 }
 
-/** 보강계획 사전신청 (슬랙·화면 공통) — 승인 절차 없이 바로 등록된다 */
-export async function createMakeupSession(input: MakeupCreateInput) {
+/**
+ * 보강계획 사전신청 (슬랙·화면 공통) — 승인 절차 없이 바로 등록된다.
+ *
+ * **같은 직원·같은 시간대의 살아 있는 신청이 이미 있으면 새로 만들지 않고 그 행을 돌려준다**
+ * (`duplicate: true`). 슬랙 모달은 서버가 3초 안에 응답하지 못하면 오류를 띄우고 제출 버튼을
+ * 다시 열어 주는데, 첫 요청은 이미 저장을 끝낸 뒤라 사용자가 안내대로 다시 누르면 그대로
+ * 두 건이 됐다(실제로 겪었다 — 산발적이지만 꾸준했다). 같은 사람이 같은 시각에 두 근무를
+ * 할 수는 없으므로 시간대가 겹치는 게 아니라 **시작·종료가 똑같은** 것만 중복으로 본다.
+ * 취소·미실시(`CANCELED`/`NOSHOW`)는 빼고 본다 — 미실시 처리 후 같은 시간으로 다시
+ * 신청하는 것은 정상 경로다. DB 유니크 제약을 걸지 않는 이유: 이미 들어간 중복 데이터가
+ * 있으면 `prisma db push` 가 멈추고, 유니크 **추가**는 배포 안전장치에 걸린다(uploadId 전례).
+ *
+ * `opts.sync=false` 면 캘린더 동기화를 건너뛴다 — 슬랙 제출처럼 3초 안에 응답해야 하는
+ * 자리가 저장만 먼저 하고 동기화는 응답 뒤로 미룰 때 쓴다(빠뜨리지 말 것).
+ */
+export async function createMakeupSession(input: MakeupCreateInput, opts: { sync?: boolean } = {}) {
+  const existing = await findAlive(input);
+  if (existing) return { row: existing, duplicate: true };
+
   const row = await prisma.makeupSession.create({
     data: {
       employeeId: input.employeeId,
@@ -389,8 +406,21 @@ export async function createMakeupSession(input: MakeupCreateInput) {
     },
     include: { employee: true },
   });
-  await syncMakeupCalendar(row.id).catch(() => null);
-  return row;
+  if (opts.sync !== false) await syncMakeupCalendar(row.id).catch(() => null);
+  return { row, duplicate: false };
+}
+
+/** 같은 직원·같은 시작·종료의 살아 있는(취소·미실시 아님) 신청 */
+function findAlive(input: Pick<MakeupCreateInput, "employeeId" | "planStart" | "planEnd">) {
+  return prisma.makeupSession.findFirst({
+    where: {
+      employeeId: input.employeeId,
+      planStart: input.planStart,
+      planEnd: input.planEnd,
+      status: { notIn: ["CANCELED", "NOSHOW"] },
+    },
+    include: { employee: true },
+  });
 }
 
 export interface MakeupPatch {

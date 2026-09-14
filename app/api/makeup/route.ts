@@ -36,7 +36,7 @@ export async function POST(req: Request) {
   const emp = await prisma.employee.findUnique({ where: { id: employeeId } });
   if (!emp) return NextResponse.json({ error: "직원을 찾을 수 없습니다." }, { status: 404 });
 
-  const row = await createMakeupSession({
+  const { row, duplicate } = await createMakeupSession({
     employeeId,
     planStart: start,
     planEnd: end,
@@ -47,6 +47,12 @@ export async function POST(req: Request) {
     note: b.note ?? null,
     source: "WEB",
   });
+  // 같은 직원·같은 시간대 신청이 이미 있다 — 조용히 그 행을 쓰면 관리자는 새로 등록된 줄 안다
+  if (duplicate)
+    return NextResponse.json(
+      { error: `같은 시간대의 신청이 이미 있습니다 (${makeupDateLabel(row.planStart, row.planEnd)} · ${row.targetClass}).` },
+      { status: 409 }
+    );
 
   await logActivity({
     action: "MAKEUP_CREATE",

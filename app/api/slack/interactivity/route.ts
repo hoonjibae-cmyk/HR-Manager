@@ -30,10 +30,12 @@ import {
   makeupDateLabel,
   makeupListBlocks,
 } from "@/lib/makeup-slack";
+import { waitUntil } from "@vercel/functions";
 import {
   createMakeupSession,
   confirmMakeupActuals,
   cancelMakeupSession,
+  syncMakeupCalendar,
   mandatoryCapContext,
   getOvertimePolicy,
   holidayYmds,
@@ -341,128 +343,149 @@ export async function POST(req: Request) {
         : "OVERTIME";
     }
 
-    const row = await createMakeupSession({
-      employeeId: emp.id,
-      planStart: parsed.start!,
-      planEnd: parsed.end!,
-      category,
-      targetClass: f.targetClass,
-      headcount: f.headcount,
-      detail: f.detail,
-      note: f.note,
-      source: "SLACK",
-      slackUserId: userId,
-    });
+    // **3초 안에 응답해야 한다** — 슬랙은 view_submission 응답이 3초를 넘으면 모달에
+    // 오류를 띄우고 제출 버튼을 다시 열어 준다. 첫 요청은 이미 저장을 끝낸 뒤라 사용자가
+    // 안내대로 다시 누르면 그대로 두 건이 됐다(실제로 겪었다 — 콜드스타트·느린 캘린더 API 가
+    // 겹치면 산발적으로 재현된다). 그래서 **저장까지만 하고 바로 응답**하고, 캘린더 동기화·
+    // DM·채널 게시·홈탭 갱신은 응답 뒤(waitUntil)로 미룬다. 입력 오류 응답(errors)만은
+    // 모달에 실려야 하므로 위의 검증이 전부 응답 앞에 남아 있다.
+    const { row, duplicate } = await createMakeupSession(
+      {
+        employeeId: emp.id,
+        planStart: parsed.start!,
+        planEnd: parsed.end!,
+        category,
+        targetClass: f.targetClass,
+        headcount: f.headcount,
+        detail: f.detail,
+        note: f.note,
+        source: "SLACK",
+        slackUserId: userId,
+      },
+      { sync: false } // 캘린더는 응답 뒤에 — 여기서 기다리면 그 시간만큼 3초를 갉아먹는다
+    );
+
+    // 재제출(타임아웃 뒤 다시 누름)이면 첫 제출이 이미 알림·기록까지 처리했거나 처리 중이다 —
+    // 모달만 닫고 아무것도 반복하지 않는다(DM 이 두 번 가면 두 건 등록된 줄 안다).
+    if (duplicate) return Response.json({ response_action: "clear" });
 
     const staff = isStaffWork(category);
     const what = makeupKindLabel(category);
     const icon = staff ? "🗓" : "📚";
     const dateLabel = makeupDateLabel(parsed.start!, parsed.end!);
+    let meta: any = {};
+    try {
+      meta = JSON.parse(payload.view.private_metadata || "{}");
+    } catch {}
 
-    // **직원 근무의 사후 등록은 등록 즉시 확정한다** — 이미 끝난 근무를 적는 것이라 그 시간이
-    // 곧 실근무 시간이고, 다음날 확정 모달에 같은 숫자를 또 적게 할 이유가 없다.
-    // 저장 시각은 KST 벽시계라 비교용 now 도 KST 벽시계로 만든다.
-    // 마감(다음 달 1일)이 지났거나 수당 대상이 아니면 확정하지 않고 신청으로만 남긴다 —
-    // 그쪽은 관리자 판단 흐름 그대로다(canPostHocConfirm / isPayEligible 이 가른다).
-    let confirmedNow = false;
-    let postHocFailNote: string | null = null;
-    if (staff) {
-      const kstNow = new Date(Date.now() + 9 * 3600_000);
-      if (parsed.end! <= kstNow) {
-        try {
-          await confirmMakeupActuals(row.id, {
-            actualStart: parsed.start!,
-            actualEnd: parsed.end!,
-            by: "EMPLOYEE",
-            postHoc: true,
-            now: kstNow,
-          });
-          confirmedNow = true;
-        } catch (e: any) {
-          // 마감 지남 등 — 등록은 그대로 두고 왜 확정이 안 됐는지 알린다.
-          // 조용히 넘어가면 '등록했는데 왜 수당이 없냐' 가 된다.
-          postHocFailNote = String(e?.message ?? e);
+    waitUntil(
+      (async () => {
+        await syncMakeupCalendar(row.id).catch(() => null);
+
+        // **직원 근무의 사후 등록은 등록 즉시 확정한다** — 이미 끝난 근무를 적는 것이라 그 시간이
+        // 곧 실근무 시간이고, 다음날 확정 모달에 같은 숫자를 또 적게 할 이유가 없다.
+        // 저장 시각은 KST 벽시계라 비교용 now 도 KST 벽시계로 만든다.
+        // 마감(다음 달 1일)이 지났거나 수당 대상이 아니면 확정하지 않고 신청으로만 남긴다 —
+        // 그쪽은 관리자 판단 흐름 그대로다(canPostHocConfirm / isPayEligible 이 가른다).
+        let confirmedNow = false;
+        let postHocFailNote: string | null = null;
+        if (staff) {
+          const kstNow = new Date(Date.now() + 9 * 3600_000);
+          if (parsed.end! <= kstNow) {
+            try {
+              await confirmMakeupActuals(row.id, {
+                actualStart: parsed.start!,
+                actualEnd: parsed.end!,
+                by: "EMPLOYEE",
+                postHoc: true,
+                now: kstNow,
+              });
+              confirmedNow = true;
+            } catch (e: any) {
+              // 마감 지남 등 — 등록은 그대로 두고 왜 확정이 안 됐는지 알린다.
+              // 조용히 넘어가면 '등록했는데 왜 수당이 없냐' 가 된다.
+              postHocFailNote = String(e?.message ?? e);
+            }
+          }
         }
-      }
-    }
 
-    const opensAt = confirmOpensAt(row as any);
-    const blocks = makeupRecordBlocks({
-      name: emp.name,
-      dept: emp.department,
-      categoryLabel: MAKEUP_CATEGORY_LABEL[category] ?? category,
-      dateLabel,
-      targetClass: f.targetClass,
-      headcount: f.headcount,
-      detail: f.detail,
-      note: f.note,
-      calendarSynced: makeupCalendarConfigured(),
-      weekend: staff,
-      kindLabel: what,
-      confirmedNow,
-      confirmOpensLabel: `${opensAt.getUTCFullYear()}.${String(opensAt.getUTCMonth() + 1).padStart(
-        2,
-        "0"
-      )}.${String(opensAt.getUTCDate()).padStart(2, "0")}`,
-    });
-    if (postHocFailNote)
-      blocks.push({
-        type: "context",
-        elements: [{ type: "mrkdwn", text: `⚠️ ${postHocFailNote}` }],
-      });
+        const opensAt = confirmOpensAt(row as any);
+        const blocks = makeupRecordBlocks({
+          name: emp.name,
+          dept: emp.department,
+          categoryLabel: MAKEUP_CATEGORY_LABEL[category] ?? category,
+          dateLabel,
+          targetClass: f.targetClass,
+          headcount: f.headcount,
+          detail: f.detail,
+          note: f.note,
+          calendarSynced: makeupCalendarConfigured(),
+          weekend: staff,
+          kindLabel: what,
+          confirmedNow,
+          confirmOpensLabel: `${opensAt.getUTCFullYear()}.${String(
+            opensAt.getUTCMonth() + 1
+          ).padStart(2, "0")}.${String(opensAt.getUTCDate()).padStart(2, "0")}`,
+        });
+        if (postHocFailNote)
+          blocks.push({
+            type: "context",
+            elements: [{ type: "mrkdwn", text: `⚠️ ${postHocFailNote}` }],
+          });
 
-    // 신청자 확인 DM
-    await postMessage(
-      userId,
-      confirmedNow
-        ? `${icon} ${what}가(이) 등록·확정되었습니다 — ${dateLabel}`
-        : `${icon} ${what} 신청이 등록되었습니다 — ${dateLabel}`,
-      blocks
-    ).catch(() => {});
-    // 공유 채널 게시 (승인 버튼 없음 — 기록용). **어느 채널이냐가 갈래로 갈린다**:
-    //  - 보강(교수부) → 보강계획 채널(SLACK_MAKEUP_CHANNEL). 수업 이야기라 그 채널이 맞다.
-    //  - 직원 근무(주말·평일 초과) → **운영진 채널**. 보강계획 채널은 교수부가 보는 곳이라
-    //    직원 근무가 섞이면 보강이 안 읽히고, 정작 챙겨야 할 운영진은 못 본다.
-    //    채널은 '운영진 일일 안내' 와 같은 설정(HrNotifySetting.dailyChannel)을 쓴다 —
-    //    받는 사람이 같은데 채널 설정을 둘로 두면 언젠가 한쪽만 옮기고 갈라진다.
-    if (staff) {
-      const setting = await prisma.hrNotifySetting
-        .findUnique({ where: { id: 1 }, select: { dailyChannel: true } })
-        .catch(() => null);
-      const ops = (setting ? setting.dailyChannel : DEFAULT_DAILY_CHANNEL)?.trim();
-      if (ops)
-        await postMessage(ops, `${icon} ${what} 등록: ${emp.name} · ${dateLabel}`, blocks).catch(
-          () => {}
-        );
-    } else {
-      let meta: any = {};
-      try {
-        meta = JSON.parse(payload.view.private_metadata || "{}");
-      } catch {}
-      const channel = process.env.SLACK_MAKEUP_CHANNEL || meta.channel;
-      if (channel)
-        await postMessage(channel, `${icon} ${what} 신청: ${emp.name} · ${dateLabel}`, blocks).catch(
-          () => {}
-        );
-    }
+        // 신청자 확인 DM
+        await postMessage(
+          userId,
+          confirmedNow
+            ? `${icon} ${what}가(이) 등록·확정되었습니다 — ${dateLabel}`
+            : `${icon} ${what} 신청이 등록되었습니다 — ${dateLabel}`,
+          blocks
+        ).catch(() => {});
+        // 공유 채널 게시 (승인 버튼 없음 — 기록용). **어느 채널이냐가 갈래로 갈린다**:
+        //  - 보강(교수부) → 보강계획 채널(SLACK_MAKEUP_CHANNEL). 수업 이야기라 그 채널이 맞다.
+        //  - 직원 근무(주말·평일 초과) → **운영진 채널**. 보강계획 채널은 교수부가 보는 곳이라
+        //    직원 근무가 섞이면 보강이 안 읽히고, 정작 챙겨야 할 운영진은 못 본다.
+        //    채널은 '운영진 일일 안내' 와 같은 설정(HrNotifySetting.dailyChannel)을 쓴다 —
+        //    받는 사람이 같은데 채널 설정을 둘로 두면 언젠가 한쪽만 옮기고 갈라진다.
+        if (staff) {
+          const setting = await prisma.hrNotifySetting
+            .findUnique({ where: { id: 1 }, select: { dailyChannel: true } })
+            .catch(() => null);
+          const ops = (setting ? setting.dailyChannel : DEFAULT_DAILY_CHANNEL)?.trim();
+          if (ops)
+            await postMessage(ops, `${icon} ${what} 등록: ${emp.name} · ${dateLabel}`, blocks).catch(
+              () => {}
+            );
+        } else {
+          const channel = process.env.SLACK_MAKEUP_CHANNEL || meta.channel;
+          if (channel)
+            await postMessage(
+              channel,
+              `${icon} ${what} 신청: ${emp.name} · ${dateLabel}`,
+              blocks
+            ).catch(() => {});
+        }
 
-    await logActivity({
-      action: "MAKEUP_CREATE",
-      actor: "SLACK",
-      actorName: userId,
-      employeeId: emp.id,
-      target: emp.name,
-      summary: confirmedNow
-        ? `${emp.name}님이 ${what}를 사후 등록했습니다(즉시 확정) — ${dateLabel} · ${
-            MAKEUP_CATEGORY_LABEL[category] ?? category
-          } (${f.targetClass}).`
-        : `${emp.name}님이 ${what}을 사전신청했습니다 — ${dateLabel} · ${
-            MAKEUP_CATEGORY_LABEL[category] ?? category
-          } (${f.targetClass}).`,
-      meta: { makeupId: row.id, category, confirmedNow, targetClass: f.targetClass },
-    }).catch(() => {});
+        await logActivity({
+          action: "MAKEUP_CREATE",
+          actor: "SLACK",
+          actorName: userId,
+          employeeId: emp.id,
+          target: emp.name,
+          summary: confirmedNow
+            ? `${emp.name}님이 ${what}를 사후 등록했습니다(즉시 확정) — ${dateLabel} · ${
+                MAKEUP_CATEGORY_LABEL[category] ?? category
+              } (${f.targetClass}).`
+            : `${emp.name}님이 ${what}을 사전신청했습니다 — ${dateLabel} · ${
+                MAKEUP_CATEGORY_LABEL[category] ?? category
+              } (${f.targetClass}).`,
+          meta: { makeupId: row.id, category, confirmedNow, targetClass: f.targetClass },
+        }).catch(() => {});
 
-    await refreshHomeTab(userId).catch(() => {});
+        await refreshHomeTab(userId).catch(() => {});
+      })().catch((e) => console.error("보강 신청 후처리 실패:", e))
+    );
+
     return Response.json({ response_action: "clear" });
   }
 
