@@ -10,7 +10,16 @@ function portalOrigin() {
   return new URL(process.env.PORTAL_ORIGIN || "https://portal.yussam.com").origin;
 }
 
-function denied(req: Request) {
+type DenialReason =
+  | "missing_secret"
+  | "origin_mismatch"
+  | "missing_token"
+  | "invalid_token"
+  | "employee_not_found"
+  | "employee_mismatch";
+
+function denied(req: Request, reason: DenialReason, failedChecks: string[] = []) {
+  console.warn("[HR_PORTAL_SSO_DENIED]", { reason, failedChecks });
   const response = NextResponse.redirect(new URL("/login?error=access_denied", req.url), 303);
   response.headers.set("Cache-Control", "no-store");
   return response;
@@ -18,18 +27,18 @@ function denied(req: Request) {
 
 export async function POST(req: Request) {
   const secret = process.env.HR_SSO_SECRET?.trim();
-  if (!secret || secret.length < 32) return denied(req);
+  if (!secret || secret.length < 32) return denied(req, "missing_secret");
   const origin = req.headers.get("origin");
-  if (origin && origin !== portalOrigin()) return denied(req);
+  if (origin && origin !== portalOrigin()) return denied(req, "origin_mismatch");
 
   const form = await req.formData().catch(() => null);
   const token = form?.get("token");
-  if (typeof token !== "string") return denied(req);
+  if (typeof token !== "string") return denied(req, "missing_token");
   const claims = verifyPortalSsoToken(token, secret, {
     portalOrigin: portalOrigin(),
     hrOrigin: new URL(req.url).origin,
   });
-  if (!claims) return denied(req);
+  if (!claims) return denied(req, "invalid_token");
 
   const employee = await prisma.employee.findUnique({
     where: { empNo: claims.empNo },
@@ -44,7 +53,20 @@ export async function POST(req: Request) {
       resignDate: true,
     },
   });
-  if (!employee || !matchesHrManagementEmployee(claims, employee)) return denied(req);
+  if (!employee) return denied(req, "employee_not_found");
+  if (!matchesHrManagementEmployee(claims, employee)) {
+    const employeeEmail = (employee.workEmail || employee.email || "").trim().toLowerCase();
+    const failedChecks = [
+      claims.department === "경영지원" ? null : "claim_department",
+      employee.department === "경영지원" ? null : "employee_department",
+      employee.active === true ? null : "active",
+      employee.resignDate === null ? null : "resign_date",
+      employee.empNo === claims.empNo ? null : "employee_number",
+      employee.slackUserId?.trim() === claims.slackUserId.trim() ? null : "slack_user",
+      employeeEmail && employeeEmail === claims.email.trim().toLowerCase() ? null : "email",
+    ].filter((check): check is string => Boolean(check));
+    return denied(req, "employee_mismatch", failedChecks);
+  }
 
   const identity = {
     empNo: employee.empNo,

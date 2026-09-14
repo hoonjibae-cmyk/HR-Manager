@@ -23,6 +23,10 @@ function normalizedEmail(value: string | null | undefined) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizedSlackUserId(value: string | null | undefined) {
+  return String(value || "").trim();
+}
+
 /**
  * 포털의 서명만 믿지 않고 HR 원장과 한 번 더 대조한다.
  * 퇴사·부서 변경·Slack 연결 해제는 다음 요청부터 곧바로 접근을 끊는다.
@@ -39,7 +43,8 @@ export function matchesHrManagementEmployee(
     employee.active === true &&
     employee.resignDate === null &&
     employee.empNo === identity.empNo &&
-    employee.slackUserId === identity.slackUserId &&
+    Boolean(normalizedSlackUserId(employee.slackUserId)) &&
+    normalizedSlackUserId(employee.slackUserId) === normalizedSlackUserId(identity.slackUserId) &&
     Boolean(employeeEmail) &&
     employeeEmail === normalizedEmail(identity.email)
   );
