@@ -351,6 +351,15 @@ export default function MakeupCalendar({
 /** ISO(UTC 필드에 담긴 KST 벽시계) → <input type="datetime-local"> 값 */
 const toLocalInput = (iso: string | null) => (iso ? iso.slice(0, 16) : "");
 
+/** "2026-09-20 09:00 ~ 14:00" — 자정을 넘겨 날짜가 갈리면 끝쪽에도 날짜를 적는다 */
+const planRangeLabel = (startIso: string, endIso: string) => {
+  const d = (iso: string) => iso.slice(0, 10);
+  const t = (iso: string) => iso.slice(11, 16);
+  return `${d(startIso)} ${t(startIso)} ~ ${
+    d(endIso) === d(startIso) ? "" : `${d(endIso)} `
+  }${t(endIso)}`;
+};
+
 function DetailModal({
   row,
   onClose,
@@ -533,6 +542,24 @@ function DetailModal({
         </div>
 
         <div className="space-y-3">
+          {/* 신청(예정) 시간 — 실근무를 확정해도 이 값은 바뀌지 않는다(planStart/planEnd 별도 컬럼).
+              예전엔 아래 실근무 칸이 '실제 ?? 예정' 으로만 채워져, 확정 뒤에는 신청 시각이
+              화면 어디에도 안 보였다 — 관리자는 '몇 시에 하겠다고 했고 실제로는 몇 시에 했나' 를
+              나란히 봐야 한다. */}
+          <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="text-slate-400 shrink-0">신청(예정) 시간</span>
+            <span className="tnum text-slate-700">{planRangeLabel(row.planStart, row.planEnd)}</span>
+            {row.actualStart &&
+              (row.actualStart !== row.planStart || row.actualEnd !== row.planEnd) && (
+                <span
+                  className="pill bg-amber-50 text-amber-700 ml-auto"
+                  title="확정된 실근무 시각이 신청 시각과 다릅니다 — 아래 칸이 실제 근무 시각입니다"
+                >
+                  실근무와 다름
+                </span>
+              )}
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">실근무 시작</label>
@@ -553,6 +580,14 @@ function DetailModal({
               />
             </div>
           </div>
+          {/* 아직 확정 전이면 이 칸의 값은 실측이 아니라 신청 시각을 미리 채운 것 —
+              구분 없이 두면 확정된 실근무로 읽힌다 */}
+          {!row.confirmedBy && (
+            <p className="text-[11px] text-slate-400 -mt-1">
+              아직 확정 전이라 신청 시각이 그대로 채워져 있습니다 — 실제 근무 시각이 다르면 고친 뒤
+              확정하세요.
+            </p>
+          )}
 
           <div>
             <label className="label">
