@@ -5,8 +5,7 @@ import { won } from "@/lib/format";
 import {
   buildPayrollTrend,
   chartPoints,
-  chartTicks,
-  niceMax,
+  niceRange,
   shortWon,
   TREND_MODE_LABEL,
   type TrendMode,
@@ -53,12 +52,19 @@ export default function PayrollTrendChart({ records }: { records: TrendRecord[] 
   const { months, series } = trend;
   const inner = { w: W - PAD.left - PAD.right, h: H - PAD.top - PAD.bottom };
 
-  // 세로 눈금은 **보이는 계열의 최댓값**에 맞춘다 — 총계에 맞추면 작은 계열이 바닥에 깔린다.
-  // 거기서 조금 위의 깔끔한 수로 올려 선이 천장에 붙지 않고 눈금도 읽을 수 있게 한다.
-  const max = useMemo(() => {
-    let m = 0;
-    for (const mo of months) for (const s of series) m = Math.max(m, mo.values[s.key] ?? 0);
-    return niceMax(m);
+  // **변동축** — 보이는 계열의 최솟값~최댓값을 축의 아래끝~위끝으로 잡는다(niceRange).
+  // 바닥을 0 에 고정하면 큰 값 위에서 조금씩 움직이는 총액이 직선으로 보여 변동이 안 읽힌다.
+  // 대신 축이 0 부터가 아니라는 사실을 머리글에 함께 적는다(잘린 축을 숨기면 오독이 된다).
+  const { lo, hi, ticks } = useMemo(() => {
+    let mn = Infinity;
+    let mx = 0;
+    for (const mo of months)
+      for (const s of series) {
+        const v = mo.values[s.key] ?? 0;
+        mn = Math.min(mn, v);
+        mx = Math.max(mx, v);
+      }
+    return niceRange(mn === Infinity ? 0 : mn, mx);
   }, [months, series]);
 
   const xs = useMemo(
@@ -73,7 +79,6 @@ export default function PayrollTrendChart({ records }: { records: TrendRecord[] 
       </div>
     );
 
-  const ticks = chartTicks(max);
   const at = hover != null ? months[hover] : null;
 
   return (
@@ -82,6 +87,15 @@ export default function PayrollTrendChart({ records }: { records: TrendRecord[] 
         <span className="font-bold text-slate-800">월별 급여 추이</span>
         <span className="text-xs text-slate-400">
           급여가 산정된 {months.length}개월 · 합계 {won(trend.grandTotal)}
+          {lo > 0 && (
+            <span
+              className="text-amber-500"
+              title="변동이 잘 보이도록 세로축을 기간의 최소~최대 구간에 맞췄습니다. 0부터 그린 그래프보다 차이가 크게 보입니다."
+            >
+              {" "}
+              · 세로축 {shortWon(lo)}~{shortWon(hi)} (0부터 아님)
+            </span>
+          )}
         </span>
 
         <div className="flex items-center gap-1.5 text-xs ml-auto">
@@ -121,7 +135,7 @@ export default function PayrollTrendChart({ records }: { records: TrendRecord[] 
           <g transform={`translate(${PAD.left},${PAD.top})`}>
             {/* 가로 눈금선 + 금액 */}
             {ticks.map((t) => {
-              const y = inner.h - (max > 0 ? (t / max) * inner.h : 0);
+              const y = inner.h - (hi > lo ? ((t - lo) / (hi - lo)) * inner.h : 0);
               return (
                 <g key={t}>
                   <line x1={0} x2={inner.w} y1={y} y2={y} stroke="#e2e8f0" strokeWidth={1} />
@@ -150,9 +164,10 @@ export default function PayrollTrendChart({ records }: { records: TrendRecord[] 
               const color = COLORS[si % COLORS.length];
               const pts = chartPoints(
                 months.map((m) => m.values[s.key] ?? 0),
-                max,
+                hi,
                 inner.w,
-                inner.h
+                inner.h,
+                lo
               );
               const d = pts.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
               return (

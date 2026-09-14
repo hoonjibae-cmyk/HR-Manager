@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildPayrollTrend,
   contractBaseOf,
+  niceRange,
   overtimeOf,
   grossOf,
   chartPoints,
@@ -181,11 +182,23 @@ describe("trendChoices — 필터 상자를 채운다", () => {
 });
 
 describe("chartPoints — 좌표", () => {
-  it("0 을 바닥으로 잡는다 — 최솟값에 맞춰 자르면 추이를 잘못 읽는다", () => {
+  it("바닥 인자를 안 주면 예전처럼 0 이 바닥이다", () => {
     const p = chartPoints([0, 50, 100], 100, 200, 80);
     expect(p[0].y).toBe(80); // 0 → 바닥
     expect(p[2].y).toBe(0); // 최댓값 → 천장
     expect(p[1].y).toBe(40);
+  });
+
+  it("변동축 — 바닥(lo)을 넘기면 lo→바닥, max→천장으로 편다", () => {
+    const p = chartPoints([100, 150, 200], 200, 200, 80, 100);
+    expect(p[0].y).toBe(80); // 최솟값(=lo) → 바닥
+    expect(p[1].y).toBe(40); // 가운데
+    expect(p[2].y).toBe(0); // 최댓값 → 천장
+  });
+
+  it("바닥보다 작은 값이 섞여도(있을 수 없지만) 바닥 밑으로 뚫고 내려가지 않는다", () => {
+    const p = chartPoints([50, 200], 200, 200, 80, 100);
+    expect(p[0].y).toBe(80);
   });
 
   it("가로로 고르게 편다", () => {
@@ -226,6 +239,44 @@ describe("niceMax — 눈금 위끝", () => {
   it("0 이하는 1 로 (0으로 나누지 않기 위함)", () => {
     expect(niceMax(0)).toBe(1);
     expect(niceMax(-5)).toBe(1);
+  });
+});
+
+describe("niceRange — 변동축 (기간 최소~최대)", () => {
+  it("최솟값 바로 아래·최댓값 바로 위의 깔끔한 수로 감싼다", () => {
+    // 화면 사례: 두 달이 1.28억~1.29억 — 0 부터 그리면 직선으로 보였다
+    const r = niceRange(128_000_000, 129_500_000);
+    expect(r.lo).toBeLessThanOrEqual(128_000_000);
+    expect(r.hi).toBeGreaterThanOrEqual(129_500_000);
+    // 감싸되 헐렁하지 않아야 변동이 크게 보인다 — 한 눈금(step) 안쪽
+    const step = r.ticks[1] - r.ticks[0];
+    expect(128_000_000 - r.lo).toBeLessThan(step);
+    expect(r.hi - 129_500_000).toBeLessThan(step);
+    // 눈금은 lo 에서 시작해 hi 에서 끝난다
+    expect(r.ticks[0]).toBe(r.lo);
+    expect(r.ticks[r.ticks.length - 1]).toBe(r.hi);
+  });
+
+  it("눈금이 깔끔한 수다 (간격 1·2·2.5·5 × 10ⁿ 의 배수)", () => {
+    const r = niceRange(128_000_000, 129_500_000);
+    const step = r.ticks[1] - r.ticks[0];
+    for (const t of r.ticks) expect(t % step).toBe(0);
+  });
+
+  it("모든 달이 같은 값이면 10% 를 벌려 가운데에 눕힌다 (높이 0 방지)", () => {
+    const r = niceRange(100_000_000, 100_000_000);
+    expect(r.lo).toBeLessThan(100_000_000);
+    expect(r.hi).toBeGreaterThan(100_000_000);
+  });
+
+  it("바닥은 0 밑으로 내려가지 않는다 — 금액 축이다", () => {
+    const r = niceRange(0, 100);
+    expect(r.lo).toBe(0);
+    expect(niceRange(3, 100).lo).toBeGreaterThanOrEqual(0);
+  });
+
+  it("값이 전부 0 이거나 없으면 0~1 (0으로 나누지 않는다)", () => {
+    expect(niceRange(0, 0)).toEqual({ lo: 0, hi: 1, ticks: [0, 1] });
   });
 });
 

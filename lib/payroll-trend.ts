@@ -232,16 +232,18 @@ export function chartPoints(
   values: number[],
   max: number,
   w: number,
-  h: number
+  h: number,
+  /** 축의 바닥값 — 변동축(niceRange)일 때 lo 를 넘긴다. 기본 0 이면 예전과 같다 */
+  min = 0
 ): ChartPoint[] {
   const n = values.length;
   if (!n) return [];
-  const top = max > 0 ? max : 1;
+  const top = max > min ? max : min + 1;
   // 점이 하나면 가운데에 찍는다 (0으로 나누지 않기 위함이기도 하다)
   const step = n > 1 ? w / (n - 1) : 0;
   return values.map((v, i) => ({
     x: n > 1 ? i * step : w / 2,
-    y: h - (v / top) * h,
+    y: h - ((Math.max(v, min) - min) / (top - min)) * h,
   }));
 }
 
@@ -254,11 +256,55 @@ export function chartPoints(
  */
 export function niceMax(max: number, count = 4): number {
   if (max <= 0) return 1;
-  const rough = max / count;
+  return Math.ceil(max / niceStep(max / count)) * niceStep(max / count);
+}
+
+/** 눈금 간격 — 1·2·2.5·5 × 10ⁿ 중 rough 를 감싸는 가장 작은 것 */
+function niceStep(rough: number): number {
   const mag = Math.pow(10, Math.floor(Math.log10(rough)));
   const norm = rough / mag;
-  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
-  return Math.ceil(max / step) * step;
+  return (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
+}
+
+export interface NiceRange {
+  /** 축의 바닥 — 기간 최솟값 바로 아래의 깔끔한 수 (0 밑으로는 안 내려간다) */
+  lo: number;
+  /** 축의 위끝 — 기간 최댓값 바로 위의 깔끔한 수 */
+  hi: number;
+  /** lo 부터 hi 까지 눈금 간격대로 */
+  ticks: number[];
+}
+
+/**
+ * **변동축** — 조회 기간의 최솟값·최댓값을 축의 아래끝·위끝으로 삼는다(2026-09 결정).
+ *
+ * 바닥을 0 에 고정하면 월 급여총액처럼 **큰 값 위에서 조금씩 움직이는 지표**는 선이
+ * 천장에 붙은 직선으로 보여 변동이 읽히지 않는다(1.3억 언저리에서 수백만 원 움직여도
+ * 화면에서는 픽셀 몇 개다). 대신 축이 0 에서 시작하지 않는다는 사실을 **화면이 함께
+ * 적어야 한다** — 잘린 축은 작은 차이를 크게 보이게 하는 만큼, 시작값을 숨기면 오독이 된다.
+ *
+ * 최솟값·최댓값을 그대로 끝으로 쓰지 않고 **한 눈금 안쪽의 깔끔한 수**로 감싼다 —
+ * 그대로 쓰면 끝 점이 테두리에 붙고 눈금이 `1억 2,875만` 처럼 읽을 수 없는 수가 된다
+ * (niceMax 와 같은 이유). 모든 달이 같은 값이면 높이가 0 이 되므로 값의 10% 를 위아래로
+ * 벌려 가운데에 눕힌다.
+ */
+export function niceRange(min: number, max: number, count = 4): NiceRange {
+  if (!(max > 0)) return { lo: 0, hi: 1, ticks: [0, 1] };
+  min = Math.max(0, Math.min(min, max));
+  let span = max - min;
+  if (span <= 0) {
+    span = max * 0.1 || 1;
+    min = Math.max(0, min - span / 2);
+    max += span / 2;
+    span = max - min;
+  }
+  const step = niceStep(span / count);
+  const lo = Math.max(0, Math.floor(min / step) * step);
+  let hi = Math.ceil(max / step) * step;
+  if (hi <= lo) hi = lo + step;
+  const ticks: number[] = [];
+  for (let t = lo; t <= hi + step / 2; t += step) ticks.push(Math.round(t));
+  return { lo, hi, ticks };
 }
 
 /** 눈금 값 — 0 부터 위끝까지 고르게 나눈다 */
