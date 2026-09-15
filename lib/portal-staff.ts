@@ -8,7 +8,10 @@ export const PORTAL_STAFF_DEPARTMENTS = [
   "조교팀",
 ] as const;
 
-export type PortalStaffScope = "hr:self-service" | "hr:certificate";
+export type PortalStaffScope =
+  | "hr:self-service"
+  | "hr:certificate"
+  | "hr:monthly-operations";
 
 export interface PortalStaffClaims extends HrIdentity {
   kind: "hr-staff-api";
