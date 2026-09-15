@@ -57,26 +57,18 @@ export async function POST(req: Request) {
     !completedByEmpNo
   )
     return noStoreJson({ error: "완료 알림 내용을 확인해 주세요." }, 400);
+  if (completedByEmpNo !== auth.employee.empNo)
+    return noStoreJson({ error: "완료 처리 계정이 로그인 계정과 다릅니다." }, 403);
 
-  const [completedBy, employees] = await Promise.all([
-    prisma.employee.findUnique({ where: { empNo: completedByEmpNo } }),
-    assigneeEmpNos.length
-      ? prisma.employee.findMany({
-          where: {
-            empNo: { in: assigneeEmpNos },
-            active: true,
-            department: "교육운영팀",
-          },
-        })
-      : Promise.resolve([]),
-  ]);
-  if (
-    !completedBy ||
-    !completedBy.active ||
-    !completedBy.department ||
-    !["교육운영팀", "경영지원"].includes(completedBy.department)
-  )
-    return noStoreJson({ error: "완료 처리 계정을 확인할 수 없습니다." }, 400);
+  const employees = assigneeEmpNos.length
+    ? await prisma.employee.findMany({
+        where: {
+          empNo: { in: assigneeEmpNos },
+          active: true,
+          department: "교육운영팀",
+        },
+      })
+    : [];
   const employeeByEmpNo = new Map(employees.map((employee) => [employee.empNo, employee]));
   const assignees = assigneeEmpNos.flatMap((empNo) => {
     const employee = employeeByEmpNo.get(empNo);
@@ -88,7 +80,7 @@ export async function POST(req: Request) {
       notificationId,
       cycle,
       taskTitle,
-      completedBy,
+      completedBy: auth.employee,
       assignees,
     });
     if (!result.ok)
