@@ -78,6 +78,40 @@ export async function requestLeaveCancel(requestId: number, reason: string) {
   });
 }
 
+/** 최종 승인 전 신청 철회 — 차감 트랜잭션이 생기기 전이므로 상태만 취소로 남긴다. */
+export async function withdrawLeaveRequest(
+  requestId: number,
+  employeeId: number,
+  actorName: string,
+) {
+  const reqRow = await prisma.leaveRequest.findUnique({ where: { id: requestId } });
+  if (!reqRow || reqRow.employeeId !== employeeId) throw new Error("신청 없음");
+  if (reqRow.status !== "PRE_PENDING" && reqRow.status !== "PENDING")
+    throw new Error("승인 대기 중인 신청만 철회할 수 있습니다.");
+  await prisma.$transaction([
+    prisma.leaveRequest.update({
+      where: { id: requestId },
+      data: {
+        status: "CANCELED",
+        cancelReason: "신청자 철회",
+        cancelRequestedAt: new Date(),
+        cancelDecidedAt: new Date(),
+      },
+    }),
+    prisma.auditLog.create({
+      data: {
+        actor: "PORTAL",
+        actorName,
+        action: "LEAVE_WITHDRAW",
+        target: `req:${requestId}`,
+        employeeId,
+        summary: `${actorName}님이 승인 전 휴가 신청(${reqRow.days}일)을 철회했습니다.`,
+        detail: JSON.stringify({ requestId }),
+      },
+    }),
+  ]);
+}
+
 /**
  * 휴가 취소 승인 (운영진) → 사용 트랜잭션 삭제(연차 복원) + 상태 CANCELED.
  * 캘린더 일정 삭제는 호출부에서 처리한다.

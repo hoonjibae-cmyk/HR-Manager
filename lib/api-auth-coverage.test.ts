@@ -22,6 +22,7 @@ const dedicatedAuth = new Set([
   "app/api/directory/teachers/route.ts",
   "app/api/portal/self-service/route.ts",
   "app/api/portal/self-service/certificate/route.ts",
+  "app/api/portal/monthly-operations/notify/route.ts",
   "app/api/slack/command/route.ts",
   "app/api/slack/events/route.ts",
   "app/api/slack/interactivity/route.ts",
