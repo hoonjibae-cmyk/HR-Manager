@@ -243,6 +243,25 @@ function fixedTermEndClauses(): string[] {
   ];
 }
 
+/**
+ * 계약서 서명란 위 **작성일자** — 1순위 발급(출력)일, 단 발급일이 계약 시작일보다
+ * **뒤**면 계약 시작일로 되돌린다. 즉 `min(발급일, 시작일)`.
+ *
+ * 미래 시작 계약(예: 내년 1/1 발효)을 미리 뽑으면 실제로 서명하는 날(오늘)이 찍혀야 하고,
+ * 이미 시작된 계약을 재발급하면 원래 계약일이 그대로 찍혀야 한다 — 재발급본에 오늘 날짜가
+ * 찍히면 서명본 원본과 날짜가 달라져 다른 계약서처럼 보인다.
+ *
+ * 제1조(계약기간)·별지 제2조(약정기간)의 시작일 표기와는 무관하다 — 그쪽은 언제나 계약 시작일.
+ */
+export function contractSignDate(startDate: Date, printedAt: Date): Date {
+  return printedAt.getTime() > startDate.getTime() ? startDate : printedAt;
+}
+
+/** KST 오늘 — 앱의 날짜 저장 규칙(KST 벽시계를 UTC 필드에 담는다)에 맞춘 기본 발급일 */
+function kstNow(): Date {
+  return new Date(Date.now() + 9 * 3600_000);
+}
+
 /** 시간 표기 — 209 / 4.345 / 172.062 처럼 불필요한 0 없이 */
 function hoursText(h: number): string {
   const s = h.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
@@ -254,10 +273,13 @@ export function contractHtml(args: {
   employee: DocEmployee;
   contract: DocContract;
   company: DocCompany;
+  /** 발급(출력) 시각 — 작성일자 산정용. 생략하면 KST 오늘 */
+  printedAt?: Date;
 }): string {
   const { employee: e, contract: ct, company: c } = args;
   const isRatio = ct.templateKey === "RATIO" || e.payScheme === "RATIO";
   if (isRatio) return ratioContractHtml(args);
+  const signDate = contractSignDate(ct.startDate, args.printedAt ?? kstNow());
 
   const sched = parseSchedule(e.schedule);
   const workDays = sched.filter((s) => s.work).length;
@@ -486,7 +508,7 @@ export function contractHtml(args: {
 
   <div class="doc-foot">
     <p style="text-align:center">"갑"과 "을"은 상기와 같이 근로계약을 체결하고, 계약서 2부를 작성하여 '사용자'와 '근로자' 각 1부씩 보관한다.</p>
-    <div class="date-center">${ymdKo(ct.startDate)}</div>
+    <div class="date-center">${ymdKo(signDate)}</div>
     ${signDuo(c, e, "근로자")}
     ${handoverConfirm()}
   </div></div>`;
@@ -497,8 +519,11 @@ function ratioContractHtml(args: {
   employee: DocEmployee;
   contract: DocContract;
   company: DocCompany;
+  /** 발급(출력) 시각 — 작성일자 산정용. 생략하면 KST 오늘 */
+  printedAt?: Date;
 }): string {
   const { employee: e, contract: ct, company: c } = args;
+  const signDate = contractSignDate(ct.startDate, args.printedAt ?? kstNow());
   const payday = c.payday ?? 7;
   const pctNum = (ct.ratioPercent ?? 0) * 100;
   const pct = pctNum % 1 === 0 ? pctNum.toFixed(0) : pctNum.toFixed(1);
@@ -576,7 +601,7 @@ function ratioContractHtml(args: {
 
   <div class="doc-foot">
     <p style="text-align:center">"갑"과 "을"은 상기와 같이 강의위탁계약을 체결하고, 계약서 2부를 작성하여 각각 서명 날인 후 각 1부씩 보관한다.</p>
-    <div class="date-center">${ymdKo(ct.startDate)}</div>
+    <div class="date-center">${ymdKo(signDate)}</div>
     ${signDuo(c, e, "수탁자")}
     ${handoverConfirm()}
   </div></div>`;
@@ -587,8 +612,11 @@ export function incentiveContractHtml(args: {
   employee: DocEmployee;
   contract: DocContract;
   company: DocCompany;
+  /** 발급(출력) 시각 — 작성일자 산정용. 생략하면 KST 오늘 */
+  printedAt?: Date;
 }): string {
   const { employee: e, contract: ct, company: c } = args;
+  const signDate = contractSignDate(ct.startDate, args.printedAt ?? kstNow());
   const payday = c.payday ?? 7;
   const threshold = ct.incThreshold ?? null;
   const perStudent = ct.incPerStudent ?? null;
@@ -690,7 +718,7 @@ export function incentiveContractHtml(args: {
 
   <div class="doc-foot">
     <p style="text-align:center">"갑"과 "을"은 상기와 같이 인센티브 지급계약을 체결하고, 2부를 작성하여 '사용자'와 '근로자' 각 1부씩 보관한다.</p>
-    <div class="date-center">${ymdKo(ct.startDate)}</div>
+    <div class="date-center">${ymdKo(signDate)}</div>
     <p class="small" style="text-align:right">본 계약서를 서면으로 교부받았기에 아래와 같이 서명합니다.</p>
     ${signDuo(c, e, "근로자")}
   </div></div>`;
@@ -714,6 +742,8 @@ export function contractGroups(args: {
   company: DocCompany;
   /** 양자 서명 서류에 줄 조판 옵션 (간인·각 장 이니셜란·쪽번호) */
   bilateralOpts?: PdfOptions;
+  /** 발급(출력) 시각 — 계약서 작성일자 산정용. 생략하면 KST 오늘 */
+  printedAt?: Date;
 }): DocGroup[] {
   const { employee, company, contract, bilateralOpts } = args;
   const scheme = paySchemeOfTemplate(contract.templateKey) ?? employee.payScheme;
