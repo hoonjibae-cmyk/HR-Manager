@@ -16,6 +16,7 @@ const nextConfig = {
       "/api/documents/newhire": ["./node_modules/@sparticuz/chromium/bin/**"],
       "/api/documents/contract": ["./node_modules/@sparticuz/chromium/bin/**"],
       "/api/documents/cert": ["./node_modules/@sparticuz/chromium/bin/**"],
+      "/api/portal/self-service/certificate": ["./node_modules/@sparticuz/chromium/bin/**"],
       "/api/documents/payslip": ["./node_modules/@sparticuz/chromium/bin/**"],
       "/api/email/send": ["./node_modules/@sparticuz/chromium/bin/**"],
       "/api/email/schedule-run": ["./node_modules/@sparticuz/chromium/bin/**"],
