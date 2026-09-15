@@ -45,6 +45,13 @@ export const APP_ACCESS: Record<string, Record<string, AppRole>> = {
     교육운영팀: "user",
     경영지원: "admin",
   },
+  // 유쌤 마케팅 스튜디오 — 교육운영팀은 홍보 제작·검토·승인·설정을
+  // 모두 사용하지만 직원 계정 관리는 하지 않는다. 받는 쪽은 operations 를
+  // 그 전용 역할로 옮겨 적용한다.
+  "yussam-marketing": {
+    경영지원: "admin",
+    교육운영팀: "operations",
+  },
 };
 
 export function appAccessMap(app: string): Record<string, AppRole> | null {

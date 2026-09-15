@@ -5,6 +5,7 @@ import { directoryApiKey, directoryRequestAuthorized } from "./directory-api-aut
 const originalDirectoryKey = process.env.DIRECTORY_API_KEY;
 const originalVocaKey = process.env.VOCA_DIRECTORY_API_KEY;
 const originalStudentCardKey = process.env.STUDENT_CARD_DIRECTORY_API_KEY;
+const originalMarketingKey = process.env.MARKETING_DIRECTORY_API_KEY;
 
 afterEach(() => {
   if (originalDirectoryKey === undefined) delete process.env.DIRECTORY_API_KEY;
@@ -13,6 +14,8 @@ afterEach(() => {
   else process.env.VOCA_DIRECTORY_API_KEY = originalVocaKey;
   if (originalStudentCardKey === undefined) delete process.env.STUDENT_CARD_DIRECTORY_API_KEY;
   else process.env.STUDENT_CARD_DIRECTORY_API_KEY = originalStudentCardKey;
+  if (originalMarketingKey === undefined) delete process.env.MARKETING_DIRECTORY_API_KEY;
+  else process.env.MARKETING_DIRECTORY_API_KEY = originalMarketingKey;
 });
 
 describe("application directory access", () => {
@@ -29,6 +32,13 @@ describe("application directory access", () => {
       경영지원: "admin",
       교육운영팀: "operations",
       교수부: "teacher",
+    });
+  });
+
+  it("exposes Marketing Studio only to management and operations", () => {
+    expect(appAccessMap("yussam-marketing")).toEqual({
+      경영지원: "admin",
+      교육운영팀: "operations",
     });
   });
 
@@ -49,6 +59,15 @@ describe("application directory access", () => {
     expect(directoryRequestAuthorized("yussam-voca", "voca-key")).toBe(true);
     expect(directoryRequestAuthorized("yussam-voca", "shared-key")).toBe(false);
     expect(directoryRequestAuthorized("omr-report", "shared-key")).toBe(true);
+  });
+
+  it("uses a dedicated Marketing Studio key when configured", () => {
+    process.env.DIRECTORY_API_KEY = "shared-key";
+    process.env.MARKETING_DIRECTORY_API_KEY = "marketing-key";
+
+    expect(directoryApiKey("yussam-marketing")).toBe("marketing-key");
+    expect(directoryRequestAuthorized("yussam-marketing", "marketing-key")).toBe(true);
+    expect(directoryRequestAuthorized("yussam-marketing", "shared-key")).toBe(false);
   });
 
   it("falls back to the shared key when no dedicated key exists", () => {
