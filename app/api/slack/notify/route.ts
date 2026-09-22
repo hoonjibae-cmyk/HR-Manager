@@ -26,7 +26,8 @@ export const dynamic = "force-dynamic";
  * 이 창구는 글을 지어내지 않는다. 받은 text 를 그대로 보낸다.
  *
  * 요청:
- *   POST { empNo?: string, email?: string, text: string }
+ *   POST { empNo?: string, email?: string, channel?: string, text: string }
+ *   channel 을 주면 사람이 아니라 그 채널(예: 운영진 채널)에 보낸다.
  *   x-app: yussam-voca 등 호출 프로그램 키
  *   x-api-key: <앱 전용 키 또는 DIRECTORY_API_KEY>
  */
@@ -52,7 +53,7 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { empNo?: unknown; email?: unknown; text?: unknown };
+  let body: { empNo?: unknown; email?: unknown; channel?: unknown; text?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -61,11 +62,29 @@ export async function POST(req: Request) {
 
   const empNo = typeof body.empNo === "string" ? body.empNo.trim() : "";
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const channel = typeof body.channel === "string" ? body.channel.trim() : "";
   const text = typeof body.text === "string" ? body.text.trim() : "";
 
   if (!text) return NextResponse.json({ error: "보낼 내용(text)이 없습니다." }, { status: 400 });
+
+  // 채널로 보내는 경우 — 사람이 아니라 방(예: 운영진 채널)에 알린다. 직원 조회는
+  // 필요 없고, 봇이 그 채널에 들어가 있어야 한다(초대되지 않았으면 슬랙이 거부한다).
+  if (channel) {
+    const res = (await postMessage(channel, text)) as { ok?: boolean; error?: string };
+    if (!res?.ok) {
+      const hint = res?.error === "not_in_channel" || res?.error === "channel_not_found"
+        ? " 봇이 그 채널에 초대되어 있는지, 채널 ID가 맞는지 확인하세요."
+        : "";
+      return NextResponse.json(
+        { delivered: false, reason: "slack-error", error: `${res?.error ?? "슬랙 발송 실패"}${hint}` },
+        { status: 502 },
+      );
+    }
+    return NextResponse.json({ delivered: true, channel });
+  }
+
   if (!empNo && !email) {
-    return NextResponse.json({ error: "받는 사람(empNo 또는 email)이 없습니다." }, { status: 400 });
+    return NextResponse.json({ error: "받는 사람(empNo, email 또는 channel)이 없습니다." }, { status: 400 });
   }
 
   // 사번이 있으면 사번으로 찾는다 — 이메일은 바뀔 수 있고 사번은 안 바뀐다.
