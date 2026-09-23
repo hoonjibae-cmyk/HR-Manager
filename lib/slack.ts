@@ -1,6 +1,12 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { prisma } from "./db";
 import { ymd } from "./format";
+import {
+  overdraftApprovalLine,
+  overdraftNoticeText,
+  OVERDRAFT_CONSENT_LABEL,
+  type OverdraftCheck,
+} from "./leave-overdraft";
 import { matchEmployee } from "./timesheet";
 
 const API = "https://slack.com/api";
@@ -272,6 +278,12 @@ export function parseLeaveText(text: string): {
   return { start, end, half, leaveType, reason };
 }
 
+/** 잔여 초과 신청 표시 — 승인자가 모르고 누르지 않게 버튼 바로 위에 둔다 */
+function overdraftBlocks(after: number | null | undefined) {
+  if (after == null) return [];
+  return [{ type: "context", elements: [{ type: "mrkdwn", text: overdraftApprovalLine(after) }] }];
+}
+
 export function approvalBlocks(args: {
   requestId: number;
   name: string;
@@ -284,6 +296,8 @@ export function approvalBlocks(args: {
   /** 중간결재를 거친 신청이면 「중간결재: ○○○ 확인」 줄을 붙인다 */
   preApprovedBy?: string | null;
   workPlan?: string | null;
+  /** 잔여 초과(마이너스) 신청이면 승인 뒤 잔여 — 신청자가 급여 공제에 동의한 건이다 */
+  overdraftAfter?: number | null;
 }) {
   const range =
     args.days > 1 ? `${ymd(args.start)} ~ ${ymd(args.end)}` : ymd(args.start);
@@ -317,6 +331,7 @@ export function approvalBlocks(args: {
           },
         ]
       : []),
+    ...overdraftBlocks(args.overdraftAfter),
     {
       type: "actions",
       block_id: `leave_${args.requestId}`,
@@ -355,6 +370,7 @@ export function preApprovalBlocks(args: {
   reason: string;
   remaining: number;
   workPlan?: string | null;
+  overdraftAfter?: number | null;
 }) {
   const range = args.days > 1 ? `${ymd(args.start)} ~ ${ymd(args.end)}` : ymd(args.start);
   return [
@@ -386,6 +402,7 @@ export function preApprovalBlocks(args: {
           },
         ]
       : []),
+    ...overdraftBlocks(args.overdraftAfter),
     {
       type: "actions",
       block_id: `leave_pre_${args.requestId}`,
@@ -649,6 +666,66 @@ export interface LeaveModalContext {
   channel?: string;
   /** 이번 연차기간 (있으면 누계 대신 이 기간 기준으로 안내) */
   period?: { start: string; end: string; granted: number; used: number };
+  /**
+   * 잔여 초과 안내 + 동의 체크란. `upfront` 는 양식을 열 때부터(잔여가 이미 0 이하),
+   * 아니면 제출 때 초과가 드러나 양식을 다시 그린 경우다(입력값은 `prefill` 로 되살린다).
+   */
+  overdraft?: { check: Pick<OverdraftCheck, "remaining" | "pending" | "days" | "after">; upfront?: boolean };
+  /** 다시 그릴 때 사용자가 이미 적은 값 */
+  prefill?: Partial<LeaveModalValues>;
+}
+
+export interface LeaveModalValues {
+  kind: string;
+  start: string | null;
+  end: string | null;
+  halftime: string;
+  reason: string;
+  workplan: string;
+  /** 잔여 초과 공제 동의 체크 여부 */
+  consent: boolean;
+}
+
+const KIND_OPTIONS = [
+  { text: { type: "plain_text", text: "연차 (1일)" }, value: "ANNUAL" },
+  { text: { type: "plain_text", text: "반차 (0.5일)" }, value: "HALF" },
+  { text: { type: "plain_text", text: "대휴(보상연차)" }, value: "COMP" },
+  { text: { type: "plain_text", text: "병가" }, value: "SICK" },
+  { text: { type: "plain_text", text: "경조사" }, value: "SPECIAL" },
+];
+
+const CONSENT_OPTION = {
+  text: { type: "plain_text", text: OVERDRAFT_CONSENT_LABEL },
+  value: "agree",
+};
+
+/**
+ * 잔여 초과 안내 + 동의 체크란 — 제출 버튼 바로 위(양식 맨 아래)에 둔다.
+ * 체크란은 `optional` 로 두고 서버가 검사한다 — 필수로 두면 슬랙 기본 문구("필수 항목")만
+ * 떠서 왜 막혔는지 알 수 없고, 초과가 아닌 신청(병가 등)까지 막는다.
+ */
+function overdraftConsentBlocks(ctx: LeaveModalContext): any[] {
+  if (!ctx.overdraft) return [];
+  return [
+    { type: "divider" },
+    {
+      type: "section",
+      block_id: "overdraft_notice",
+      text: { type: "mrkdwn", text: overdraftNoticeText(ctx.overdraft.check, { upfront: ctx.overdraft.upfront }) },
+    },
+    {
+      type: "input",
+      block_id: "consent",
+      optional: true,
+      label: { type: "plain_text", text: "연차 초과 사용 동의" },
+      element: {
+        type: "checkboxes",
+        action_id: "v",
+        options: [CONSENT_OPTION],
+        ...(ctx.prefill?.consent ? { initial_options: [CONSENT_OPTION] } : {}),
+      },
+    },
+  ];
 }
 
 /** 기존 워크플로 '휴가신청서' 양식을 그대로 재현한 모달 */
@@ -658,6 +735,8 @@ export function leaveModalView(ctx: LeaveModalContext) {
   const periodLine = ctx.period
     ? `이번 연차기간 ${ctx.period.start} ~ ${ctx.period.end}\n발생 ${ctx.period.granted} · 사용 ${ctx.period.used} · 잔여 *${ctx.remaining}일*${compLine}`
     : `잔여 연차 *${ctx.remaining}일*${compLine}`;
+  const pf = ctx.prefill ?? {};
+  const kindOpt = KIND_OPTIONS.find((o) => o.value === pf.kind);
   return {
     type: "modal",
     callback_id: "leave_request_submit",
@@ -682,20 +761,15 @@ export function leaveModalView(ctx: LeaveModalContext) {
           type: "static_select",
           action_id: "v",
           placeholder: { type: "plain_text", text: "옵션을 선택하세요." },
-          options: [
-            { text: { type: "plain_text", text: "연차 (1일)" }, value: "ANNUAL" },
-            { text: { type: "plain_text", text: "반차 (0.5일)" }, value: "HALF" },
-            { text: { type: "plain_text", text: "대휴(보상연차)" }, value: "COMP" },
-            { text: { type: "plain_text", text: "병가" }, value: "SICK" },
-            { text: { type: "plain_text", text: "경조사" }, value: "SPECIAL" },
-          ],
+          options: KIND_OPTIONS,
+          ...(kindOpt ? { initial_option: kindOpt } : {}),
         },
       },
       {
         type: "input",
         block_id: "start",
         label: { type: "plain_text", text: "휴가시작일" },
-        element: { type: "datepicker", action_id: "v" },
+        element: { type: "datepicker", action_id: "v", ...(pf.start ? { initial_date: pf.start } : {}) },
       },
       {
         type: "input",
@@ -703,7 +777,7 @@ export function leaveModalView(ctx: LeaveModalContext) {
         optional: true,
         label: { type: "plain_text", text: "휴가종료일" },
         hint: { type: "plain_text", text: "하루 짜리 연차 또는 반차의 경우 종료일은 기입하지 마세요." },
-        element: { type: "datepicker", action_id: "v" },
+        element: { type: "datepicker", action_id: "v", ...(pf.end ? { initial_date: pf.end } : {}) },
       },
       {
         type: "input",
@@ -715,6 +789,7 @@ export function leaveModalView(ctx: LeaveModalContext) {
           type: "plain_text_input",
           action_id: "v",
           placeholder: { type: "plain_text", text: "작성해 주세요." },
+          ...(pf.halftime ? { initial_value: pf.halftime } : {}),
         },
       },
       {
@@ -726,6 +801,7 @@ export function leaveModalView(ctx: LeaveModalContext) {
           action_id: "v",
           multiline: true,
           placeholder: { type: "plain_text", text: "작성해 주세요." },
+          ...(pf.reason ? { initial_value: pf.reason } : {}),
         },
       },
       {
@@ -742,23 +818,24 @@ export function leaveModalView(ctx: LeaveModalContext) {
           action_id: "v",
           multiline: true,
           placeholder: { type: "plain_text", text: "작성해 주세요. (해당 없으면 '없음')" },
+          ...(pf.workplan ? { initial_value: pf.workplan } : {}),
         },
       },
+      ...overdraftConsentBlocks(ctx),
     ],
   };
 }
 
+/** 모달에 동의 체크란이 이미 있는가 — 없으면 초과 시 양식을 다시 그려 띄운다 */
+export function leaveModalHasConsent(view: any): boolean {
+  return (view?.blocks ?? []).some((b: any) => b?.block_id === "consent");
+}
+
 /** 모달 제출 값 추출 */
-export function readLeaveModal(view: any): {
-  kind: string;
-  start: string | null;
-  end: string | null;
-  halftime: string;
-  reason: string;
-  workplan: string;
-} {
+export function readLeaveModal(view: any): LeaveModalValues {
   const v = view?.state?.values ?? {};
   return {
+    consent: (v.consent?.v?.selected_options ?? []).some((o: any) => o?.value === "agree"),
     kind: v.kind?.v?.selected_option?.value ?? "ANNUAL",
     start: v.start?.v?.selected_date ?? null,
     end: v.end?.v?.selected_date ?? null,

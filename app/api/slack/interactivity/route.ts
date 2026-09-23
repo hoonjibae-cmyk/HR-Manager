@@ -10,6 +10,7 @@ import {
   openView,
   leaveModalView,
   readLeaveModal,
+  leaveModalHasConsent,
   leaveCancelModalView,
   readCancelModal,
   cancelApprovalBlocks,
@@ -70,6 +71,7 @@ import {
 import {
   leaveBalanceOf,
   submitLeaveRequest,
+  upfrontOverdraft,
   postLeaveApprovalCard,
   cancelableLeaves,
   rangeLabel,
@@ -85,6 +87,7 @@ import { LEAVE_TYPE_LABEL } from "@/lib/constants";
 import { DEFAULT_DAILY_CHANNEL } from "@/lib/daily-brief";
 import { logActivity } from "@/lib/activity";
 import { ymd } from "@/lib/format";
+import { OVERDRAFT_CONSENT_REQUIRED } from "@/lib/leave-overdraft";
 
 export const dynamic = "force-dynamic";
 
@@ -152,6 +155,7 @@ async function openLeaveForm(triggerId: string, userId: string, channelId?: stri
       serviceLabel: summary.serviceLabel,
       period: modalPeriod(summary),
       channel: channelId,
+      overdraft: await upfrontOverdraft(emp.id, summary),
     })
   );
 }
@@ -289,7 +293,33 @@ export async function POST(req: Request) {
       halfTimeNote: f.halftime,
       workPlan: f.workplan,
       channel: meta.channel,
+      overdraftConsent: f.consent,
     });
+
+    // 잔여 초과인데 동의가 없다 — 동의란이 이미 있으면 거기에 오류를 달고, 없으면(잔여가 남아
+    // 있어 처음엔 안 띄웠던 경우) 적은 값을 그대로 살려 **안내·동의란을 붙인 양식으로 다시 그린다**.
+    if (!res.ok && res.overdraft) {
+      if (leaveModalHasConsent(payload.view)) {
+        return Response.json({
+          response_action: "errors",
+          errors: { consent: res.error ?? OVERDRAFT_CONSENT_REQUIRED },
+        });
+      }
+      const { summary, comp } = await leaveBalanceOf(emp);
+      return Response.json({
+        response_action: "update",
+        view: leaveModalView({
+          empName: emp.name,
+          remaining: summary.remaining,
+          compRemaining: comp.remaining,
+          serviceLabel: summary.serviceLabel,
+          period: modalPeriod(summary),
+          channel: meta.channel,
+          overdraft: { check: res.overdraft },
+          prefill: f,
+        }),
+      });
+    }
 
     if (!res.ok) {
       return Response.json({
@@ -315,6 +345,9 @@ export async function POST(req: Request) {
             `✅ 휴가신청서가 접수되었습니다.\n` +
             `• 기간: ${ymd(start)}${res.days! > 1 ? ` ~ ${ymd(end)}` : ""} (${res.days}일)\n` +
             `• 현재 ${res.poolLabel} 잔여: ${res.remaining}일\n` +
+            (res.overdrawn && res.overdraft
+              ? `• ⚠️ 잔여 초과 신청 — 승인되면 잔여 ${res.overdraft.after}일 (퇴직 시 초과분 급여 공제에 동의하셨습니다)\n`
+              : "") +
             (preApproverName
               ? `${preApproverName} 님의 중간결재 확인 후 운영진 승인으로 넘어갑니다.`
               : `관리자 승인 후 반영됩니다.`),
@@ -909,6 +942,7 @@ export async function POST(req: Request) {
           remaining,
           workPlan: reqRow.workPlan,
           preApprovedBy: deciderName,
+          overdraftAfter: reqRow.overdraftConsentAt ? reqRow.overdraftAfter : null,
         });
         // 결재자 DM 의 버튼을 결과 표시로 갈아 끼운다 (남겨 두면 두 번 눌린다)
         if (channel && msgTs) {

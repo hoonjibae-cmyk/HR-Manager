@@ -1,4 +1,5 @@
 import { waitUntil } from "@vercel/functions";
+import { overdraftNoticeText } from "@/lib/leave-overdraft";
 import {
   verifySlackSignature,
   slackConfigured,
@@ -17,6 +18,7 @@ import {
   modalPeriod,
   RATIO_LEAVE_NOTICE,
   submitLeaveRequest,
+  upfrontOverdraft,
   rangeLabel,
 } from "@/lib/leave-slack";
 import { isContractorContract } from "@/lib/constants";
@@ -113,6 +115,7 @@ export async function POST(req: Request) {
         serviceLabel: s2.serviceLabel,
         period: modalPeriod(s2),
         channel: form.get("channel_id") || undefined,
+        overdraft: await upfrontOverdraft(emp.id, s2),
       })
     );
     return new Response("", { status: 200 });
@@ -136,6 +139,12 @@ export async function POST(req: Request) {
     reason: parsed.reason,
     channel: form.get("channel_id") || undefined,
   });
+  // 잔여 초과 — 명령에는 동의란을 띄울 수 없어 양식으로 보낸다(양식이 안내·동의란을 띄운다).
+  if (!res.ok && res.overdraft)
+    return ephemeral(
+      overdraftNoticeText(res.overdraft) +
+        "\n\n동의는 휴가신청서 양식에서 받습니다 — `/연차 신청` 으로 양식을 열어 같은 내용으로 제출해 주세요."
+    );
   if (!res.ok) return ephemeral(`❌ ${res.error}`);
 
   // 명령을 다시 친 재제출 — 새로 만들지 않았음을 그대로 알린다 (모달과 달리 명령은

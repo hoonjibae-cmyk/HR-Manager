@@ -14,6 +14,14 @@ import { postMessage, approvalBlocks, preApprovalBlocks } from "./slack";
 import { ymd } from "./format";
 import { LEAVE_TYPE_LABEL, isHalfDayLeave, parseSchedule, isContractorContract } from "./constants";
 import { preApproverFor } from "./leave-approval";
+import {
+  affectsAnnualBalance,
+  checkOverdraft,
+  OVERDRAFT_CONSENT_REQUIRED,
+  OVERDRAFT_TYPES,
+  showConsentUpfront,
+  type OverdraftCheck,
+} from "./leave-overdraft";
 
 /** 연차 미적용 판정 근거 — 안내 문구에 사유를 정확히 쓰기 위해 함께 들고 다닌다 */
 export interface LeaveEligibility {
@@ -184,6 +192,34 @@ export function leaveBalanceText(
   return lines.join("\n");
 }
 
+/**
+ * 아직 승인되지 않은 연차 신청 일수(중간결재 대기 포함) — 승인되면 잔여에서 빠질 몫.
+ * 잔여 초과 판정에 함께 넣는다(연달아 낸 신청이 각각은 잔여 안이어도 합치면 넘는다).
+ */
+export async function pendingAnnualDays(employeeId: number): Promise<number> {
+  const rows = await prisma.leaveRequest.findMany({
+    where: {
+      employeeId,
+      status: { in: ["PRE_PENDING", "PENDING"] },
+      leaveType: { in: [...OVERDRAFT_TYPES] },
+    },
+    select: { days: true },
+  });
+  return rows.reduce((a, r) => a + r.days, 0);
+}
+
+/**
+ * 양식을 열 때부터 띄울 잔여 초과 안내 — 쓸 수 있는 연차가 이미 0 이하일 때만.
+ * 연차 미적용 직원은 부여분 안에서만 신청할 수 있어 초과 자체가 막히므로 띄우지 않는다.
+ */
+export async function upfrontOverdraft(employeeId: number, summary: LeaveSummary) {
+  if (!summary.eligible) return undefined;
+  const pending = await pendingAnnualDays(employeeId);
+  if (!showConsentUpfront(summary.remaining, pending)) return undefined;
+  const c = checkOverdraft({ leaveType: "ANNUAL", remaining: summary.remaining, pending, days: 0 });
+  return { check: c, upfront: true };
+}
+
 /** 모달 헤더에 넣을 이번 기간 요약 */
 export function modalPeriod(summary: LeaveSummary) {
   return {
@@ -204,13 +240,22 @@ export interface LeaveSubmitInput {
   workPlan?: string;
   channel?: string; // 승인 카드를 게시할 채널 (미지정 시 SLACK_APPROVAL_CHANNEL)
   source?: string;
+  /** 잔여 초과 시 퇴직월 급여 공제 동의 — 초과 신청은 이것 없이 만들어지지 않는다 */
+  overdraftConsent?: boolean;
 }
 
 export interface LeaveSubmitResult {
   ok: boolean;
   /** 실패 시 사용자에게 보여줄 사유 (모달 필드 오류로도 사용) */
   error?: string;
-  field?: "start" | "end" | "kind";
+  field?: "start" | "end" | "kind" | "consent";
+  /**
+   * 잔여를 넘는 신청인데 동의가 없어 만들지 않았다 — 부르는 쪽이 안내와 동의란을 띄운다.
+   * (모달은 양식을 다시 그리고, 포털은 이 값으로 확인창을 띄운다)
+   */
+  overdraft?: OverdraftCheck;
+  /** 동의를 받아 만든 초과 신청이면 true */
+  overdrawn?: boolean;
   days?: number;
   remaining?: number;
   poolLabel?: string;
@@ -249,6 +294,8 @@ export async function postLeaveApprovalCard(args: {
   workPlan?: string | null;
   preApprovedBy?: string | null;
   fallbackChannel?: string | null;
+  /** 잔여 초과 동의 신청이면 승인 뒤 잔여 (LeaveRequest.overdraftAfter) */
+  overdraftAfter?: number | null;
 }): Promise<boolean> {
   const channel = process.env.SLACK_APPROVAL_CHANNEL || args.fallbackChannel;
   if (!channel) return false;
@@ -266,6 +313,7 @@ export async function postLeaveApprovalCard(args: {
       remaining: args.remaining,
       workPlan: args.workPlan ?? undefined,
       preApprovedBy: args.preApprovedBy ?? undefined,
+      overdraftAfter: args.overdraftAfter ?? null,
     })
   ).catch(() => null);
   if (posted?.ok) {
@@ -354,6 +402,27 @@ export async function submitLeaveRequest(
     };
   }
 
+  // 잔여 초과(마이너스) — 동의가 있어야만 만든다. 동의 없이 들어오면 만들지 않고 판정값을
+  // 돌려줘 부르는 쪽이 안내·동의란을 띄우게 한다(슬랙 모달은 양식을 다시 그린다).
+  const overdraft = affectsAnnualBalance(input.leaveType)
+    ? checkOverdraft({
+        leaveType: input.leaveType,
+        remaining: summary.remaining,
+        pending: await pendingAnnualDays(emp.id),
+        days,
+      })
+    : null;
+  if (overdraft?.overdrawn && !input.overdraftConsent) {
+    return {
+      ok: false,
+      error: OVERDRAFT_CONSENT_REQUIRED,
+      field: "consent",
+      overdraft,
+      days,
+    };
+  }
+  const overdrawn = !!overdraft?.overdrawn;
+
   const reasonFull =
     input.reason + (input.halfTimeNote ? ` (사용시간 ${input.halfTimeNote})` : "");
 
@@ -385,8 +454,11 @@ export async function submitLeaveRequest(
       workPlan: input.workPlan?.trim() || null,
       status: preApprover ? "PRE_PENDING" : "PENDING",
       source: input.source ?? "SLACK",
+      overdraftConsentAt: overdrawn ? new Date() : null,
+      overdraftAfter: overdrawn ? overdraft!.after : null,
     },
   });
+  const overdraftAfter = overdrawn ? overdraft!.after : null;
 
   // **발송은 여기서 하지 않고 notify 로 미룬다** — 슬랙 모달·슬래시 명령은 3초 안에 응답해야
   // 하는데, 중간결재 DM·승인 카드 게시가 응답 앞에 있으면 그 시간만큼 3초를 갉아먹어
@@ -409,6 +481,7 @@ export async function submitLeaveRequest(
           reason: `[${typeLabel}] ${reasonFull || "개인사유"}`,
           remaining: poolRemaining,
           workPlan: input.workPlan,
+          overdraftAfter,
         })
       ).catch(() => null);
       if (posted?.ok) {
@@ -435,6 +508,7 @@ export async function submitLeaveRequest(
       remaining: poolRemaining,
       workPlan: input.workPlan,
       fallbackChannel: input.channel,
+      overdraftAfter,
     });
     return { preApproverName: null };
   };
@@ -446,6 +520,8 @@ export async function submitLeaveRequest(
     poolLabel,
     requestId: reqRow.id,
     preApproverName: preApprover?.name,
+    overdrawn,
+    ...(overdrawn ? { overdraft: overdraft! } : {}),
     notify,
   };
 }

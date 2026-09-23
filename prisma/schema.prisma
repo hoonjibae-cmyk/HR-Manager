@@ -576,6 +576,10 @@ model LeaveRequest {
   preApproverId String? // 확인한 사람 (slack user id, 운영진 대행이면 "admin")
   preDecidedAt  DateTime?
 
+  // 잔여 초과(마이너스) 신청 — 퇴직 시 초과분 급여 공제 동의(근로기준법 §43 의 근거)
+  overdraftConsentAt DateTime? // 신청자가 동의란에 체크한 시각
+  overdraftAfter     Float? // 신청 당시 '모두 승인되면 남는 잔여' (음수)
+
   // 취소 신청 (직원이 승인된 휴가를 취소 요청 → 운영진 승인 필요)
   cancelReason      String?
   cancelRequestedAt DateTime?

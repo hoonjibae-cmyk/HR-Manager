@@ -152,6 +152,7 @@ describe("readLeaveModal — 제출값 파싱", () => {
       halftime: "14시~18시",
       reason: "병원 방문",
       workplan: "8/14 A반 → 김OO 선생님 대강",
+      consent: false, // 동의란이 없는 보통 양식
     });
   });
 
@@ -163,6 +164,7 @@ describe("readLeaveModal — 제출값 파싱", () => {
       halftime: "",
       reason: "",
       workplan: "",
+      consent: false,
     });
   });
 });

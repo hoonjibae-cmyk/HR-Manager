@@ -128,6 +128,7 @@ export default async function LeavePage({
     workPlan: r.workPlan,
     source: r.source,
     status: r.status,
+    overdraftAfter: r.overdraftConsentAt ? r.overdraftAfter : null,
     employee: { name: r.employee.name, department: r.employee.department },
   }));
 

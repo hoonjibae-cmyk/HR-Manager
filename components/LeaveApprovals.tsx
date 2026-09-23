@@ -17,6 +17,8 @@ interface Req {
   source: string;
   /** PRE_PENDING(중간결재 대기)이면 배지로 표시 — 지금 누구 손에 있는지 보여야 한다 */
   status: string;
+  /** 잔여 초과 동의 신청이면 승인 뒤 잔여(음수) — 모르고 승인하지 않게 표시한다 */
+  overdraftAfter?: number | null;
   employee: { name: string; department: string | null };
 }
 
@@ -82,7 +84,17 @@ export default function LeaveApprovals({ requests }: { requests: Req[] }) {
               {ymd(r.startDate)}
               {r.days > 1 ? ` ~ ${ymd(r.endDate)}` : ""}
             </td>
-            <td className="td tnum">{r.days}일</td>
+            <td className="td tnum">
+              {r.days}일
+              {r.overdraftAfter != null && (
+                <span
+                  className="block text-[11px] font-normal text-red-600"
+                  title="잔여 연차를 넘는 신청입니다. 신청자가 퇴직 시 초과분을 퇴직월 급여에서 공제하는 데 동의했습니다."
+                >
+                  잔여 초과 · 승인 시 {r.overdraftAfter}일
+                </span>
+              )}
+            </td>
             <td className="td">{LEAVE_TYPE_LABEL[r.leaveType] ?? r.leaveType}</td>
             <td className="td text-slate-500">{r.reason ?? "-"}</td>
             <td className="td text-slate-500 whitespace-pre-line">{r.workPlan || "-"}</td>
