@@ -621,8 +621,8 @@ export async function markOpened(assignmentId: number) {
 }
 
 /** 임시저장 — 최종 제출과 따로 둔다. 미응답·임시저장은 어떤 선택으로도 처리되지 않는다 */
-export async function saveChoiceDraft(assignmentId: number, slackUserId: string, versionId: number, raw: Record<string, string>) {
-  const v = await employeeView(assignmentId, slackUserId);
+export async function saveChoiceDraft(assignmentId: number, slackUserId: string, versionId: number, raw: Record<string, string>, view?: EmployeeView) {
+  const v = view ?? (await employeeView(assignmentId, slackUserId));
   if (v.version.id !== versionId) return { versionChanged: true };
   const clean = sanitizeChoices(raw, v.infos);
   await prisma.vacationAssignment.update({
@@ -1361,7 +1361,7 @@ export async function submissionPdf(submissionId: number): Promise<{ pdf: Buffer
         ? `<table class="grid"><thead><tr><th>날짜</th><th>연차 처리 상태</th><th>처리 시각</th><th>비고</th></tr></thead><tbody>${reqs
             .map(
               (r) =>
-                `<tr><td>${esc(ymd(r.startDate))}</td><td>${esc(LEAVE_STATUS_LABEL[r.status] ?? r.status)}</td><td>${esc(
+                `<tr><td>${esc(`${ymdOf(r.startDate)} ${dayLabel(ymdOf(r.startDate)).replace(/^\S+\s/, "")}`)}</td><td>${esc(LEAVE_STATUS_LABEL[r.status] ?? r.status)}</td><td style="white-space:nowrap">${esc(
                   (r.cancelDecidedAt ?? r.decidedAt) ? kstLabel((r.cancelDecidedAt ?? r.decidedAt)!) : "-"
                 )}</td><td>${esc(r.decidedNote ?? r.cancelReason ?? "")}</td></tr>`
             )

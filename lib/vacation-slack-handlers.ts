@@ -18,8 +18,11 @@ import {
   readChoiceValues,
   readSignValues,
   rejectReasonModal,
+  noticeView,
   resultView,
+  selectableDatesInView,
   signModalView,
+  waitingView,
   allChecked,
 } from "./vacation-slack";
 import {
@@ -118,31 +121,52 @@ export async function handleVacationSubmission(payload: any): Promise<Response |
 
   try {
     if (cb === "vac_choice") {
+      // ⚠ 슬랙은 제출 응답을 **3초** 안에 못 받으면 제출을 버리고 이 화면에 오류만 남긴다
+      // (직원에게는 '다음을 눌렀는데 그대로' 로 보인다 — 실제로 겪었다). 여기서는 DB 를 거치지
+      // 않는 검사만 하고, 조회·서명 화면 준비는 '처리 중' 화면을 먼저 띄운 뒤 뒤에서 끝낸다.
       const aid = Number(meta.aid);
-      const v = await employeeView(aid, userId);
-      if (v.version.id !== Number(meta.vid))
-        return json({
-          response_action: "update",
-          view: await choiceView(aid, userId, `공고가 제${v.version.version}판으로 변경되었습니다. 바뀐 내용을 확인하고 다시 골라 주세요.`),
-        });
+      const vid = Number(meta.vid);
       const raw = readChoiceValues(view);
-      await saveChoiceDraft(aid, userId, v.version.id, raw);
-      const clean = sanitizeChoices(raw, v.infos);
-      const missing = unselectedDates(clean, v.infos);
-      if (missing.length) return json({ response_action: "errors", errors: missingChoiceErrors(missing) });
-
-      if (!leaveDates(clean).length) {
-        // 정상근무만 — 서명 없이 선택 결과만 남긴다
-        const out = await submitChoices({ assignmentId: aid, slackUserId: userId, versionId: v.version.id, choices: clean, idempotencyKey: `choice:${view.id}:${view.hash}` });
-        return respondOutcome(out);
+      const missing = selectableDatesInView(view).filter((d) => !raw[d]);
+      if (missing.length) {
+        waitUntil(saveChoiceDraft(aid, userId, vid, raw).catch(() => {}));
+        return json({ response_action: "errors", errors: missingChoiceErrors(missing) });
       }
-      const { balance } = balanceFor(v, clean);
-      if (balance.shortage > 0) {
-        const first = leaveDates(clean)[0];
-        return json({ response_action: "errors", errors: { [`d_${first}`]: shortageText(balance).slice(0, 300) } });
+      const externalId = newExternalId(aid);
+      if (!Object.values(raw).includes("LEAVE")) {
+        // 정상근무만 — 서명 없이 선택 결과만 남긴다. 이 화면 자리에서 결과로 바뀐다
+        waitUntil(
+          finishInView({ view_id: view.id }, userId, async () =>
+            viewForOutcome(
+              await submitChoices({ assignmentId: aid, slackUserId: userId, versionId: vid, choices: raw, idempotencyKey: `choice:${view.id}:${view.hash}` })
+            )
+          )
+        );
+        return json({ response_action: "update", view: waitingView("근무 선택 기록 중", "선택을 기록하고 있습니다. 잠시만 기다려 주세요 — 창을 닫아도 기록은 계속됩니다.", externalId) });
       }
-      const { preview } = await signPreview(v, clean);
-      return json({ response_action: "push", view: signModalView({ assignmentId: aid, versionId: v.version.id, choices: clean, preview }) });
+      waitUntil(
+        finishInView({ external_id: externalId }, userId, async () => {
+          const v = await employeeView(aid, userId);
+          if (v.version.id !== vid) {
+            // 뒤에 깔린 선택 화면도 새 판으로 갈아 둔다 — '뒤로' 를 누르면 바로 바뀐 내용이 보인다
+            await slackCall("views.update", {
+              view_id: view.id,
+              view: await choiceView(aid, userId, `공고가 제${v.version.version}판으로 변경되었습니다. 바뀐 내용을 확인하고 다시 골라 주세요.`),
+            }).catch(() => {});
+            return noticeView("공고 변경", `공고가 제${v.version.version}판으로 변경되었습니다. *뒤로* 를 눌러 바뀐 내용을 확인하고 다시 골라 주세요. 아무것도 제출되지 않았습니다.`, { close: "뒤로" });
+          }
+          await saveChoiceDraft(aid, userId, vid, raw, v);
+          const clean = sanitizeChoices(raw, v.infos);
+          const left = unselectedDates(clean, v.infos);
+          if (left.length)
+            return noticeView("선택 확인", `선택할 수 있는 날짜가 바뀌었습니다: ${left.map(dayLabel).join(", ")}. *뒤로* 를 눌러 다시 확인해 주세요. 아무것도 제출되지 않았습니다.`, { close: "뒤로" });
+          const { balance } = balanceFor(v, clean);
+          if (balance.shortage > 0) return noticeView("연차 잔여 부족", `${shortageText(balance)}\n\n*뒤로* 를 눌러 선택을 바꿔 주세요. 아무것도 제출되지 않았습니다.`, { close: "뒤로" });
+          const { preview } = await signPreview(v, clean);
+          return signModalView({ assignmentId: aid, versionId: v.version.id, choices: clean, preview });
+        })
+      );
+      return json({ response_action: "push", view: waitingView("연차 신청서 확인·서명", "신청서 미리보기를 준비하고 있습니다. 잠시만 기다려 주세요.", externalId) });
     }
 
     if (cb === "vac_sign") {
@@ -151,49 +175,61 @@ export async function handleVacationSubmission(payload: any): Promise<Response |
       if (!allChecked(checks)) errors.checks = "확인 항목 세 가지를 모두 직접 확인해 주세요.";
       if (!signedName) errors.signed_name = "성명을 직접 입력해 주세요.";
       if (Object.keys(errors).length) return json({ response_action: "errors", errors });
-      const out = await submitChoices({
-        assignmentId: Number(meta.aid),
-        slackUserId: userId,
-        versionId: Number(meta.vid),
-        choices: meta.c ?? {},
-        idempotencyKey: `sign:${view.id}`,
-        signature: { typedName: signedName, checks },
-        shown: Array.isArray(meta.s) ? meta.s.map(Number) : null,
-      });
-      if (out.status === "SIGNATURE_INVALID") return json({ response_action: "errors", errors: { signed_name: out.reason } });
-      if (out.status === "BALANCE_CHANGED") {
-        const v = await employeeView(Number(meta.aid), userId);
-        const clean = sanitizeChoices(meta.c ?? {}, v.infos);
-        const { preview } = await signPreview(v, clean);
-        return json({
-          response_action: "update",
-          view: signModalView({
-            assignmentId: v.assignment.id,
-            versionId: v.version.id,
-            choices: clean,
-            preview,
-            banner: `화면을 연 뒤 연차 잔여·승인 대기가 바뀌었습니다(현재 확정 잔여 ${out.balance.remaining}일, 승인 대기 ${out.balance.pending}일). 바뀐 숫자를 확인하고 다시 서명해 주세요. 아직 제출되지 않았습니다.`,
-          }),
-        });
-      }
-      return respondOutcome(out);
+      const aid = Number(meta.aid);
+      // 제출(잠금·재검증·원문 생성)은 3초를 넘길 수 있다 — 처리 중 화면으로 먼저 답하고 뒤에서 끝낸다.
+      // 이 화면 자리(view_id 는 update 해도 그대로다)에서 결과·재서명 화면으로 바뀐다.
+      waitUntil(
+        finishInView({ view_id: view.id }, userId, async () => {
+          const out = await submitChoices({
+            assignmentId: aid,
+            slackUserId: userId,
+            versionId: Number(meta.vid),
+            choices: meta.c ?? {},
+            idempotencyKey: `sign:${view.id}`,
+            signature: { typedName: signedName, checks },
+            shown: Array.isArray(meta.s) ? meta.s.map(Number) : null,
+          });
+          if (out.status === "SIGNATURE_INVALID" || out.status === "BALANCE_CHANGED") {
+            const v = await employeeView(aid, userId);
+            const clean = sanitizeChoices(meta.c ?? {}, v.infos);
+            const { preview } = await signPreview(v, clean);
+            return signModalView({
+              assignmentId: v.assignment.id,
+              versionId: v.version.id,
+              choices: clean,
+              preview,
+              banner:
+                out.status === "SIGNATURE_INVALID"
+                  ? `${out.reason} 확인 항목과 성명을 다시 입력해 주세요. 아직 제출되지 않았습니다.`
+                  : `화면을 연 뒤 연차 잔여·승인 대기가 바뀌었습니다(현재 확정 잔여 ${out.balance.remaining}일, 승인 대기 ${out.balance.pending}일). 바뀐 숫자를 확인하고 다시 서명해 주세요. 아직 제출되지 않았습니다.`,
+            });
+          }
+          return viewForOutcome(out);
+        })
+      );
+      return json({ response_action: "update", view: waitingView("신청서 제출 중", "신청서를 제출하고 있습니다. 잠시만 기다려 주세요 — 창을 닫아도 제출은 계속되고, 결과는 DM 으로도 드립니다.", newExternalId(aid)) });
     }
 
     if (cb === "vac_inquiry_submit") {
       const msg = String(view.state?.values?.msg?.v?.value ?? "");
-      await createInquiry(Number(meta.aid), userId, msg);
-      return json({ response_action: "update", view: messageView("확인 요청 전달", "✅ 담당자에게 전달했습니다. 답변은 DM 으로 드립니다.\n문의는 연차 신청이나 동의로 처리되지 않습니다.") });
+      waitUntil(
+        finishInView({ view_id: view.id }, userId, async () => {
+          await createInquiry(Number(meta.aid), userId, msg);
+          return messageView("확인 요청 전달", "✅ 담당자에게 전달했습니다. 답변은 DM 으로 드립니다.\n문의는 연차 신청이나 동의로 처리되지 않습니다.");
+        })
+      );
+      return json({ response_action: "update", view: waitingView("확인 요청 전달 중", "담당자에게 전달하고 있습니다. 잠시만 기다려 주세요.", newExternalId(Number(meta.aid))) });
     }
 
     if (cb === "vac_reject_submit") {
       const reason = String(view.state?.values?.reason?.v?.value ?? "").trim();
       if (!reason) return json({ response_action: "errors", errors: { reason: "반려 사유를 적어 주세요." } });
       const sid = Number(meta.sid);
-      const allowed = await canDecide(sid, userId, !!meta.pre);
-      if (!allowed.ok) return json({ response_action: "update", view: messageView("권한 없음", allowed.reason) });
-      const r = await rejectGroup(sid, userId, reason, !!meta.pre);
       waitUntil(
-        (async () => {
+        finishInView({ view_id: view.id }, userId, async () => {
+          const allowed = await canDecide(sid, userId, !!meta.pre);
+          if (!allowed.ok) return messageView("권한 없음", allowed.reason);
+          const r = await rejectGroup(sid, userId, reason, !!meta.pre);
           if (meta.ch && meta.ts)
             await updateMessage(meta.ch, meta.ts, `반려: ${r.sub.employee?.name}`, [
               { type: "section", text: { type: "mrkdwn", text: `❌ *${meta.pre ? "중간결재 반려" : "반려"}* — ${r.sub.employee?.name} · ${r.rejected.map(dayLabel).join(", ") || "처리할 신청 없음"}\n사유: ${reason}` } },
@@ -206,9 +242,13 @@ export async function handleVacationSubmission(payload: any): Promise<Response |
             }).catch(() => {});
             await refreshHomeTab(su).catch(() => {});
           }
-        })().catch((e) => console.error("방학 연차 반려 후처리 실패:", e))
+          return messageView(
+            "반려 처리",
+            r.rejected.length ? `❌ ${r.sub.employee?.name} · ${r.rejected.map(dayLabel).join(", ")} 반려했습니다.` : "이미 처리된 신청입니다."
+          );
+        })
       );
-      return json({});
+      return json({ response_action: "update", view: waitingView("반려 처리 중", "반려를 처리하고 있습니다. 잠시만 기다려 주세요.", newExternalId(sid)) });
     }
   } catch (e: any) {
     if (e instanceof ForbiddenError)
@@ -219,21 +259,51 @@ export async function handleVacationSubmission(payload: any): Promise<Response |
   return null;
 }
 
-function respondOutcome(out: SubmitOutcome): Response {
+function viewForOutcome(out: SubmitOutcome): any {
   if (out.status === "OK" || out.status === "DUPLICATE" || out.status === "UNCHANGED") {
     if (out.status === "OK" && out.dispatch) waitUntil(dispatchAfterSubmit(out.dispatch).catch((e) => console.error("방학 근무·연차 알림 실패:", e)));
-    return json({
-      response_action: "update",
-      view: resultView({
-        kind: out.submission.kind,
-        docNo: out.submission.docNo,
-        rows: resultRows(out.submission),
-        submissionId: out.submission.id,
-        note: out.status === "UNCHANGED" ? "이전 제출과 내용이 같아 새로 제출하지 않았습니다." : out.status === "DUPLICATE" ? "이미 접수된 제출입니다(다시 보낸 요청은 한 번으로 처리했습니다)." : null,
-      }),
+    return resultView({
+      kind: out.submission.kind,
+      docNo: out.submission.docNo,
+      rows: resultRows(out.submission),
+      submissionId: out.submission.id,
+      note: out.status === "UNCHANGED" ? "이전 제출과 내용이 같아 새로 제출하지 않았습니다." : out.status === "DUPLICATE" ? "이미 접수된 제출입니다(다시 보낸 요청은 한 번으로 처리했습니다)." : null,
     });
   }
-  return json({ response_action: "update", view: messageView("제출되지 않았습니다", outcomeMessage(out) ?? "제출하지 못했습니다.") });
+  return messageView("제출되지 않았습니다", outcomeMessage(out) ?? "제출하지 못했습니다.");
+}
+
+function newExternalId(aid: number): string {
+  return `vac-${aid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * 처리 중 화면을 결과 화면으로 갈아 끼운다. 직원이 그새 창을 닫아 갈아 끼울 화면이 없으면
+ * 결과를 DM 으로 알린다 — 제출은 이미 끝났는데 아무 흔적이 없으면 다시 제출하게 된다
+ * (정상 접수는 영수 DM 이 따로 가므로 그때는 겹쳐 보내지 않는다).
+ */
+async function finishInView(target: { view_id?: string; external_id?: string }, userId: string, build: () => Promise<any>) {
+  let next: any;
+  try {
+    next = await build();
+  } catch (e: any) {
+    console.error("방학 근무·연차 처리 실패:", e);
+    next =
+      e instanceof ForbiddenError
+        ? messageView("열 수 없음", e.message)
+        : messageView("처리하지 못했습니다", `처리 중 오류가 났습니다. 아무것도 바뀌지 않았을 수 있으니 안내 DM 의 버튼으로 다시 열어 확인해 주세요.\n(${String(e?.message ?? e).slice(0, 200)})`);
+  }
+  const res: any = await slackCall("views.update", { ...target, view: next }).catch((e) => ({ ok: false, error: String(e) }));
+  if (res?.ok) return;
+  console.error("방학 근무·연차 화면 갱신 실패:", res?.error);
+  const receipt = next?.title?.text === "신청 접수 완료" || next?.title?.text === "근무 선택 기록 완료";
+  if (receipt) return;
+  const text = (next?.blocks ?? [])
+    .map((b: any) => b?.text?.text ?? b?.elements?.[0]?.text ?? "")
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 2900);
+  if (text) await slackCall("chat.postMessage", { channel: userId, text: `방학 근무·연차: ${text}` }).catch(() => {});
 }
 
 /** 결재 권한 — 운영진(SLACK_APPROVERS), 중간결재는 그 부서 지정 결재자 또는 운영진 대행 */
@@ -264,10 +334,22 @@ export async function handleVacationAction(payload: any, origin: string): Promis
 
   try {
     if (action.action_id === "vac_open") {
+      // trigger_id 는 3초면 만료된다 — 조회보다 창 열기를 먼저 하고 내용은 뒤에서 채운다
+      // (콜드 스타트에 조회까지 얹으면 버튼을 눌러도 아무 창이 안 뜬다).
       const aid = Number(action.value);
-      const view = await choiceView(aid, userId);
-      await markOpened(aid);
-      await openView(payload.trigger_id, view);
+      const opened: any = await openView(payload.trigger_id, waitingView("근무 선택 및 연차 신청", "공고와 연차 잔여를 불러오고 있습니다. 잠시만 기다려 주세요.", newExternalId(aid)));
+      if (!opened?.ok) {
+        console.error("방학 근무·연차 창 열기 실패:", opened?.error);
+        await say("창을 열지 못했습니다. 버튼을 한 번 더 눌러 주세요.");
+        return ok();
+      }
+      waitUntil(
+        finishInView({ view_id: opened.view.id }, userId, async () => {
+          const view = await choiceView(aid, userId);
+          await markOpened(aid).catch(() => {});
+          return view;
+        })
+      );
       return ok();
     }
 
@@ -277,7 +359,7 @@ export async function handleVacationAction(payload: any, origin: string): Promis
       try {
         meta = JSON.parse(payload.view?.private_metadata || "{}");
       } catch {}
-      await saveChoiceDraft(Number(meta.aid), userId, Number(meta.vid), readChoiceValues(payload.view)).catch(() => {});
+      waitUntil(saveChoiceDraft(Number(meta.aid), userId, Number(meta.vid), readChoiceValues(payload.view)).catch(() => {}));
       return ok();
     }
 

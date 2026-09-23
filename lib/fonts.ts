@@ -22,6 +22,11 @@ const SYMBOL_RANGE =
 //   만든 법: fontTools subset 으로 U+3000-303F 만 추출 (assets/fonts/NanumGothic-Punct-*.woff2)
 const PUNCT_RANGE = "U+3000-303F";
 
+// 체크 표시(☐☑☒✓✔)도 두 서브셋 어디에도 없다 — 방학 연차 신청서의 확인 항목이 서버리스에서
+// 체크 없이 글머리표만 남았다(서명한 확인 항목이 안 보이는 셈이다). DejaVu Sans 에서 이 다섯 자만
+// 뽑아 1KB 보강본으로 덧입힌다(라이선스: assets/fonts/CheckMarks-LICENSE.txt).
+const CHECK_RANGE = "U+2610-2612,U+2713-2714";
+
 /**
  * 바닥글 전용 @font-face — 굵기 하나(400)만.
  *
@@ -51,6 +56,8 @@ export function fontFaceCss(): string {
     ["NanumGothic", 700, "NotoSymbols-Bold.woff2", SYMBOL_RANGE],
     ["NanumGothic", 400, "NanumGothic-Punct-Regular.woff2", PUNCT_RANGE],
     ["NanumGothic", 700, "NanumGothic-Punct-Bold.woff2", PUNCT_RANGE],
+    ["NanumGothic", 400, "CheckMarks-Regular.woff2", CHECK_RANGE],
+    ["NanumGothic", 700, "CheckMarks-Bold.woff2", CHECK_RANGE],
   ];
   cachedCss = faces
     .map(

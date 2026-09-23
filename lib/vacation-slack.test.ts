@@ -6,6 +6,9 @@ import {
   groupApprovalBlocks,
   missingChoiceErrors,
   noticeDmBlocks,
+  noticeView,
+  selectableDatesInView,
+  waitingView,
   readChoiceValues,
   readSignValues,
   receiptDmBlocks,
@@ -170,5 +173,27 @@ describe("문서 받기 토큰", () => {
     const forged = Buffer.from(JSON.stringify({ sid: 6, u: "U1", exp: 9e9 })).toString("base64url");
     expect(verifyDocToken(`${forged}.${sig}`, secret, now)).toBeNull();
     expect(verifyDocToken(`${body}.`, secret, now)).toBeNull();
+  });
+});
+
+describe("3초 응답 — 처리 중 화면", () => {
+  it("모달에 그려진 선택 칸만으로 고를 날짜를 읽는다 (DB 없이 미선택 검사)", () => {
+    const v = choiceModalView({ assignmentId: 7, versionId: 3, head, employeeName: "x", condition: null, infos, choices: {}, balance, ownStatus: {} });
+    // 공휴일(1/1)은 선택 칸이 아니라 안내 줄이다
+    expect(selectableDatesInView(v)).toEqual(["2026-12-28", "2026-12-29"]);
+    expect(selectableDatesInView({})).toEqual([]);
+  });
+
+  it("처리 중 화면은 external_id 를 달고, 제출 버튼이 없다", () => {
+    const w = waitingView("연차 신청서 확인·서명", "준비 중", "vac-1-x");
+    expect(w.external_id).toBe("vac-1-x");
+    expect(w.submit).toBeUndefined();
+    expect(w.title.text.length).toBeLessThanOrEqual(24);
+  });
+
+  it("안내 화면 — 쌓인 화면 위에서는 닫기 문구를 '뒤로' 로", () => {
+    const n = noticeView("연차 잔여 부족", "본문", { close: "뒤로" });
+    expect(n.close.text).toBe("뒤로");
+    expect(n.external_id).toBeUndefined();
   });
 });

@@ -227,6 +227,42 @@ export function readChoiceValues(view: any): Record<string, string> {
   return out;
 }
 
+/**
+ * 모달에 그려진 '고를 수 있는 날짜' — 제출값만으로 미선택을 가리려고 쓴다(DB 를 안 거친다).
+ * 선택 대상이 아닌 날은 입력칸 없이 안내 줄로만 그리므로 여기 잡히지 않는다.
+ */
+export function selectableDatesInView(view: any): string[] {
+  return (view?.blocks ?? [])
+    .filter((b: any) => b?.type === "input" && typeof b.block_id === "string" && b.block_id.startsWith("d_"))
+    .map((b: any) => b.block_id.slice(2));
+}
+
+/**
+ * 처리 중 화면 — 슬랙은 모달 제출 응답을 **3초** 안에 받지 못하면 제출을 버리고 원래 화면에
+ * 오류만 띄운다(직원에게는 '눌렀는데 그 화면 그대로' 로 보인다). 무거운 조회·제출은 이 화면을
+ * 먼저 띄워 두고 뒤에서 끝낸 뒤 `external_id` 로 갈아 끼운다.
+ */
+export function waitingView(title: string, text: string, externalId: string): any {
+  return {
+    type: "modal",
+    external_id: externalId,
+    title: pt(title.slice(0, 24)),
+    close: pt("닫기"),
+    blocks: [md(`⏳ ${text}`)],
+  };
+}
+
+/** 안내만 담은 화면 (닫기 버튼 문구를 고를 수 있다 — 쌓인 화면 위에서는 '뒤로') */
+export function noticeView(title: string, text: string, opts: { externalId?: string; close?: string } = {}): any {
+  return {
+    type: "modal",
+    ...(opts.externalId ? { external_id: opts.externalId } : {}),
+    title: pt(title.slice(0, 24)),
+    close: pt(opts.close ?? "닫기"),
+    blocks: [md(text)],
+  };
+}
+
 export function missingChoiceErrors(dates: string[]): Record<string, string> {
   return Object.fromEntries(
     dates.map((d) => [`d_${d}`, "아직 선택하지 않았습니다. 지금까지 고른 내용은 임시저장되었습니다."])
