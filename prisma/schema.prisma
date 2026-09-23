@@ -216,6 +216,8 @@ model Employee {
   leaveApproverOf   Department[]       @relation("DeptLeaveApprover")
   severanceBases    SeveranceMonthlyBase[]
   dayOffs           DayOff[]
+  vacationAssignments VacationAssignment[]
+  vacationSubmissions VacationSubmission[]
   attachedFiles     AttachedFile[]
 
   createdAt DateTime @default(now())
@@ -580,6 +582,10 @@ model LeaveRequest {
   overdraftConsentAt DateTime? // 신청자가 동의란에 체크한 시각
   overdraftAfter     Float? // 신청 당시 '모두 승인되면 남는 잔여' (음수)
 
+  // 방학 근무·연차 공고에서 직원이 고른 연차 — 날짜 하나당 신청 하나(변경·취소를 날짜 단위로 한다)
+  vacationAssignmentId Int?
+  vacationSubmissionId Int?
+
   // 취소 신청 (직원이 승인된 휴가를 취소 요청 → 운영진 승인 필요)
   cancelReason      String?
   cancelRequestedAt DateTime?
@@ -869,4 +875,161 @@ model SeveranceMonthlyBase {
 
   @@unique([employeeId, year, month])
   @@index([employeeId])
+}
+
+
+// ==================== 방학 근무·연차 (lib/vacation.ts) ====================
+// 수업이 없는 기간에 직원이 날짜별로 정상근무/연차 신청을 **스스로** 고르는 공고.
+// 일괄 연차대체·근로자대표 합의와 무관하다 — 미응답은 아무 선택도 아니다.
+// 게시한 공고는 덮어쓰지 않고 버전(VacationNoticeVersion)으로 쌓는다.
+model VacationNotice {
+  id               Int       @id @default(autoincrement())
+  /// DRAFT | PUBLISHED | CLOSED | ARCHIVED
+  status           String    @default("DRAFT")
+  /// 가장 최근에 **게시한** 판 — 직원이 보는 것은 이것이다
+  currentVersionId Int?
+  createdBy        String?
+  closedAt         DateTime?
+  archivedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  versions    VacationNoticeVersion[]
+  assignments VacationAssignment[]
+  inquiries   VacationInquiry[]
+  events      VacationEvent[]
+}
+
+/// 공고의 한 판 — 게시(publishedAt)된 판은 고치지 않는다. 고치려면 새 판을 만든다.
+model VacationNoticeVersion {
+  id          Int            @id @default(autoincrement())
+  noticeId    Int
+  notice      VacationNotice @relation(fields: [noticeId], references: [id], onDelete: Restrict)
+  version     Int
+  /// NoticeContent JSON — 안내문·날짜·대상·직군별 정상근무 조건 원문
+  content     String         @default("{}")
+  /// DRAFT | PUBLISHED | SUPERSEDED
+  status      String         @default("DRAFT")
+  /// 발행 전 운영 사실 확인 {items:{key:true}, by, byName, at} — 법률 검토 완료가 아니다
+  attestation String?
+  /// 게시 당시 대상자 스냅샷 [{employeeId,name,department}]
+  targets     String         @default("[]")
+  /// 게시 당시 제외자·사유 [{employeeId,name,reason}]
+  excluded    String         @default("[]")
+  /// 앞 판과 비교해 재확인이 필요한 변경인가
+  material    Boolean        @default(false)
+  changeNote  String?
+  publishedAt DateTime?
+  publishedBy String?
+  createdAt   DateTime       @default(now())
+
+  @@unique([noticeId, version])
+}
+
+/// 공고 × 직원. 직원이 지워져도(입사 취소) 기록은 남는다 — 이름·소속을 따로 적어 둔다.
+model VacationAssignment {
+  id           Int            @id @default(autoincrement())
+  noticeId     Int
+  notice       VacationNotice @relation(fields: [noticeId], references: [id], onDelete: Restrict)
+  employeeId   Int?
+  employee     Employee?      @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  employeeName String
+  department   String?
+  /// 이 직원에게 마지막으로 안내한 판
+  versionId    Int
+  /// 공고 개정으로 대상에서 빠졌다 (기록은 남긴다)
+  removed      Boolean        @default(false)
+  /// 앞선 제출 뒤 중요한 조건이 바뀌어 다시 확인해야 한다 — 이전 서명을 새 조건에 적용하지 않는다
+  needsReconfirm Boolean      @default(false)
+  firstOpenedAt  DateTime?
+  lastOpenedAt   DateTime?
+  /// 임시저장 {YYYY-MM-DD: WORK|LEAVE} — 최종 제출과 구분된다
+  draft          String       @default("{}")
+  draftVersionId Int?
+  draftSavedAt   DateTime?
+  notifiedAt     DateTime?
+  notifyError    String?
+  lastRemindedAt DateTime?
+  activeSubmissionId Int?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  submissions VacationSubmission[]
+
+  @@unique([noticeId, employeeId])
+  @@index([employeeId])
+}
+
+/// 제출 원문 — **고치지도 지우지도 않는다**. 변경은 supersedesId 로 이어진 새 제출이다.
+model VacationSubmission {
+  id           Int                @id @default(autoincrement())
+  assignmentId Int
+  assignment   VacationAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  noticeId     Int
+  versionId    Int
+  versionNo    Int
+  employeeId   Int?
+  employee     Employee?          @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  docNo        String             @unique
+  /// LEAVE(연차유급휴가 신청서) | WORK_ONLY(근무 선택 확인 내역 — 서명 없음)
+  kind         String
+  /// [{date, choice, days, requestId?}]
+  choices      String
+  leaveDays    Float              @default(0)
+  /// 제출 당시 원문 데이터(SubmissionSnapshot JSON)와 그로 만든 HTML
+  snapshot     String
+  docHtml      String
+  /// 무결성 점검용 SHA-256 — 법적 효력 보증이 아니다
+  contentHash  String
+  signMethod   String?
+  signedName   String?
+  /// 인증된 제출 계정 (슬랙 사용자 id — 서버가 요청 서명으로 확인한 값)
+  submittedBy  String
+  submittedAt  DateTime           @default(now())
+  /// 같은 서명 화면의 재전송을 한 번으로 묶는다
+  idempotencyKey String           @unique
+  /// ACTIVE | SUPERSEDED
+  status       String             @default("ACTIVE")
+  supersedesId Int?
+  supersededAt DateTime?
+
+  @@index([assignmentId])
+  @@index([noticeId])
+}
+
+/// 「안내 내용 확인 요청」 — 연차 동의·서명을 요구하지 않는 문의
+model VacationInquiry {
+  id           Int            @id @default(autoincrement())
+  noticeId     Int
+  notice       VacationNotice @relation(fields: [noticeId], references: [id], onDelete: Restrict)
+  assignmentId Int
+  employeeId   Int?
+  employeeName String
+  message      String
+  /// OPEN | ANSWERED
+  status       String         @default("OPEN")
+  answer       String?
+  answeredBy   String?
+  answeredAt   DateTime?
+  createdAt    DateTime       @default(now())
+
+  @@index([noticeId])
+}
+
+/// 공고별 처리 이력 — 열람·제출·변경·철회·취소 요청·알림·사실 확인 (지우지 않는다)
+model VacationEvent {
+  id           Int            @id @default(autoincrement())
+  noticeId     Int
+  notice       VacationNotice @relation(fields: [noticeId], references: [id], onDelete: Restrict)
+  assignmentId Int?
+  employeeId   Int?
+  type         String
+  /// EMPLOYEE(슬랙 본인) | ADMIN | SLACK_APPROVER | SYSTEM
+  actor        String
+  actorName    String?
+  note         String?
+  detail       String         @default("{}")
+  createdAt    DateTime       @default(now())
+
+  @@index([noticeId, createdAt])
 }

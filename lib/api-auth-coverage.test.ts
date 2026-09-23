@@ -27,6 +27,8 @@ const dedicatedAuth = new Set([
   "app/api/slack/events/route.ts",
   "app/api/slack/interactivity/route.ts",
   "app/api/slack/notify/route.ts",
+  // 직원 본인 문서 — 슬랙이 본인에게 준 15분짜리 서명 토큰 + 제출 주인 대조
+  "app/api/vacation/doc/route.ts",
 ]);
 
 describe("HR API authentication coverage", () => {

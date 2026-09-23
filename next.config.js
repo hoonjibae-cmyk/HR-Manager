@@ -21,6 +21,9 @@ const nextConfig = {
       "/api/email/send": ["./node_modules/@sparticuz/chromium/bin/**"],
       "/api/email/schedule-run": ["./node_modules/@sparticuz/chromium/bin/**"],
       "/api/cron": ["./node_modules/@sparticuz/chromium/bin/**"],
+      // 방학 근무·연차 신청서 PDF — submissionPdf() 가 htmlToPdf 를 부르는 곳은 이 둘뿐이다
+      "/api/vacation/doc": ["./node_modules/@sparticuz/chromium/bin/**"],
+      "/api/vacation/submissions/[id]/pdf": ["./node_modules/@sparticuz/chromium/bin/**"],
     },
     /**
      * **PDF 를 뽑지 않는데 크로미움을 지고 다니던 라우트에서 bin 을 뺀다.**
@@ -44,6 +47,13 @@ const nextConfig = {
       "/api/settings/notify": ["./node_modules/@sparticuz/chromium/bin/**"],
       "/api/email/preview": ["./node_modules/@sparticuz/chromium/bin/**"],
       "/api/email/test": ["./node_modules/@sparticuz/chromium/bin/**"],
+      // lib/vacation-service 를 import 하지만 PDF 는 뽑지 않는다(문서는 위 두 라우트가 렌더한다).
+      // 슬랙 처리는 서명 링크만 만들어 DM 으로 준다.
+      "/api/slack/interactivity": ["./node_modules/@sparticuz/chromium/bin/**"],
+      "/api/vacation/notices": ["./node_modules/@sparticuz/chromium/bin/**"],
+      "/api/vacation/notices/[id]": ["./node_modules/@sparticuz/chromium/bin/**"],
+      "/api/vacation/inquiries/[id]": ["./node_modules/@sparticuz/chromium/bin/**"],
+      "/vacation": ["./node_modules/@sparticuz/chromium/bin/**"],
     },
   },
 };

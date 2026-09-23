@@ -88,8 +88,19 @@ import { DEFAULT_DAILY_CHANNEL } from "@/lib/daily-brief";
 import { logActivity } from "@/lib/activity";
 import { ymd } from "@/lib/format";
 import { OVERDRAFT_CONSENT_REQUIRED } from "@/lib/leave-overdraft";
+import { handleVacationAction, handleVacationSubmission } from "@/lib/vacation-slack-handlers";
 
 export const dynamic = "force-dynamic";
+
+/** 이 배포의 공개 주소 — 슬랙이 보낸 요청의 Host 를 그대로 쓴다(직원 문서 링크용) */
+function publicOrigin(req: Request): string {
+  const h = req.headers;
+  const host = h.get("x-forwarded-host") || h.get("host");
+  const proto = h.get("x-forwarded-proto") || (host?.startsWith("localhost") ? "http" : "https");
+  if (host) return `${proto}://${host}`;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "http://localhost:3000";
+}
 
 /** 슬랙 사용자 → 직원 카드 (미등록이면 이메일·이름으로 자동 연결) */
 async function resolveEmployee(userId: string) {
@@ -257,6 +268,10 @@ export async function POST(req: Request) {
 
   const form = new URLSearchParams(raw);
   const payload = JSON.parse(form.get("payload") || "{}");
+
+  /* ---------- 방학 근무·연차 (모달 제출) ---------- */
+  const vacSubmission = await handleVacationSubmission(payload);
+  if (vacSubmission) return vacSubmission;
 
   /* ---------- 휴가신청서 모달 제출 ---------- */
   if (payload.type === "view_submission" && payload.view?.callback_id === "leave_request_submit") {
@@ -736,6 +751,10 @@ export async function POST(req: Request) {
 
   const action = payload.actions?.[0];
   if (!action) return new Response("", { status: 200 });
+
+  /* ---------- 방학 근무·연차 버튼 — 아래의 '모르는 버튼 = 연차 신청 id' 분기보다 앞이어야 한다 ---------- */
+  const vacAction = await handleVacationAction(payload, publicOrigin(req));
+  if (vacAction) return vacAction;
 
   /* ---------- '휴가신청서 작성' 버튼 (채널 · 앱 홈) ---------- */
   if (action.action_id === "open_leave_modal") {

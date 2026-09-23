@@ -22,11 +22,17 @@ export async function approveLeaveRequest(requestId: number, approver = "admin")
     throw new Error("이미 처리된 신청입니다");
 
   const isComp = reqRow.leaveType === "COMP";
-  const ops: any[] = [];
-  // 병가·경조사는 연차 잔여에서 차감하지 않고 기록만 남긴다
-  if (deductsLeave(reqRow.leaveType)) {
-    ops.push(
-      prisma.leaveTransaction.create({
+  // **상태를 조건으로 건 갱신이 먼저다** — 읽고 나서 쓰면 두 승인자가 동시에 눌렀을 때 둘 다
+  // PENDING 을 보고 차감을 두 번 만든다. 조건부 갱신이 한 건만 성공하므로 차감도 한 번뿐이다.
+  await prisma.$transaction(async (tx: any) => {
+    const upd = await tx.leaveRequest.updateMany({
+      where: { id: requestId, status: { in: ["PENDING", "PRE_PENDING"] } },
+      data: { status: "APPROVED", approverId: approver, decidedAt: new Date() },
+    });
+    if (upd.count !== 1) throw new Error("이미 처리된 신청입니다");
+    // 병가·경조사는 연차 잔여에서 차감하지 않고 기록만 남긴다
+    if (deductsLeave(reqRow.leaveType)) {
+      await tx.leaveTransaction.create({
         data: {
           employeeId: reqRow.employeeId,
           date: reqRow.startDate,
@@ -36,15 +42,9 @@ export async function approveLeaveRequest(requestId: number, approver = "admin")
           note: `${isComp ? "대휴사용" : "연차사용"} (${reqRow.reason ?? ""})`,
           requestId: reqRow.id,
         },
-      })
-    );
-  }
-  ops.push(
-    prisma.leaveRequest.update({
-      where: { id: requestId },
-      data: { status: "APPROVED", approverId: approver, decidedAt: new Date() },
-    }),
-    prisma.auditLog.create({
+      });
+    }
+    await tx.auditLog.create({
       data: {
         actor: approver.startsWith("U") ? "SLACK" : approver,
         actorName: approver,
@@ -54,9 +54,8 @@ export async function approveLeaveRequest(requestId: number, approver = "admin")
         summary: `${reqRow.employee?.name ?? "직원"}의 휴가 ${reqRow.days}일을 승인했습니다.`,
         detail: JSON.stringify({ requestId, leaveType: reqRow.leaveType }),
       },
-    })
-  );
-  await prisma.$transaction(ops);
+    });
+  });
   return leaveSummaryFor(reqRow.employeeId);
 }
 
@@ -68,14 +67,16 @@ export async function requestLeaveCancel(requestId: number, reason: string) {
   if (!reqRow) throw new Error("신청 없음");
   if (reqRow.status !== "APPROVED")
     throw new Error("승인된 휴가만 취소 신청할 수 있습니다.");
-  return prisma.leaveRequest.update({
-    where: { id: requestId },
+  const upd = await prisma.leaveRequest.updateMany({
+    where: { id: requestId, status: "APPROVED" },
     data: {
       status: "CANCEL_PENDING",
       cancelReason: reason || "사유 미기재",
       cancelRequestedAt: new Date(),
     },
   });
+  if (upd.count !== 1) throw new Error("승인된 휴가만 취소 신청할 수 있습니다.");
+  return prisma.leaveRequest.findUnique({ where: { id: requestId } });
 }
 
 /** 최종 승인 전 신청 철회 — 차감 트랜잭션이 생기기 전이므로 상태만 취소로 남긴다. */
@@ -83,24 +84,27 @@ export async function withdrawLeaveRequest(
   requestId: number,
   employeeId: number,
   actorName: string,
+  opts: { reason?: string; actor?: string } = {},
 ) {
   const reqRow = await prisma.leaveRequest.findUnique({ where: { id: requestId } });
   if (!reqRow || reqRow.employeeId !== employeeId) throw new Error("신청 없음");
   if (reqRow.status !== "PRE_PENDING" && reqRow.status !== "PENDING")
     throw new Error("승인 대기 중인 신청만 철회할 수 있습니다.");
-  await prisma.$transaction([
-    prisma.leaveRequest.update({
-      where: { id: requestId },
+  await prisma.$transaction(async (tx: any) => {
+    // 승인과 철회가 엇갈리면 한쪽만 성공해야 한다 — 상태 조건부 갱신
+    const upd = await tx.leaveRequest.updateMany({
+      where: { id: requestId, status: { in: ["PRE_PENDING", "PENDING"] } },
       data: {
         status: "CANCELED",
-        cancelReason: "신청자 철회",
+        cancelReason: opts.reason ?? "신청자 철회",
         cancelRequestedAt: new Date(),
         cancelDecidedAt: new Date(),
       },
-    }),
-    prisma.auditLog.create({
+    });
+    if (upd.count !== 1) throw new Error("승인 대기 중인 신청만 철회할 수 있습니다.");
+    await tx.auditLog.create({
       data: {
-        actor: "PORTAL",
+        actor: opts.actor ?? "PORTAL",
         actorName,
         action: "LEAVE_WITHDRAW",
         target: `req:${requestId}`,
@@ -108,8 +112,8 @@ export async function withdrawLeaveRequest(
         summary: `${actorName}님이 승인 전 휴가 신청(${reqRow.days}일)을 철회했습니다.`,
         detail: JSON.stringify({ requestId }),
       },
-    }),
-  ]);
+    });
+  });
 }
 
 /**
@@ -122,14 +126,16 @@ export async function approveLeaveCancel(requestId: number, approver = "admin") 
   if (reqRow.status !== "CANCEL_PENDING")
     throw new Error("취소 승인 대기 상태가 아닙니다.");
 
-  await prisma.$transaction([
-    // 승인 시 생성된 사용 트랜잭션 제거 → 잔여 연차 복원
-    prisma.leaveTransaction.deleteMany({ where: { requestId } }),
-    prisma.leaveRequest.update({
-      where: { id: requestId },
+  await prisma.$transaction(async (tx: any) => {
+    // 상태 조건부 갱신이 한 건만 성공한다 — 취소 승인을 두 번 눌러도 복원은 한 번뿐이다
+    const upd = await tx.leaveRequest.updateMany({
+      where: { id: requestId, status: "CANCEL_PENDING" },
       data: { status: "CANCELED", cancelDecidedAt: new Date(), approverId: approver },
-    }),
-    prisma.auditLog.create({
+    });
+    if (upd.count !== 1) throw new Error("취소 승인 대기 상태가 아닙니다.");
+    // 승인 시 생성된 사용 트랜잭션 제거 → 잔여 연차 복원
+    await tx.leaveTransaction.deleteMany({ where: { requestId } });
+    await tx.auditLog.create({
       data: {
         actor: approver.startsWith("U") ? "SLACK" : approver,
         actorName: approver,
@@ -139,8 +145,8 @@ export async function approveLeaveCancel(requestId: number, approver = "admin") 
         summary: `휴가 취소를 승인했습니다 (${reqRow.days}일 복원).`,
         detail: JSON.stringify({ requestId }),
       },
-    }),
-  ]);
+    });
+  });
   return leaveSummaryFor(reqRow.employeeId);
 }
 
@@ -150,10 +156,11 @@ export async function rejectLeaveCancel(requestId: number, approver = "admin") {
   if (!reqRow) throw new Error("신청 없음");
   if (reqRow.status !== "CANCEL_PENDING")
     throw new Error("취소 승인 대기 상태가 아닙니다.");
-  await prisma.leaveRequest.update({
-    where: { id: requestId },
+  const upd = await prisma.leaveRequest.updateMany({
+    where: { id: requestId, status: "CANCEL_PENDING" },
     data: { status: "APPROVED", cancelDecidedAt: new Date() },
   });
+  if (upd.count !== 1) throw new Error("취소 승인 대기 상태가 아닙니다.");
   await prisma.auditLog.create({
     data: {
       actor: approver.startsWith("U") ? "SLACK" : approver,
@@ -175,10 +182,11 @@ export async function rejectLeaveRequest(
   // 중간결재 단계(PRE_PENDING)의 반려도 여기로 온다 (승인과 같은 이유)
   if (reqRow.status !== "PENDING" && reqRow.status !== "PRE_PENDING")
     throw new Error("이미 처리된 신청입니다");
-  await prisma.leaveRequest.update({
-    where: { id: requestId },
+  const upd = await prisma.leaveRequest.updateMany({
+    where: { id: requestId, status: { in: ["PENDING", "PRE_PENDING"] } },
     data: { status: "REJECTED", approverId: approver, decidedAt: new Date(), decidedNote: note },
   });
+  if (upd.count !== 1) throw new Error("이미 처리된 신청입니다");
   await prisma.auditLog.create({
     data: {
       actor: approver.startsWith("U") ? "SLACK" : approver,

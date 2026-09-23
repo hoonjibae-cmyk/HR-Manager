@@ -51,6 +51,12 @@ export const ACTION_LABEL: Record<string, string> = {
   NOTIFY_DAILY_LEAVE: "오늘 휴가 안내",
   NOTIFY_DAILY_MAKEUP: "오늘 보강 안내",
   DAYOFF_SYNC: "평일 휴무 동기화",
+  VACATION_PUBLISH: "방학 근무·연차 공고 게시",
+  VACATION_CLOSED: "방학 근무·연차 공고 마감",
+  VACATION_PUBLISHED: "방학 근무·연차 공고 다시 열기",
+  VACATION_ARCHIVED: "방학 근무·연차 공고 보관",
+  VACATION_REMIND: "방학 근무·연차 확인 요청",
+  VACATION_SUBMIT: "방학 근무·연차 제출",
 };
 
 /** 되돌리기 어렵거나 돈·개인정보가 오가는 작업 (이력 화면 기본 필터) */

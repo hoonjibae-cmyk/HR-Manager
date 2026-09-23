@@ -14,6 +14,7 @@ import { postMessage, approvalBlocks, preApprovalBlocks } from "./slack";
 import { ymd } from "./format";
 import { LEAVE_TYPE_LABEL, isHalfDayLeave, parseSchedule, isContractorContract } from "./constants";
 import { preApproverFor } from "./leave-approval";
+import { withEmployeeLeaveLock } from "./leave-lock";
 import {
   affectsAnnualBalance,
   checkOverdraft,
@@ -196,8 +197,8 @@ export function leaveBalanceText(
  * 아직 승인되지 않은 연차 신청 일수(중간결재 대기 포함) — 승인되면 잔여에서 빠질 몫.
  * 잔여 초과 판정에 함께 넣는다(연달아 낸 신청이 각각은 잔여 안이어도 합치면 넘는다).
  */
-export async function pendingAnnualDays(employeeId: number): Promise<number> {
-  const rows = await prisma.leaveRequest.findMany({
+export async function pendingAnnualDays(employeeId: number, client: any = prisma): Promise<number> {
+  const rows: { days: number }[] = await client.leaveRequest.findMany({
     where: {
       employeeId,
       status: { in: ["PRE_PENDING", "PENDING"] },
@@ -443,21 +444,67 @@ export async function submitLeaveRequest(
   const preApprover = preApproverFor(dept?.leaveApprover ?? null, emp.id);
 
   const typeLabel = LEAVE_TYPE_LABEL[input.leaveType] ?? "연차";
-  const reqRow = await prisma.leaveRequest.create({
-    data: {
-      employeeId: emp.id,
-      startDate: input.start,
-      endDate: input.end,
-      days,
-      leaveType: input.leaveType,
-      reason: reasonFull || "개인사유",
-      workPlan: input.workPlan?.trim() || null,
-      status: preApprover ? "PRE_PENDING" : "PENDING",
-      source: input.source ?? "SLACK",
-      overdraftConsentAt: overdrawn ? new Date() : null,
-      overdraftAfter: overdrawn ? overdraft!.after : null,
-    },
+  // 생성은 **직원 단위 잠금 안에서** 중복·겹침·잔여를 다시 본 뒤에 한다 — 같은 사람이 슬랙·포털·
+  // 방학 공고로 동시에 내도 한 줄로 서서 두 건이 되거나 잔여 판정이 엇갈리지 않는다.
+  const locked = await withEmployeeLeaveLock(emp.id, async (tx) => {
+    const again = await tx.leaveRequest.findFirst({
+      where: {
+        employeeId: emp.id,
+        startDate: input.start,
+        endDate: input.end,
+        leaveType: input.leaveType,
+        status: { notIn: ["REJECTED", "CANCELED"] },
+      },
+    });
+    if (again) return { dup: again };
+    // 방학 근무·연차 공고로 이미 낸 날과 겹치면 새로 만들지 않는다(같은 날 두 번 차감 방지)
+    const vac = await tx.leaveRequest.findFirst({
+      where: {
+        employeeId: emp.id,
+        vacationAssignmentId: { not: null },
+        status: { notIn: ["REJECTED", "CANCELED"] },
+        startDate: { lte: input.end },
+        endDate: { gte: input.start },
+      },
+    });
+    if (vac) return { conflict: vac };
+    if (affectsAnnualBalance(input.leaveType)) {
+      const c = checkOverdraft({
+        leaveType: input.leaveType,
+        remaining: summary.remaining,
+        pending: await pendingAnnualDays(emp.id, tx),
+        days,
+      });
+      if (c.overdrawn && !input.overdraftConsent) return { overdraft: c };
+    }
+    const row = await tx.leaveRequest.create({
+      data: {
+        employeeId: emp.id,
+        startDate: input.start,
+        endDate: input.end,
+        days,
+        leaveType: input.leaveType,
+        reason: reasonFull || "개인사유",
+        workPlan: input.workPlan?.trim() || null,
+        status: preApprover ? "PRE_PENDING" : "PENDING",
+        source: input.source ?? "SLACK",
+        overdraftConsentAt: overdrawn ? new Date() : null,
+        overdraftAfter: overdrawn ? overdraft!.after : null,
+      },
+    });
+    return { row };
   });
+  if ("dup" in locked && locked.dup)
+    return { ok: true, duplicate: true, requestId: locked.dup.id, days: locked.dup.days };
+  if ("conflict" in locked && locked.conflict)
+    return {
+      ok: false,
+      error: `이 기간에 「방학 근무·연차」 공고로 이미 신청한 연차가 있습니다 (${ymd(locked.conflict.startDate)}). 공고 신청 내역에서 확인해 주세요.`,
+      field: "start",
+    };
+  if ("overdraft" in locked && locked.overdraft)
+    return { ok: false, error: OVERDRAFT_CONSENT_REQUIRED, field: "consent", overdraft: locked.overdraft, days };
+  const reqRow = (locked as any).row;
   const overdraftAfter = overdrawn ? overdraft!.after : null;
 
   // **발송은 여기서 하지 않고 notify 로 미룬다** — 슬랙 모달·슬래시 명령은 3초 안에 응답해야
