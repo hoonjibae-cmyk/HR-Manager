@@ -4,6 +4,14 @@ import { prisma } from "@/lib/db";
 import { leaveSummaryFor } from "@/lib/repo";
 import { PageHeader, Pill, Empty } from "@/components/ui";
 import { LEAVE_TYPE_LABEL } from "@/lib/constants";
+import {
+  CONSENT_CHANNEL_LABEL,
+  LEGACY_CONSENT_NOTE,
+  kstStamp,
+  legacySourceLabel,
+  parseConsentRecord,
+  type OverdraftConsentRecord,
+} from "@/lib/leave-overdraft";
 import CompGrantButton from "@/components/CompGrantButton";
 import LeaveTxnDeleteButton from "@/components/LeaveTxnDeleteButton";
 
@@ -65,6 +73,9 @@ export default async function EmployeeLeavePage({
   const inYear = (d: Date) => year == null || d.getUTCFullYear() === year;
   const shownTxns = txns.filter((t: any) => inYear(t.date));
   const shownReqs = requests.filter((r: any) => inYear(r.startDate));
+  const consents = requests
+    .filter((r: any) => r.overdraftConsentAt)
+    .map((r: any) => ({ r, rec: parseConsentRecord(r.overdraftConsent) as OverdraftConsentRecord | null }));
 
   // 사용/부여를 나눠 합계를 낸다 (표시 중인 범위 기준)
   const usedAnnual = shownTxns
@@ -232,6 +243,65 @@ export default async function EmployeeLeavePage({
         )}
       </div>
 
+      {/* 연차 초과사용 급여공제 동의 — 퇴직 정산·분쟁 때 근거. 연도 탭과 무관하게 전부 보여 준다
+          (퇴직 시점에 따지는 것은 지금까지의 모든 초과 신청이다). 반려·취소된 신청도 지우지 않고 상태와 함께 남긴다. */}
+      {consents.length > 0 && (
+        <div className="card mb-6 border-amber-200">
+          <div className="px-5 py-3 border-b border-amber-100 bg-amber-50/60 font-bold text-slate-800">
+            연차 초과사용 급여공제 동의 기록{" "}
+            <span className="text-xs font-normal text-slate-500">
+              잔여를 넘는 연차를 신청하며 「퇴직 시 초과분 퇴직월 급여 공제」에 동의한 기록 · {consents.length}건
+            </span>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {consents.map(({ r, rec }: { r: any; rec: OverdraftConsentRecord | null }) => (
+              <li key={r.id} className="px-5 py-3 text-sm">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="tnum font-semibold">
+                    {ymd(r.startDate)}
+                    {r.endDate.getTime() !== r.startDate.getTime() && ` ~ ${ymd(r.endDate)}`}
+                  </span>
+                  <span className="text-slate-600">
+                    {LEAVE_TYPE_LABEL[r.leaveType] ?? r.leaveType} {r.days}일
+                  </span>
+                  <Pill kind={r.status === "APPROVED" ? "ACTIVE" : r.status === "PENDING" || r.status === "PRE_PENDING" ? "DRAFT" : "EXPIRED"}>
+                    {STATUS_LABEL[r.status] ?? r.status}
+                  </Pill>
+                  <span className="text-slate-500">
+                    동의 {kstStamp(r.overdraftConsentAt)} ·{" "}
+                    {rec ? CONSENT_CHANNEL_LABEL[rec.channel as keyof typeof CONSENT_CHANNEL_LABEL] ?? rec.channel : legacySourceLabel(r.source)}
+                  </span>
+                  <a
+                    href={`/api/leave/requests/${r.id}/overdraft-consent`}
+                    target="_blank"
+                    rel="noopener"
+                    className="ml-auto text-xs text-brand-700 hover:underline"
+                  >
+                    동의 기록 PDF ↗
+                  </a>
+                </div>
+                <div className="text-xs text-slate-500 mt-1 tnum">
+                  {rec
+                    ? `신청 시점 잔여 ${rec.figures.remaining}일 − 승인 대기 ${rec.figures.pending}일 − 이번 신청 ${rec.figures.days}일 → 승인 시 ${rec.figures.after}일`
+                    : `승인 시 잔여 ${r.overdraftAfter ?? "-"}일`}
+                </div>
+                <details className="mt-1">
+                  <summary className="text-xs text-slate-400 cursor-pointer select-none">
+                    신청자에게 보인 안내문·동의 문구 원문
+                  </summary>
+                  <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-600 whitespace-pre-line leading-relaxed">
+                    {rec ? rec.notice : LEGACY_CONSENT_NOTE}
+                    {"\n\n"}☑ {rec?.label ?? "위 내용을 확인했으며, 퇴직 시 남은 연차 초과분을 퇴직월 급여에서 공제하는 데 동의합니다."}
+                    {rec?.account && `\n\n신청 계정: 슬랙 사용자 ${rec.account}`}
+                    {r.overdraftConsentHash && `\n무결성 점검값(SHA-256): ${r.overdraftConsentHash}`}
+                  </div>
+                </details>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* 슬랙으로 들어온 신청 이력 */}
       <div className="card mb-6">
         <div className="px-5 py-3 border-b border-slate-100 font-bold text-slate-800">
@@ -277,6 +347,17 @@ export default async function EmployeeLeavePage({
                       >
                         {STATUS_LABEL[r.status] ?? r.status}
                       </Pill>
+                      {r.overdraftConsentAt && (
+                        <a
+                          href={`/api/leave/requests/${r.id}/overdraft-consent`}
+                          target="_blank"
+                          rel="noopener"
+                          title="잔여를 넘는 신청 — 퇴직 시 초과분 급여 공제에 동의함. 눌러서 동의 기록 보기"
+                          className="ml-1 inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold bg-amber-100 text-amber-800 hover:underline"
+                        >
+                          초과사용 동의
+                        </a>
+                      )}
                     </td>
                     <td className="td text-slate-500">{r.reason ?? "-"}</td>
                     <td className="td text-slate-500 whitespace-pre-line">{r.workPlan || "-"}</td>

@@ -87,12 +87,15 @@ export default function LeaveApprovals({ requests }: { requests: Req[] }) {
             <td className="td tnum">
               {r.days}일
               {r.overdraftAfter != null && (
-                <span
-                  className="block text-[11px] font-normal text-red-600"
-                  title="잔여 연차를 넘는 신청입니다. 신청자가 퇴직 시 초과분을 퇴직월 급여에서 공제하는 데 동의했습니다."
+                <a
+                  href={`/api/leave/requests/${r.id}/overdraft-consent`}
+                  target="_blank"
+                  rel="noopener"
+                  className="block text-[11px] font-normal text-red-600 hover:underline"
+                  title="잔여 연차를 넘는 신청입니다. 신청자가 퇴직 시 초과분을 퇴직월 급여에서 공제하는 데 동의했습니다. 눌러서 동의 기록 보기"
                 >
-                  잔여 초과 · 승인 시 {r.overdraftAfter}일
-                </span>
+                  잔여 초과 · 승인 시 {r.overdraftAfter}일 ↗
+                </a>
               )}
             </td>
             <td className="td">{LEAVE_TYPE_LABEL[r.leaveType] ?? r.leaveType}</td>

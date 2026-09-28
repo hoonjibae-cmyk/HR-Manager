@@ -581,6 +581,10 @@ model LeaveRequest {
   // 잔여 초과(마이너스) 신청 — 퇴직 시 초과분 급여 공제 동의(근로기준법 §43 의 근거)
   overdraftConsentAt DateTime? // 신청자가 동의란에 체크한 시각
   overdraftAfter     Float? // 신청 당시 '모두 승인되면 남는 잔여' (음수)
+  /// 동의 기록 원문(JSON) — 신청 순간 보인 안내문·동의 문구·수치·경로·계정. 분쟁 때 근거라 고치지 않는다
+  overdraftConsent     String?
+  /// 위 기록의 SHA-256 (무결성 점검용 — 법적 효력 보증 아님)
+  overdraftConsentHash String?
 
   // 방학 근무·연차 공고에서 직원이 고른 연차 — 날짜 하나당 신청 하나(변경·취소를 날짜 단위로 한다)
   vacationAssignmentId Int?

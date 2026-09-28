@@ -24,6 +24,8 @@ const nextConfig = {
       // 방학 근무·연차 신청서 PDF — submissionPdf() 가 htmlToPdf 를 부르는 곳은 이 둘뿐이다
       "/api/vacation/doc": ["./node_modules/@sparticuz/chromium/bin/**"],
       "/api/vacation/submissions/[id]/pdf": ["./node_modules/@sparticuz/chromium/bin/**"],
+      // 연차 초과사용 동의 기록 PDF
+      "/api/leave/requests/[id]/overdraft-consent": ["./node_modules/@sparticuz/chromium/bin/**"],
     },
     /**
      * **PDF 를 뽑지 않는데 크로미움을 지고 다니던 라우트에서 bin 을 뺀다.**

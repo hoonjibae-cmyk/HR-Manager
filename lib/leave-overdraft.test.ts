@@ -8,8 +8,9 @@ import {
   affectsAnnualBalance,
   overdraftNoticeText,
   overdraftApprovalLine,
-  OVERDRAFT_CONSENT_LABEL,
+  OVERDRAFT_CONSENT_LABEL, buildConsentRecord, parseConsentRecord, consentRecordHtml
 } from "./leave-overdraft";
+import { recordHash } from "./vacation-hash";
 import {
   leaveModalView,
   readLeaveModal,
@@ -177,5 +178,77 @@ describe("승인 카드·중간결재 DM — 초과 신청 표시", () => {
   it("보통 신청에는 붙지 않는다", () => {
     expect(has(approvalBlocks(args))).toBe(false);
     expect(has(preApprovalBlocks(args))).toBe(false);
+  });
+});
+
+describe("동의 기록 원문", () => {
+  const base = {
+    check: { remaining: 0.5, pending: 1, days: 1, after: -1.5 },
+    channel: "SLACK_MODAL" as const,
+    account: "U_TEST",
+    employee: { id: 7, name: "가상직원", department: "교수부" },
+    leave: { type: "ANNUAL", typeLabel: "연차", start: new Date("2026-10-05T00:00:00Z"), end: new Date("2026-10-05T00:00:00Z"), days: 1 },
+    at: new Date("2026-09-28T05:07:09Z"),
+  };
+
+  it("신청 순간의 안내문·동의 문구·수치·경로·계정을 그대로 담는다", () => {
+    const r = buildConsentRecord(base);
+    expect(r.v).toBe(1);
+    expect(r.label).toBe(OVERDRAFT_CONSENT_LABEL);
+    expect(r.notice).toContain("퇴직월 급여에서 공제");
+    expect(r.notice).toContain("신청 후 -1.5일");
+    expect(r.notice).not.toContain("*"); // 슬랙 서식 기호 없이 평문
+    expect(r.figures).toEqual({ remaining: 0.5, pending: 1, days: 1, after: -1.5 });
+    expect(r.leave).toMatchObject({ start: "2026-10-05", end: "2026-10-05", days: 1 });
+    expect(r.channel).toBe("SLACK_MODAL");
+    expect(r.account).toBe("U_TEST");
+    expect(r.agreedAt).toBe("2026-09-28T05:07:09.000Z");
+  });
+
+  it("저장한 JSON 을 되읽고, 모르는 형식은 null", () => {
+    const r = buildConsentRecord(base);
+    expect(parseConsentRecord(JSON.stringify(r))).toEqual(r);
+    expect(parseConsentRecord(null)).toBeNull();
+    expect(parseConsentRecord("{bad")).toBeNull();
+    expect(parseConsentRecord(JSON.stringify({ v: 2 }))).toBeNull();
+  });
+
+  it("지문은 키 순서와 무관하고, 내용이 바뀌면 달라진다", () => {
+    const r = buildConsentRecord(base);
+    const shuffled = Object.fromEntries(Object.entries(r).reverse());
+    expect(recordHash(shuffled)).toBe(recordHash(r));
+    expect(recordHash({ ...r, figures: { ...r.figures, after: -1 } })).not.toBe(recordHash(r));
+  });
+
+  it("동의 기록 문서 — 원문·수치·경로·점검값을 싣고 KST 로 적는다", () => {
+    const r = buildConsentRecord(base);
+    const h = consentRecordHtml({ companyName: "가상학원", requestId: 11, status: "승인", record: r, hash: "abc123", printedAt: new Date("2026-09-28T06:00:00Z") });
+    expect(h).toContain("연차 초과사용 급여공제 동의 기록");
+    expect(h).toContain(OVERDRAFT_CONSENT_LABEL);
+    expect(h).toContain("2026-09-28 14:07:09 (KST)");
+    expect(h).toContain("슬랙 휴가신청서");
+    expect(h).toContain("U_TEST");
+    expect(h).toContain("-1.5일");
+    expect(h).toContain("abc123");
+  });
+
+  it("원문 저장 전 신청은 남은 것만 적고 그 사실을 밝힌다", () => {
+    const h = consentRecordHtml({
+      companyName: "가상학원",
+      requestId: 3,
+      status: "승인",
+      record: null,
+      hash: null,
+      legacy: { agreedAt: new Date("2026-09-20T01:00:00Z"), after: -1, employeeName: "가상직원", department: null, typeLabel: "연차", start: new Date("2026-09-22T00:00:00Z"), end: new Date("2026-09-22T00:00:00Z"), days: 1, source: "SLACK" },
+      printedAt: new Date(),
+    });
+    expect(h).toContain("동의 원문을 저장하기 전에 접수");
+    expect(h).toContain("-1일");
+    expect(h).toContain("2026-09-20 10:00:00 (KST)");
+  });
+
+  it("이름에 섞인 태그는 글자로만 나간다", () => {
+    const r = buildConsentRecord({ ...base, employee: { ...base.employee, name: "<b>x</b>" } });
+    expect(consentRecordHtml({ companyName: "a", requestId: 1, status: "승인", record: r, hash: null, printedAt: new Date() })).not.toContain("<b>x</b>");
   });
 });

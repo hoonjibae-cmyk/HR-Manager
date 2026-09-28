@@ -15,10 +15,14 @@ import { ymd } from "./format";
 import { LEAVE_TYPE_LABEL, isHalfDayLeave, parseSchedule, isContractorContract } from "./constants";
 import { preApproverFor } from "./leave-approval";
 import { withEmployeeLeaveLock } from "./leave-lock";
+import { recordHash } from "./vacation-hash";
+import { logActivity } from "./activity";
 import {
   affectsAnnualBalance,
+  buildConsentRecord,
   checkOverdraft,
   OVERDRAFT_CONSENT_REQUIRED,
+  type ConsentChannel,
   OVERDRAFT_TYPES,
   showConsentUpfront,
   type OverdraftCheck,
@@ -243,6 +247,8 @@ export interface LeaveSubmitInput {
   source?: string;
   /** 잔여 초과 시 퇴직월 급여 공제 동의 — 초과 신청은 이것 없이 만들어지지 않는다 */
   overdraftConsent?: boolean;
+  /** 동의를 받은 경로·계정 — 동의 기록 원문에 함께 새긴다(분쟁 때 누가 어디서 체크했는지) */
+  consentBy?: { channel: ConsentChannel; account: string | null };
 }
 
 export interface LeaveSubmitResult {
@@ -257,6 +263,8 @@ export interface LeaveSubmitResult {
   overdraft?: OverdraftCheck;
   /** 동의를 받아 만든 초과 신청이면 true */
   overdrawn?: boolean;
+  /** 초과 신청의 동의 시각 (신청서·동의 기록에 새긴 값) */
+  consentAt?: Date | null;
   days?: number;
   remaining?: number;
   poolLabel?: string;
@@ -422,7 +430,6 @@ export async function submitLeaveRequest(
       days,
     };
   }
-  const overdrawn = !!overdraft?.overdrawn;
 
   const reasonFull =
     input.reason + (input.halfTimeNote ? ` (사용시간 ${input.halfTimeNote})` : "");
@@ -468,8 +475,11 @@ export async function submitLeaveRequest(
       },
     });
     if (vac) return { conflict: vac };
+    // 판정·기록은 **잠금 안에서 다시 본 수치**로 한다 — 잠금 밖 판정과 그사이 달라졌다면 실제로
+    // 통과한 쪽이 이 수치다(동의 기록에 적힌 숫자와 신청서가 어긋나지 않게).
+    let c: OverdraftCheck | null = null;
     if (affectsAnnualBalance(input.leaveType)) {
-      const c = checkOverdraft({
+      c = checkOverdraft({
         leaveType: input.leaveType,
         remaining: summary.remaining,
         pending: await pendingAnnualDays(emp.id, tx),
@@ -477,6 +487,18 @@ export async function submitLeaveRequest(
       });
       if (c.overdrawn && !input.overdraftConsent) return { overdraft: c };
     }
+    const over = c?.overdrawn ? c : null;
+    const agreedAt = new Date();
+    const record = over
+      ? buildConsentRecord({
+          check: over,
+          channel: input.consentBy?.channel ?? (input.source === "PORTAL" ? "PORTAL" : "SLACK_MODAL"),
+          account: input.consentBy?.account ?? null,
+          employee: { id: emp.id, name: emp.name, department: emp.department },
+          leave: { type: input.leaveType, typeLabel: LEAVE_TYPE_LABEL[input.leaveType] ?? input.leaveType, start: input.start, end: input.end, days },
+          at: agreedAt,
+        })
+      : null;
     const row = await tx.leaveRequest.create({
       data: {
         employeeId: emp.id,
@@ -488,11 +510,13 @@ export async function submitLeaveRequest(
         workPlan: input.workPlan?.trim() || null,
         status: preApprover ? "PRE_PENDING" : "PENDING",
         source: input.source ?? "SLACK",
-        overdraftConsentAt: overdrawn ? new Date() : null,
-        overdraftAfter: overdrawn ? overdraft!.after : null,
+        overdraftConsentAt: over ? agreedAt : null,
+        overdraftAfter: over ? over.after : null,
+        overdraftConsent: record ? JSON.stringify(record) : null,
+        overdraftConsentHash: record ? recordHash(record) : null,
       },
     });
-    return { row };
+    return { row, over, record };
   });
   if ("dup" in locked && locked.dup)
     return { ok: true, duplicate: true, requestId: locked.dup.id, days: locked.dup.days };
@@ -505,7 +529,19 @@ export async function submitLeaveRequest(
   if ("overdraft" in locked && locked.overdraft)
     return { ok: false, error: OVERDRAFT_CONSENT_REQUIRED, field: "consent", overdraft: locked.overdraft, days };
   const reqRow = (locked as any).row;
-  const overdraftAfter = overdrawn ? overdraft!.after : null;
+  const over: OverdraftCheck | null = (locked as any).over ?? null;
+  const overdraftAfter = over ? over.after : null;
+  // 동의는 작업 이력에도 남긴다 — 신청서가 지워져도(입사 취소 등) 무엇에 동의했는지가 남는다
+  if ((locked as any).record)
+    await logActivity({
+      action: "LEAVE_OVERDRAFT_CONSENT",
+      actor: input.source === "PORTAL" ? "PORTAL" : "SLACK",
+      actorName: emp.name,
+      employeeId: emp.id,
+      target: emp.name,
+      summary: `${emp.name}님이 잔여 초과 연차(${days}일, 승인 시 잔여 ${over!.after}일)를 신청하며 퇴직 시 초과분 급여 공제에 동의했습니다.`,
+      meta: { requestId: reqRow.id, hash: reqRow.overdraftConsentHash, record: (locked as any).record },
+    });
 
   // **발송은 여기서 하지 않고 notify 로 미룬다** — 슬랙 모달·슬래시 명령은 3초 안에 응답해야
   // 하는데, 중간결재 DM·승인 카드 게시가 응답 앞에 있으면 그 시간만큼 3초를 갉아먹어
@@ -567,8 +603,8 @@ export async function submitLeaveRequest(
     poolLabel,
     requestId: reqRow.id,
     preApproverName: preApprover?.name,
-    overdrawn,
-    ...(overdrawn ? { overdraft: overdraft! } : {}),
+    overdrawn: !!over,
+    ...(over ? { overdraft: over, consentAt: reqRow.overdraftConsentAt } : {}),
     notify,
   };
 }

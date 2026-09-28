@@ -87,7 +87,7 @@ import { LEAVE_TYPE_LABEL } from "@/lib/constants";
 import { DEFAULT_DAILY_CHANNEL } from "@/lib/daily-brief";
 import { logActivity } from "@/lib/activity";
 import { ymd } from "@/lib/format";
-import { OVERDRAFT_CONSENT_REQUIRED } from "@/lib/leave-overdraft";
+import { OVERDRAFT_CONSENT_LABEL, OVERDRAFT_CONSENT_REQUIRED, kstStamp } from "@/lib/leave-overdraft";
 import { handleVacationAction, handleVacationSubmission } from "@/lib/vacation-slack-handlers";
 
 export const dynamic = "force-dynamic";
@@ -309,6 +309,7 @@ export async function POST(req: Request) {
       workPlan: f.workplan,
       channel: meta.channel,
       overdraftConsent: f.consent,
+      consentBy: { channel: "SLACK_MODAL", account: userId },
     });
 
     // 잔여 초과인데 동의가 없다 — 동의란이 이미 있으면 거기에 오류를 달고, 없으면(잔여가 남아
@@ -361,7 +362,10 @@ export async function POST(req: Request) {
             `• 기간: ${ymd(start)}${res.days! > 1 ? ` ~ ${ymd(end)}` : ""} (${res.days}일)\n` +
             `• 현재 ${res.poolLabel} 잔여: ${res.remaining}일\n` +
             (res.overdrawn && res.overdraft
-              ? `• ⚠️ 잔여 초과 신청 — 승인되면 잔여 ${res.overdraft.after}일 (퇴직 시 초과분 급여 공제에 동의하셨습니다)\n`
+              ? `• ⚠️ 잔여 초과 신청 — 승인되면 잔여 ${res.overdraft.after}일\n` +
+                // 동의 사본 — 무엇에 언제 동의했는지 본인도 갖고 있게 한다(회사 쪽 기록은 신청서에 원문으로 남는다)
+                `• 동의 내용: “${OVERDRAFT_CONSENT_LABEL}”\n` +
+                `• 동의 시각: ${res.consentAt ? kstStamp(res.consentAt) : "-"}\n`
               : "") +
             (preApproverName
               ? `${preApproverName} 님의 중간결재 확인 후 운영진 승인으로 넘어갑니다.`

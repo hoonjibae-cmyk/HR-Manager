@@ -7,6 +7,11 @@ export function snapshotHash(s: SubmissionSnapshot): string {
   return createHash("sha256").update(canonicalJson(s)).digest("hex");
 }
 
+/** 임의 기록의 지문 (키 순서와 무관) — 연차 초과사용 동의 기록 등 */
+export function recordHash(v: unknown): string {
+  return createHash("sha256").update(canonicalJson(v)).digest("hex");
+}
+
 export function canonicalJson(v: any): string {
   if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
   if (v && typeof v === "object")

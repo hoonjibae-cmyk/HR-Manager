@@ -34,6 +34,7 @@ export const ACTION_LABEL: Record<string, string> = {
   EMPLOYEE_FILE_ADD: "직원 서류함 파일 업로드",
   EMPLOYEE_FILE_DELETE: "직원 서류함 파일 삭제",
   LEAVE_REQUEST: "휴가 신청",
+  LEAVE_OVERDRAFT_CONSENT: "연차 초과사용 급여공제 동의",
   LEAVE_APPROVE: "휴가 승인",
   LEAVE_REJECT: "휴가 반려",
   LEAVE_CANCEL: "휴가 취소 확정",

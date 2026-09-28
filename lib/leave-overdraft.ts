@@ -90,3 +90,156 @@ export const OVERDRAFT_CONSENT_REQUIRED =
 export function overdraftApprovalLine(after: number): string {
   return `⚠️ *잔여 초과 신청* — 승인 시 잔여 ${d(after)} · 신청자가 퇴직 시 초과분 급여 공제에 동의함`;
 }
+
+/* ============================== 동의 기록 ============================== */
+//
+// 동의는 **나중에 다툼이 생겼을 때 꺼내 보일 수 있어야** 뜻이 있다. 체크 시각만 남기면
+// '무엇에 동의했는가' 를 증명할 수 없다 — 그래서 신청 순간 화면에 보인 안내문·동의 문구와
+// 그때의 잔여·승인 대기·신청 일수, 어느 경로(본인 슬랙 계정·포털)로 냈는지를 **원문 그대로**
+// 신청서에 새기고(`LeaveRequest.overdraftConsent`), 무결성 점검용 지문을 함께 둔다.
+// 문구가 나중에 바뀌어도 옛 신청의 기록은 그때 문구로 남는다(다시 만들지 않는다).
+
+export type ConsentChannel = "SLACK_MODAL" | "PORTAL";
+
+export const CONSENT_CHANNEL_LABEL: Record<ConsentChannel, string> = {
+  SLACK_MODAL: "슬랙 휴가신청서 (본인 슬랙 계정)",
+  PORTAL: "직원 포털 (본인 로그인)",
+};
+
+export interface OverdraftConsentRecord {
+  v: 1;
+  /** 동의(=신청 접수) 시각, ISO */
+  agreedAt: string;
+  channel: ConsentChannel;
+  /** 요청 서명으로 확인된 슬랙 사용자 ID */
+  account: string | null;
+  employee: { id: number; name: string; department: string | null };
+  leave: { type: string; typeLabel: string; start: string; end: string; days: number };
+  /** 신청 시점 수치 — 잔여(승인분만) · 승인 대기 · 이번 신청 · 모두 승인 시 잔여 */
+  figures: { remaining: number; pending: number; days: number; after: number };
+  /** 신청자에게 보인 안내문 (서식 기호를 뺀 평문) */
+  notice: string;
+  /** 신청자가 체크한 동의 문구 */
+  label: string;
+}
+
+const ymdOf = (d: Date) => d.toISOString().slice(0, 10);
+
+export function buildConsentRecord(input: {
+  check: Pick<OverdraftCheck, "remaining" | "pending" | "days" | "after">;
+  channel: ConsentChannel;
+  account: string | null;
+  employee: { id: number; name: string; department: string | null };
+  leave: { type: string; typeLabel: string; start: Date; end: Date; days: number };
+  at: Date;
+}): OverdraftConsentRecord {
+  const { remaining, pending, days, after } = input.check;
+  return {
+    v: 1,
+    agreedAt: input.at.toISOString(),
+    channel: input.channel,
+    account: input.account,
+    employee: { id: input.employee.id, name: input.employee.name, department: input.employee.department ?? null },
+    leave: { type: input.leave.type, typeLabel: input.leave.typeLabel, start: ymdOf(input.leave.start), end: ymdOf(input.leave.end), days: input.leave.days },
+    figures: { remaining, pending, days, after },
+    notice: overdraftNoticeText({ remaining, pending, days, after }).replaceAll("*", ""),
+    label: OVERDRAFT_CONSENT_LABEL,
+  };
+}
+
+export function parseConsentRecord(json: string | null | undefined): OverdraftConsentRecord | null {
+  if (!json) return null;
+  try {
+    const r = JSON.parse(json);
+    return r && r.v === 1 && typeof r.agreedAt === "string" && typeof r.label === "string" ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 원문 저장 전 신청의 경로 — LeaveRequest.source 를 사람이 읽는 말로 */
+export function legacySourceLabel(source: string | null | undefined): string {
+  return source === "PORTAL" ? "직원 포털" : source === "SLACK" || !source ? "슬랙" : source;
+}
+
+/** 동의 기록을 저장하기 전(v1.43.1 이하)에 접수된 신청 — 시각과 신청 후 잔여만 있다 */
+export const LEGACY_CONSENT_NOTE =
+  "이 신청은 동의 원문을 저장하기 전에 접수되어 동의 시각과 '승인 시 잔여'만 기록되어 있습니다. " +
+  "당시 신청 화면의 동의 문구는 현재와 같습니다(도입 v1.42.0 이후 변경 없음).";
+
+/** 2026-09-28T05:07:09Z → 2026-09-28 14:07:09 (KST) */
+export function kstStamp(iso: string | Date): string {
+  const d = new Date(new Date(iso).getTime() + 9 * 3600_000);
+  return `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 19)} (KST)`;
+}
+
+const esc = (s: unknown) =>
+  String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
+/**
+ * 동의 기록 문서(PDF 본문). 저장된 기록을 그대로 옮길 뿐 새로 판정하지 않는다.
+ * 기록이 없는 옛 신청은 남은 것(시각·신청 후 잔여)만 적고 그 사실을 밝힌다.
+ */
+export function consentRecordHtml(args: {
+  companyName: string;
+  requestId: number;
+  status: string;
+  record: OverdraftConsentRecord | null;
+  hash: string | null;
+  legacy?: { agreedAt: Date; after: number | null; employeeName: string; department: string | null; typeLabel: string; start: Date; end: Date; days: number; source: string | null };
+  printedAt: Date;
+}): string {
+  const r = args.record;
+  const L = args.legacy;
+  const name = r?.employee.name ?? L?.employeeName ?? "";
+  const dept = r?.employee.department ?? L?.department ?? null;
+  const leave = r
+    ? `${r.leave.typeLabel} · ${r.leave.start}${r.leave.end !== r.leave.start ? ` ~ ${r.leave.end}` : ""} (${r.leave.days}일)`
+    : L
+      ? `${L.typeLabel} · ${ymdOf(L.start)}${L.end.getTime() !== L.start.getTime() ? ` ~ ${ymdOf(L.end)}` : ""} (${L.days}일)`
+      : "-";
+  const row = (k: string, v: string) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`;
+  const figures = r
+    ? row("신청 시점 잔여", `${r.figures.remaining}일 (승인된 사용분만 반영)`) +
+      row("승인 대기 중인 연차", `${r.figures.pending}일`) +
+      row("이번 신청", `${r.figures.days}일`) +
+      row("모두 승인 시 잔여", `<b>${r.figures.after}일</b>`)
+    : row("승인 시 잔여", L?.after != null ? `<b>${L.after}일</b>` : "기록 없음");
+  return `<div class="doc">
+  <h1 class="doc-title">연차 초과사용 급여공제 동의 기록</h1>
+  <p class="small muted" style="text-align:right">신청번호 ${args.requestId} · 출력 ${esc(kstStamp(args.printedAt))}</p>
+  <table class="kv"><tbody>
+    ${row("사업장", esc(args.companyName))}
+    ${row("성명 · 소속", `${esc(name)} · ${esc(dept ?? "-")}`)}
+    ${row("신청 휴가", esc(leave))}
+    ${row("현재 처리 상태", esc(args.status))}
+  </tbody></table>
+
+  <h3>동의 당시 수치</h3>
+  <table class="kv"><tbody>${figures}</tbody></table>
+
+  <h3>신청자에게 보인 안내문</h3>
+  ${
+    r
+      ? r.notice
+          .split("\n")
+          .filter((t) => t.trim())
+          .map((t) => `<p class="small">${esc(t)}</p>`)
+          .join("")
+      : `<p class="small muted">${esc(LEGACY_CONSENT_NOTE)}</p>`
+  }
+
+  <h3>동의 문구 (신청자가 직접 체크)</h3>
+  <p><b>☑ ${esc(r?.label ?? OVERDRAFT_CONSENT_LABEL)}</b></p>
+
+  <h3>동의 확인</h3>
+  <table class="kv"><tbody>
+    ${row("동의 시각", esc(kstStamp(r?.agreedAt ?? L!.agreedAt)))}
+    ${row("신청 경로", esc(r ? CONSENT_CHANNEL_LABEL[r.channel] ?? r.channel : legacySourceLabel(L?.source)))}
+    ${r?.account ? row("신청 계정", `슬랙 사용자 ${esc(r.account)}`) : ""}
+    ${args.hash ? row("무결성 점검값", `<span style="font-size:8pt;word-break:break-all">SHA-256 ${esc(args.hash)}</span>`) : ""}
+  </tbody></table>
+  <p class="small muted">이 문서는 신청 시점에 저장한 기록을 그대로 옮긴 것입니다. 무결성 점검값은 기록이 저장 뒤 바뀌지 않았는지 대조하는 용도이며 법적 효력을 보증하지 않습니다.
+  공제의 근거는 이 동의와 임금공제 동의서의 연차 초과사용 정산 조항이며, 실제 공제액은 퇴직 시점의 초과 일수 × 1일 통상임금으로 산정합니다.</p>
+</div>`;
+}

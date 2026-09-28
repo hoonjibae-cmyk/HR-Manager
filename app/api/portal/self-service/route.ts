@@ -594,6 +594,7 @@ export async function POST(req: Request) {
       workPlan: text(body.workPlan, 500),
       source: "PORTAL",
       overdraftConsent: body.overdraftConsent === true,
+      consentBy: { channel: "PORTAL", account: claims.slackUserId ?? null },
     });
     // 잔여 초과인데 동의가 없다 — 만들지 않고 안내·동의 문구를 돌려준다. 포털이 확인창을 띄워
     // 체크받은 뒤 overdraftConsent: true 로 다시 보내면 접수된다(슬랙 모달과 같은 문구·같은 판정).
