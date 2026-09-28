@@ -246,7 +246,7 @@ export default async function EmployeeLeavePage({
       {/* 연차 초과사용 급여공제 동의 — 퇴직 정산·분쟁 때 근거. 연도 탭과 무관하게 전부 보여 준다
           (퇴직 시점에 따지는 것은 지금까지의 모든 초과 신청이다). 반려·취소된 신청도 지우지 않고 상태와 함께 남긴다. */}
       {consents.length > 0 && (
-        <div className="card mb-6 border-amber-200">
+        <div id="overdraft-consents" className="card mb-6 border-amber-200 scroll-mt-4">
           <div className="px-5 py-3 border-b border-amber-100 bg-amber-50/60 font-bold text-slate-800">
             연차 초과사용 급여공제 동의 기록{" "}
             <span className="text-xs font-normal text-slate-500">

@@ -55,6 +55,20 @@ export async function GET(req: Request) {
     byEmp.set(t.employeeId, arr);
   }
 
+  // 퇴사 정산의 초과사용 공제 근거 — 살아 있는(승인·취소 요청 중) 신청의 동의 기록만 센다.
+  // 반려·취소된 신청은 그 초과가 실제로 일어나지 않았으므로 근거가 아니다.
+  const consentRows = await prisma.leaveRequest.findMany({
+    where: {
+      employeeId: { in: empIds },
+      overdraftConsentAt: { not: null },
+      status: { in: ["APPROVED", "CANCEL_PENDING"] },
+    },
+    select: { id: true, employeeId: true },
+    orderBy: { startDate: "asc" },
+  });
+  const consentsOf = new Map<number, number[]>();
+  for (const c of consentRows) consentsOf.set(c.employeeId, [...(consentsOf.get(c.employeeId) ?? []), c.id]);
+
   /*
    * 기준 시점은 **그 달의 마지막 날**이다.
    * 연차기간이 그 달 안에서 끝나므로, 월초를 기준으로 잡으면 아직 발생하지 않은 월 개근분이
@@ -86,6 +100,7 @@ export async function GET(req: Request) {
       hourlyWage: r.hourlyWage ?? 0,
       // 엔진과 같은 함수로 구한다 — 미리보기 금액과 실제 명세서가 원 단위까지 같아야 한다
       dailyHours: dailyLeaveHours(parseSchedule(e.schedule)),
+      consentRequestIds: consentsOf.get(e.id) ?? [],
     };
   });
 
@@ -142,11 +157,28 @@ export async function POST(req: Request) {
 
   const names = open.map((r) => r.employee?.name).filter(Boolean).join(", ");
   const totalDays = ids.reduce((a, id) => a + ((inputs[id] as any).unusedLeaveDays ?? 0), 0);
+  // 초과사용 공제(−)는 **근거까지** 이력에 남긴다 — 나중에 "무슨 근거로 뗐나" 를 되짚을 수 있어야 한다
+  const deducted = ids.filter((id) => ((inputs[id] as any).unusedLeaveDays ?? 0) < 0);
+  const evidence = deducted.length
+    ? await prisma.leaveRequest.findMany({
+        where: { employeeId: { in: deducted }, overdraftConsentAt: { not: null }, status: { in: ["APPROVED", "CANCEL_PENDING"] } },
+        select: { id: true, employeeId: true, overdraftConsentHash: true },
+      })
+    : [];
+  const noEvidence = deducted.filter((id) => !evidence.some((e) => e.employeeId === id));
   await logActivity({
     action: "PAYROLL_EDIT",
     target: `${year}-${String(month).padStart(2, "0")}`,
-    summary: `미사용 연차수당을 ${ids.length}명(${Math.round(totalDays * 10) / 10}일)에게 반영했습니다. ${names}`,
-    meta: { ids, totalDays },
+    summary:
+      `미사용 연차수당을 ${ids.length}명(${Math.round(totalDays * 10) / 10}일)에게 반영했습니다. ${names}` +
+      (deducted.length
+        ? ` · 초과사용 공제 ${deducted.length}명${noEvidence.length ? ` (동의 기록 없음 ${noEvidence.length}명)` : ""}`
+        : ""),
+    meta: {
+      ids,
+      totalDays,
+      ...(deducted.length ? { overdraftDeduction: { employeeIds: deducted, consentRecords: evidence, noConsentRecord: noEvidence } } : {}),
+    },
   }).catch(() => {});
 
   return NextResponse.json({

@@ -12,7 +12,7 @@ import { Pill } from "@/components/ui";
 import { resignStatusOf, resignBadgeLabel, resignedSummary } from "@/lib/payroll-roster";
 import { isEstimatedHourly } from "@/lib/payroll";
 import { openPdfTab, closePdfTab, deliverPdf } from "@/lib/open-pdf";
-import { payoutNotice, type PayoutSuggestion } from "@/lib/leave-payout";
+import { payoutNotice, payoutTotals, type PayoutSuggestion } from "@/lib/leave-payout";
 import { planPayslipSend, sendConfirmText, nothingToSendNotice, payslipEmailOf } from "@/lib/payslip-send";
 import {
   useTableSort,
@@ -207,6 +207,9 @@ export default function PayrollClient({ today }: { today: string }) {
   const [addOpen, setAddOpen] = useState(false);
   /** 그 달에 연차기간이 끝나거나 퇴사하는 직원 — 미사용 연차수당을 넣을지 사람이 정한다 */
   const [payout, setPayout] = useState<PayoutSuggestion[]>([]);
+  const resignPayout = payout.filter((p) => p.kind === "RESIGN");
+  const resignPayoutNotice = payoutNotice(resignPayout);
+  const resignNoConsent = resignPayout.filter((p) => !p.done && p.evidenceWarning).length;
   const [payoutOpen, setPayoutOpen] = useState(false);
   const [tsResult, setTsResult] = useState<any>(null);
   const [incResult, setIncResult] = useState<any>(null);
@@ -224,10 +227,17 @@ export default function PayrollClient({ today }: { today: string }) {
     normalizeFilterSet(FILTER_KEYS, v)
   );
 
+  // ⚠ **늦게 온 응답이 새 달 화면을 덮지 않게 한다.** 첫 렌더는 기본값(이번 달)으로 그리고 기억해 둔
+  // 연·월은 그 뒤에 얹히므로(useStoredState) 목록 조회가 두 번 나간다. 이번 달 응답이 늦게 오면
+  // '10월' 이라고 적힌 화면에 9월 행이 깔리고, 그 상태로 저장하면 입력값이 엉뚱한 달로 간다.
+  // 가장 마지막에 보낸 조회의 응답만 받는다.
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     const res = await fetch(`/api/payroll?year=${year}&month=${month}`);
     const data = res.ok ? await res.json() : [];
+    if (seq !== loadSeq.current) return;
     setRecs(data);
     // 목록을 다시 읽으면 선택을 비운다 — 발송 뒤에도 여기를 지나므로, 방금 보낸 사람이
     // 체크된 채 남아 다시 누르는 일이 없다.
@@ -242,8 +252,12 @@ export default function PayrollClient({ today }: { today: string }) {
     // 연차 원장을 훑는 조회라 급여 목록과 **따로** 부른다 — 실패해도 급여 화면은 그대로 뜬다
     fetch(`/api/payroll/leave-expiry?year=${year}&month=${month}`)
       .then((r) => (r.ok ? r.json() : { suggestions: [] }))
-      .then((j) => setPayout(j.suggestions ?? []))
-      .catch(() => setPayout([]));
+      .then((j) => {
+        if (seq === loadSeq.current) setPayout(j.suggestions ?? []);
+      })
+      .catch(() => {
+        if (seq === loadSeq.current) setPayout([]);
+      });
   }, [year, month]);
 
   useEffect(() => {
@@ -915,6 +929,28 @@ export default function PayrollClient({ today }: { today: string }) {
             그 달에 재직한 마지막 급여이거나 직접 올린 정산분이면 정상입니다. 아니라면
             이체 전에 <b>직원 정보의 퇴사일</b>을 확인하고 <b>급여 일괄 산정</b>을 다시 누르세요.
           </div>
+        </div>
+      )}
+
+      {/* 퇴사 정산이 아직 안 실린 사람 — 미사용분 지급(놓치면 체불)과 초과사용 공제(근거 확인 필요)를
+          버튼 배지만으로 두면 지나친다. 퇴사 정산 줄만 골라 늘 위에 띄운다(기간 만료는 버튼 배지로 충분하다). */}
+      {resignPayoutNotice && (
+        <div
+          className={`card p-3 mb-5 text-sm flex flex-wrap items-center gap-x-3 gap-y-1 ${
+            resignNoConsent ? "border-rose-200 bg-rose-50/60 text-rose-900" : "border-amber-200 bg-amber-50/60 text-amber-900"
+          }`}
+        >
+          <span>
+            <b>🍃 퇴사 연차 정산 미반영</b> — {resignPayoutNotice.replace(/^이 달 /, "")}
+          </span>
+          <button className="btn-outline py-1 text-xs" onClick={() => setPayoutOpen(true)}>
+            연차수당 상세에서 확인
+          </button>
+          {resignNoConsent > 0 && (
+            <div className="w-full text-xs text-rose-700">
+              초과사용 공제 대상 중 <b>동의 기록이 없는 {resignNoConsent}명</b>은 임금공제 동의서 서명본을 확인한 뒤 반영하세요.
+            </div>
+          )}
         </div>
       )}
 
@@ -1944,18 +1980,27 @@ function LeavePayoutModal({
   onDone: () => Promise<void>;
 }) {
   const todo = list.filter((s) => !s.done);
-  const [picked, setPicked] = useState<number[]>(todo.map((s) => s.employeeId));
+  // 동의 기록 없는 초과사용 공제는 **미리 체크하지 않는다** — 근거를 확인한 사람이 직접 고르게 한다
+  const [picked, setPicked] = useState<number[]>(todo.filter((s) => !s.evidenceWarning).map((s) => s.employeeId));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
   const toggle = (id: number) =>
     setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
   const chosen = list.filter((s) => picked.includes(s.employeeId));
-  const totalDays = Math.round(chosen.reduce((a, s) => a + s.suggestDays, 0) * 10) / 10;
-  const totalAmount = chosen.reduce((a, s) => a + s.suggestAmount, 0);
+  const totals = payoutTotals(chosen);
+  const chosenNoConsent = chosen.filter((s) => !s.done && s.evidenceWarning);
 
   async function apply() {
     if (!chosen.length) return;
+    if (
+      chosenNoConsent.length &&
+      !confirm(
+        `동의 기록이 없는 초과사용 공제가 포함돼 있습니다: ${chosenNoConsent.map((s) => s.name).join(", ")}\n\n` +
+          "임금공제 동의서(연차 초과사용 정산 조항) 서명본을 확인했을 때만 반영하세요. 근거 없이 공제하면 근로기준법 §43 위반이 될 수 있습니다.\n\n그래도 반영할까요?"
+      )
+    )
+      return;
     setSaving(true);
     setErr("");
     try {
@@ -2027,8 +2072,9 @@ function LeavePayoutModal({
               </div>
               <div>
                 · 잔여가 <b className="text-rose-600">마이너스(초과 사용)</b>인 퇴사자는 초과
-                일수를 (−)로 정산해 마지막 급여에서 <b>공제</b>합니다 — 임금공제 동의서의
-                연차 정산 조항이 근거입니다.
+                일수를 (−)로 정산해 마지막 급여에서 <b>공제</b>합니다 — 근거는 신청 때 받은
+                <b> 초과사용 급여공제 동의 기록</b>과 임금공제 동의서의 연차 정산 조항입니다.
+                동의 기록이 없는 사람은 <b>미리 체크하지 않았습니다</b> — 서명본을 확인한 뒤 고르세요.
               </div>
             </div>
 
@@ -2065,6 +2111,26 @@ function LeavePayoutModal({
                             반영 완료
                           </span>
                         )}
+                        {s.overdraft && (
+                          <div className="mt-0.5 text-[11px] font-normal">
+                            <span className="pill bg-rose-50 text-rose-700 text-[10px] mr-1">초과사용 공제</span>
+                            {s.consentRequestIds.length ? (
+                              <a
+                                href={`/leave/${s.employeeId}#overdraft-consents`}
+                                target="_blank"
+                                rel="noopener"
+                                className="text-brand-700 hover:underline"
+                                title="신청 때 받은 초과사용 급여공제 동의 기록 — 원문·PDF"
+                              >
+                                동의 기록 {s.consentRequestIds.length}건 ↗
+                              </a>
+                            ) : (
+                              <span className="text-rose-600" title={s.evidenceWarning ?? ""}>
+                                동의 기록 없음 — 서명본 확인 필요
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="px-2 py-2 tnum text-slate-500 whitespace-nowrap">
                         {/* 왜 이 달에 정산해야 하는지가 한눈에 갈려야 한다 — 퇴사 정산은 놓치면 체불이다 */}
@@ -2079,16 +2145,16 @@ function LeavePayoutModal({
                         </span>
                         {s.expiry}
                       </td>
-                      <td className={`px-2 py-2 text-right tnum ${s.remaining < 0 ? "text-rose-600 font-semibold" : ""}`}>
+                      <td className={`px-2 py-2 text-right tnum whitespace-nowrap ${s.remaining < 0 ? "text-rose-600 font-semibold" : ""}`}>
                         {s.remaining}일
                       </td>
                       <td className="px-2 py-2 text-right tnum text-slate-400">
                         {s.alreadyDays ? `${s.alreadyDays}일` : "-"}
                       </td>
-                      <td className={`px-2 py-2 text-right tnum font-semibold ${s.suggestDays < 0 ? "text-rose-600" : ""}`}>
+                      <td className={`px-2 py-2 text-right tnum font-semibold whitespace-nowrap ${s.suggestDays < 0 ? "text-rose-600" : ""}`}>
                         {s.suggestDays ? `${s.suggestDays}일` : "-"}
                       </td>
-                      <td className={`px-2 py-2 text-right tnum font-semibold ${s.suggestAmount < 0 ? "text-rose-600" : "text-brand-600"}`}>
+                      <td className={`px-2 py-2 text-right tnum font-semibold whitespace-nowrap ${s.suggestAmount < 0 ? "text-rose-600" : "text-brand-600"}`}>
                         {s.suggestAmount ? `${won(s.suggestAmount)}원` : "-"}
                       </td>
                     </tr>
@@ -2102,7 +2168,10 @@ function LeavePayoutModal({
             <div className="flex items-center justify-end gap-2 mt-3">
               <span className="text-xs text-slate-500 mr-auto">
                 {chosen.length
-                  ? `${chosen.length}명 · ${totalDays}일 · ${won(totalAmount)}원`
+                  ? // 지급과 공제를 갈라 적는다 — 한데 더하면 서로 상쇄돼 공제가 있다는 사실이 사라진다
+                    `${chosen.length}명` +
+                    (totals.payDays ? ` · 지급 ${totals.payDays}일 ${won(totals.payAmount)}원` : "") +
+                    (totals.deductDays ? ` · 공제 ${totals.deductDays}일 ${won(totals.deductAmount)}원` : "")
                   : "반영할 직원을 고르세요"}
               </span>
               <button className="btn-outline" onClick={onClose} disabled={saving}>

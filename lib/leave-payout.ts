@@ -48,6 +48,11 @@ export interface PayoutInput {
   hourlyWage: number;
   /** 연차 하루의 유급 시간 (주 소정 ÷ 근무일수, 상한 8) — 엔진의 dailyLeaveHours 와 같은 값 */
   dailyHours: number;
+  /**
+   * 초과사용 급여공제 동의 기록이 있는 **살아 있는**(승인·취소 요청 중) 신청 id — 퇴사 정산 공제의 근거.
+   * 반려·취소된 신청의 동의는 그 초과가 실제로 일어나지 않았으므로 근거로 세지 않는다.
+   */
+  consentRequestIds?: number[];
 }
 
 export interface PayoutSuggestion {
@@ -65,7 +70,18 @@ export interface PayoutSuggestion {
   suggestAmount: number;
   /** 이미 넣은 일수가 남은 일수를 채웠는가 */
   done: boolean;
+  /** 퇴사 정산인데 잔여가 마이너스 — 초과분을 마지막 급여에서 **공제**하는 줄 */
+  overdraft: boolean;
+  /** 공제 근거가 되는 동의 기록(신청 id) — 초과사용 줄에만 */
+  consentRequestIds: number[];
+  /** 초과사용인데 동의 기록이 없을 때의 경고 — 근거 없이 공제하면 §43 위반 소지 */
+  evidenceWarning: string | null;
 }
+
+/** 동의 기록 없이 초과분을 공제하려 할 때 띄우는 경고 */
+export const NO_CONSENT_WARNING =
+  "초과사용 급여공제 동의 기록이 없습니다. 임금공제 동의서(연차 초과사용 정산 조항) 서명본을 확인한 뒤 반영하세요 — " +
+  "근거 없이 공제하면 임금 전액 지급 원칙(근로기준법 §43) 위반이 될 수 있습니다.";
 
 /**
  * 미사용 연차수당 = 일수 × 통상시급 × **1일 소정근로시간** (lib/payroll.ts 의 unusedLeaveP 와 같은 식).
@@ -105,6 +121,9 @@ export function payoutSuggestions(
       // 퇴사 정산은 음수 제안을 그대로 둔다(공제). 기간 만료는 0 밑으로 내려가지 않는다.
       const raw = round1(r.remaining - r.alreadyDays);
       const suggest = resigns ? raw : Math.max(0, raw);
+      // 초과사용 공제 여부는 **잔여**로 가른다(이미 일부 넣어 제안이 0 이 된 줄도 공제 줄이다)
+      const overdraft = resigns && r.remaining < 0;
+      const consentRequestIds = overdraft ? [...(r.consentRequestIds ?? [])] : [];
       return {
         employeeId: r.employeeId,
         name: r.name,
@@ -115,6 +134,9 @@ export function payoutSuggestions(
         suggestDays: suggest,
         suggestAmount: payoutAmount(suggest, r.hourlyWage, r.dailyHours),
         done: suggest === 0,
+        overdraft,
+        consentRequestIds,
+        evidenceWarning: overdraft && !consentRequestIds.length ? NO_CONSENT_WARNING : null,
       };
     })
     .sort((a, b) => a.expiry.localeCompare(b.expiry) || a.name.localeCompare(b.name, "ko"));
@@ -125,16 +147,44 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
-/** 표 위에 띄우는 한 줄 — 몇 명이 며칠치인지 */
+/** 지급(+)과 공제(−)를 갈라 합친다 — 한데 더하면 서로 상쇄돼 둘 다 안 보인다 */
+export function payoutTotals(list: PayoutSuggestion[]): {
+  payDays: number;
+  payAmount: number;
+  deductDays: number;
+  deductAmount: number;
+} {
+  const pay = list.filter((s) => s.suggestDays > 0);
+  const ded = list.filter((s) => s.suggestDays < 0);
+  return {
+    payDays: round1(pay.reduce((a, s) => a + s.suggestDays, 0)),
+    payAmount: pay.reduce((a, s) => a + s.suggestAmount, 0),
+    deductDays: round1(ded.reduce((a, s) => a + s.suggestDays, 0)),
+    deductAmount: ded.reduce((a, s) => a + s.suggestAmount, 0),
+  };
+}
+
+/**
+ * 표 위에 띄우는 한 줄 — 몇 명이 며칠치인지. **초과사용 공제는 따로 적는다** — 미사용 일수와
+ * 한데 더하면 +3일과 −2일이 '1일' 로 뭉개져 공제 대상이 있다는 사실이 사라진다.
+ */
 export function payoutNotice(list: PayoutSuggestion[]): string | null {
   const todo = list.filter((s) => !s.done);
   if (!todo.length) return null;
-  const days = round1(todo.reduce((a, s) => a + s.suggestDays, 0));
-  const resigns = todo.filter((s) => s.kind === "RESIGN").length;
-  const what = resigns
-    ? resigns === todo.length
-      ? "퇴사 정산"
-      : "연차기간 만료·퇴사 정산"
-    : "연차기간 만료";
-  return `이 달 ${what} 대상 ${todo.length}명 · 미사용 ${days}일`;
+  const pay = todo.filter((s) => s.suggestDays > 0);
+  const ded = todo.filter((s) => s.suggestDays < 0);
+  const parts: string[] = [];
+  if (pay.length) {
+    const resigns = pay.filter((s) => s.kind === "RESIGN").length;
+    const what = resigns ? (resigns === pay.length ? "퇴사 정산" : "연차기간 만료·퇴사 정산") : "연차기간 만료";
+    parts.push(`${what} ${pay.length}명 · 미사용 ${round1(pay.reduce((a, s) => a + s.suggestDays, 0))}일`);
+  }
+  if (ded.length) {
+    const noConsent = ded.filter((s) => s.evidenceWarning).length;
+    parts.push(
+      `퇴사 초과사용 공제 ${ded.length}명 · ${round1(ded.reduce((a, s) => a + s.suggestDays, 0))}일` +
+        (noConsent ? ` (동의 기록 없음 ${noConsent}명)` : "")
+    );
+  }
+  return `이 달 ${parts.join(" / ")}`;
 }

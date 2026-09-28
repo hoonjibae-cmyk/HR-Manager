@@ -8,6 +8,8 @@ import {
   payoutSuggestions,
   payoutAmount,
   payoutNotice,
+  payoutTotals,
+  NO_CONSENT_WARNING,
   periodLastDay,
   inMonth,
   ymd,
@@ -259,5 +261,78 @@ describe("퇴사 정산 — 그 달에 퇴사하는 직원도 짚는다", () => 
       8
     );
     expect(payoutNotice(both)).toContain("연차기간 만료·퇴사 정산");
+  });
+});
+
+describe("퇴사월 초과사용 공제 — 동의 기록", () => {
+  const resigner = (over: Partial<PayoutInput> = {}) =>
+    row({ periodEnd: d("2027-02-28"), resignDate: d("2026-08-20"), remaining: -2, ...over });
+
+  it("동의 기록이 있으면 근거를 싣고 경고하지 않는다", () => {
+    const [s1] = payoutSuggestions([resigner({ consentRequestIds: [11, 12] })], 2026, 8);
+    expect(s1.overdraft).toBe(true);
+    expect(s1.consentRequestIds).toEqual([11, 12]);
+    expect(s1.evidenceWarning).toBeNull();
+  });
+
+  it("**동의 기록이 없으면 §43 경고** — 근거 없이 공제하지 않게", () => {
+    const [s1] = payoutSuggestions([resigner()], 2026, 8);
+    expect(s1.overdraft).toBe(true);
+    expect(s1.evidenceWarning).toBe(NO_CONSENT_WARNING);
+    expect(s1.evidenceWarning).toContain("§43");
+  });
+
+  it("이미 (−)로 다 넣은 줄도 공제 줄로 남는다 (근거 확인은 그대로 필요)", () => {
+    const [s1] = payoutSuggestions([resigner({ alreadyDays: -2 })], 2026, 8);
+    expect(s1.done).toBe(true);
+    expect(s1.overdraft).toBe(true);
+  });
+
+  it("지급 줄·기간 만료 줄은 공제가 아니다 — 동의 기록을 싣지 않는다", () => {
+    const list = payoutSuggestions(
+      [
+        resigner({ remaining: 3, consentRequestIds: [9] }),
+        row({ employeeId: 2, name: "이만료", periodEnd: d("2026-08-31"), consentRequestIds: [8] }),
+      ],
+      2026,
+      8
+    );
+    for (const s of list) {
+      expect(s.overdraft).toBe(false);
+      expect(s.consentRequestIds).toEqual([]);
+      expect(s.evidenceWarning).toBeNull();
+    }
+  });
+
+  it("합계는 지급과 공제를 갈라 낸다 — 서로 상쇄돼 사라지지 않게", () => {
+    const list = payoutSuggestions(
+      [
+        resigner({ employeeId: 1, remaining: -2 }),
+        row({ employeeId: 2, name: "이만료", periodEnd: d("2026-08-31"), remaining: 3 }),
+      ],
+      2026,
+      8
+    );
+    const t = payoutTotals(list);
+    expect(t.payDays).toBe(3);
+    expect(t.payAmount).toBe(480_000);
+    expect(t.deductDays).toBe(-2);
+    expect(t.deductAmount).toBe(-320_000);
+  });
+
+  it("안내 한 줄에 공제 대상과 동의 기록 없는 인원을 따로 적는다", () => {
+    const list = payoutSuggestions(
+      [
+        resigner({ employeeId: 1, remaining: -2 }),
+        resigner({ employeeId: 3, name: "박동의", remaining: -1, consentRequestIds: [5] }),
+        row({ employeeId: 2, name: "이만료", periodEnd: d("2026-08-31"), remaining: 3 }),
+      ],
+      2026,
+      8
+    );
+    const msg = payoutNotice(list)!;
+    expect(msg).toContain("연차기간 만료 1명 · 미사용 3일");
+    expect(msg).toContain("퇴사 초과사용 공제 2명 · -3일");
+    expect(msg).toContain("동의 기록 없음 1명");
   });
 });
