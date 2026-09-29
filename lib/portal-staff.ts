@@ -11,7 +11,8 @@ export const PORTAL_STAFF_DEPARTMENTS = [
 export type PortalStaffScope =
   | "hr:self-service"
   | "hr:certificate"
-  | "hr:monthly-operations";
+  | "hr:monthly-operations"
+  | "hr:guest-login";
 
 export interface PortalStaffClaims extends HrIdentity {
   kind: "hr-staff-api";

@@ -53,6 +53,13 @@ describe("portal staff API token", () => {
         { ...expected, scope: "hr:monthly-operations" },
       )?.empNo,
     ).toBe("E021");
+    expect(
+      verifyPortalStaffToken(
+        token({ ...claims, scope: "hr:guest-login" }),
+        secret,
+        { ...expected, scope: "hr:guest-login" },
+      )?.empNo,
+    ).toBe("E021");
   });
 
   it("rejects tampering, unknown departments, another audience and expiry", () => {
