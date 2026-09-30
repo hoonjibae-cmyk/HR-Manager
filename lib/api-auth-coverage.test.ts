@@ -23,6 +23,8 @@ const dedicatedAuth = new Set([
   "app/api/portal/self-service/route.ts",
   "app/api/portal/self-service/certificate/route.ts",
   "app/api/portal/monthly-operations/notify/route.ts",
+  // 포털 조교 인증번호 DM — 다른 포털 라우트와 같은 authenticatedPortalStaff 서명 검증
+  "app/api/portal/guest-login/route.ts",
   "app/api/slack/command/route.ts",
   "app/api/slack/events/route.ts",
   "app/api/slack/interactivity/route.ts",
