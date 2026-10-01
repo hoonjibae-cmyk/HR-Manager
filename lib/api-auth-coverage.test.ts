@@ -20,6 +20,8 @@ const dedicatedAuth = new Set([
   "app/api/cron/route.ts",
   "app/api/directory/app-users/route.ts",
   "app/api/directory/teachers/route.ts",
+  // 법인 인감 — 학생 카드 경고장용, 명부 창구와 같은 API 키 인증
+  "app/api/directory/stamp/route.ts",
   "app/api/portal/self-service/route.ts",
   "app/api/portal/self-service/certificate/route.ts",
   "app/api/portal/monthly-operations/notify/route.ts",
