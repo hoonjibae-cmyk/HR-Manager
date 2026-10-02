@@ -513,3 +513,23 @@ describe("주말근무 — 보강과 같은 원장, 기본 반영", () => {
     expect(r.excluded).toHaveLength(0);
   });
 });
+
+describe("시간대 표기 — 분 단위로 떨어진다", () => {
+  /*
+   * 4시간 20분(= 4.3333…h)은 시간으로 반올림하면 4.333h 이고, 거기에 60 을 곱해 끝 시각을 되돌리면
+   * 259.98분이 되어 별첨 내역서에 「08:30~12:49.98000000000002」 가 찍혔다(2026-09 박채영 명세서).
+   */
+  it("일요일 08:30~12:50 → 「08:30~12:50」 · 4.333h", () => {
+    const r = run([s({ date: "2026-09-13", from: "08:30", to: "12:50", category: "MANDATORY" })]);
+    const l = r.lines[0];
+    expect(l.timeLabel).toBe("08:30~12:50");
+    expect(l.hours).toBeCloseTo(4.333, 3);
+  });
+
+  it("어떤 길이든 시간대는 HH:MM~HH:MM 꼴이다", () => {
+    for (const to of ["09:41", "10:07", "11:13", "13:59", "23:59"]) {
+      const r = run([s({ date: "2026-09-13", from: "08:30", to })]);
+      for (const l of r.lines) expect(l.timeLabel).toMatch(/^\d{2}:\d{2}~\d{2}:\d{2}$/);
+    }
+  });
+});

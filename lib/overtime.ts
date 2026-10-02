@@ -160,7 +160,8 @@ function hhmmToMin(s: string): number {
 }
 
 function minToHHMM(min: number): string {
-  const m = ((min % 1440) + 1440) % 1440;
+  // 분 단위로 반올림한 뒤 적는다 — 소수 분이 들어와도 「12:49.98…」 같은 표기가 새지 않게
+  const m = ((Math.round(min) % 1440) + 1440) % 1440;
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
 
@@ -299,8 +300,8 @@ export function workWindow(s: OtSession): { start: Date; end: Date } {
   return { start: s.actualStart ?? s.planStart, end: s.actualEnd ?? s.planEnd };
 }
 
-/** 근무 시간 길이(시간) — 자정을 넘기면 다음 날로 이어진 것으로 본다 */
-export function sessionHours(s: OtSession): number {
+/** 근무 시간 길이(분, 정수) — 자정을 넘기면 다음 날로 이어진 것으로 본다 */
+function sessionMinutes(s: OtSession): number {
   const { start, end } = workWindow(s);
   let mins = minOfDay(end) - minOfDay(start);
   const dayDiff = Math.round(
@@ -310,7 +311,12 @@ export function sessionHours(s: OtSession): number {
   );
   mins += dayDiff * 1440;
   if (mins <= 0) mins += 1440; // 종료일을 안 적고 자정을 넘긴 경우
-  return Math.round((mins / 60) * 1000) / 1000;
+  return mins;
+}
+
+/** 근무 시간 길이(시간) — 자정을 넘기면 다음 날로 이어진 것으로 본다 */
+export function sessionHours(s: OtSession): number {
+  return Math.round((sessionMinutes(s) / 60) * 1000) / 1000;
 }
 
 /**
@@ -322,7 +328,9 @@ function sessionLines(s: OtSession, holidays: Set<string>, schedule: ScheduleDay
   const date = dayKey(start);
   const dow = start.getUTCDay();
   const isHoliday = holidays.has(date) || dow === 0; // 일요일 = 주휴일
-  const base: Range = [minOfDay(start), minOfDay(start) + sessionHours(s) * 60];
+  // ⚠ 끝 시각은 **분(정수)으로** 잡는다 — 반올림한 시간(4.333h)에 60 을 곱해 되돌리면
+  // 259.98분이 되어 시간대가 「08:30~12:49.98000000000002」 로 찍혔다(실제 명세서 별첨에서 겪었다).
+  const base: Range = [minOfDay(start), minOfDay(start) + sessionMinutes(s)];
 
   const mk = (r: Range, kind: OtKind, night: boolean, reason?: string): OtLine => ({
     sessionId: s.id,

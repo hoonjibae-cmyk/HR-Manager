@@ -846,6 +846,23 @@ const WEEK_KO = ["일", "월", "화", "수", "목", "금", "토"];
  * 어떤 보강이 어떤 구분(연장/휴일)으로 몇 시간 인정됐는지, 왜 깎였는지까지
  * 한 장에 남겨 직원이 명세서만 보고도 확인할 수 있게 한다.
  */
+/**
+ * 시간대 표기를 분 단위로 다듬는다 — 「08:30~12:49.98000000000002」 → 「08:30~12:50」.
+ * 산정 엔진은 고쳤지만(lib/overtime.ts) 그 전에 산정해 **급여 기록에 저장된 줄**은 옛 표기를
+ * 그대로 갖고 있고, 발송(SENT)된 달은 재산정하지 않는다. 그래서 그리는 자리에서도 바로잡는다.
+ */
+export function cleanTimeLabel(label: string): string {
+  return String(label ?? "").replace(/(\d{1,2}):(\d{1,2}\.\d+)/g, (_m, h: string, m: string) => {
+    let hh = Number(h);
+    let mm = Math.round(Number(m));
+    if (mm >= 60) {
+      hh += Math.floor(mm / 60);
+      mm %= 60;
+    }
+    return `${String(hh % 24).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  });
+}
+
 export function overtimeDetailHtml(args: {
   employee: DocEmployee;
   company: DocCompany;
@@ -872,7 +889,7 @@ export function overtimeDetailHtml(args: {
     const amount = Math.round(l.countedHours * hourlyWage * l.multiplier);
     return `<tr>
       <td class="c sm">${esc(l.date.slice(5))}(${dow(l.date)})</td>
-      <td class="c sm">${esc(l.timeLabel)}</td>
+      <td class="c sm">${esc(cleanTimeLabel(l.timeLabel))}</td>
       <td class="sm">${esc(args.categoryLabel[l.category] ?? l.category)}</td>
       <td class="c sm">${kindOf(l)}${l.night ? " +야간" : ""}</td>
       <td class="c">${num(l.countedHours)}h</td>
@@ -921,7 +938,7 @@ export function overtimeDetailHtml(args: {
       ${cut
         .map(
           (l) =>
-            `<div class="small">· ${esc(l.date.slice(5))}(${dow(l.date)}) ${esc(l.timeLabel || "")} ${num(
+            `<div class="small">· ${esc(l.date.slice(5))}(${dow(l.date)}) ${esc(cleanTimeLabel(l.timeLabel || ""))} ${num(
               l.hours
             )}시간 — ${esc(l.reason ?? "수당 대상 아님")}</div>`
         )
