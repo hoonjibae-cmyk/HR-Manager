@@ -52,6 +52,11 @@ export const APP_ACCESS: Record<string, Record<string, AppRole>> = {
     경영지원: "admin",
     교육운영팀: "operations",
   },
+  // e강의평가 — 경영지원은 전체 관리자, 교육운영팀은 평가 운영 관리자.
+  "e-evaluation": {
+    경영지원: "admin",
+    교육운영팀: "operations",
+  },
 };
 
 export function appAccessMap(app: string): Record<string, AppRole> | null {
