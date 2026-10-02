@@ -45,10 +45,11 @@ describe("application directory access", () => {
     });
   });
 
-  it("exposes e-evaluation only to management and operations", () => {
+  it("exposes professors only as e-evaluation report recipient candidates", () => {
     expect(appAccessMap("e-evaluation")).toEqual({
       경영지원: "admin",
       교육운영팀: "operations",
+      교수부: "report_viewer",
     });
   });
 
