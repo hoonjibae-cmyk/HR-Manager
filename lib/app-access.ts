@@ -8,7 +8,7 @@
 // 움직인다.
 
 /** 프로그램 안에서의 자리. 받는 쪽이 자기 권한 체계로 옮겨 쓴다. */
-export type AppRole = "admin" | "operations" | "teacher" | "user";
+export type AppRole = "admin" | "operations" | "teacher" | "user" | "report_viewer";
 
 /**
  * 프로그램별 부서 → 자리.
@@ -51,6 +51,13 @@ export const APP_ACCESS: Record<string, Record<string, AppRole>> = {
   "yussam-marketing": {
     경영지원: "admin",
     교육운영팀: "operations",
+  },
+  // e강의평가 — 교수부는 관리자 로그인 대상이 아닌 원장 리포트 DM 수신 후보.
+  // 실제 수신 여부는 e강의평가에서 경영지원이 개별 지정한다.
+  "e-evaluation": {
+    경영지원: "admin",
+    교육운영팀: "operations",
+    교수부: "report_viewer",
   },
 };
 

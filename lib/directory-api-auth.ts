@@ -4,6 +4,7 @@ const APP_KEY_ENV: Record<string, string> = {
   "student-card": "STUDENT_CARD_DIRECTORY_API_KEY",
   "yussam-voca": "VOCA_DIRECTORY_API_KEY",
   "yussam-marketing": "MARKETING_DIRECTORY_API_KEY",
+  "e-evaluation": "E_EVALUATION_DIRECTORY_API_KEY",
 };
 
 export function directoryApiKey(app: string) {

@@ -6,6 +6,7 @@ const originalDirectoryKey = process.env.DIRECTORY_API_KEY;
 const originalVocaKey = process.env.VOCA_DIRECTORY_API_KEY;
 const originalStudentCardKey = process.env.STUDENT_CARD_DIRECTORY_API_KEY;
 const originalMarketingKey = process.env.MARKETING_DIRECTORY_API_KEY;
+const originalEvaluationKey = process.env.E_EVALUATION_DIRECTORY_API_KEY;
 
 afterEach(() => {
   if (originalDirectoryKey === undefined) delete process.env.DIRECTORY_API_KEY;
@@ -16,6 +17,8 @@ afterEach(() => {
   else process.env.STUDENT_CARD_DIRECTORY_API_KEY = originalStudentCardKey;
   if (originalMarketingKey === undefined) delete process.env.MARKETING_DIRECTORY_API_KEY;
   else process.env.MARKETING_DIRECTORY_API_KEY = originalMarketingKey;
+  if (originalEvaluationKey === undefined) delete process.env.E_EVALUATION_DIRECTORY_API_KEY;
+  else process.env.E_EVALUATION_DIRECTORY_API_KEY = originalEvaluationKey;
 });
 
 describe("application directory access", () => {
@@ -40,6 +43,21 @@ describe("application directory access", () => {
       경영지원: "admin",
       교육운영팀: "operations",
     });
+  });
+
+  it("exposes professors only as e-evaluation report recipient candidates", () => {
+    expect(appAccessMap("e-evaluation")).toEqual({
+      경영지원: "admin",
+      교육운영팀: "operations",
+      교수부: "report_viewer",
+    });
+  });
+
+  it("uses a dedicated e-evaluation key when configured", () => {
+    process.env.DIRECTORY_API_KEY = "shared-key";
+    process.env.E_EVALUATION_DIRECTORY_API_KEY = "evaluation-key";
+    expect(directoryRequestAuthorized("e-evaluation", "evaluation-key")).toBe(true);
+    expect(directoryRequestAuthorized("e-evaluation", "shared-key")).toBe(false);
   });
 
   it("uses a dedicated Student Card key when configured", () => {
