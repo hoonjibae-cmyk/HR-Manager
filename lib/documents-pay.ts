@@ -77,6 +77,19 @@ function head(c: DocCompany, extra = ""): string {
   </div>`;
 }
 
+/** 시급제 휴일근로 날짜별 근거 — 산정 때 저장한 breakdown.holidayWork 를 그대로 편다 */
+function holidayWorkNote(bd: any): string {
+  const days: Array<{ date: string; kind: string; hours: number; overHours: number }> = bd?.holidayWork?.days ?? [];
+  if (!days.length) return "";
+  const n = (x: number) => (Number.isInteger(x) ? String(x) : String(Math.round(x * 100) / 100));
+  const items = days.map(
+    (d) =>
+      `${Number(d.date.slice(5, 7))}/${Number(d.date.slice(8))}(${d.kind === "HOLIDAY" ? "공휴일" : "일"}) ${n(d.hours)}시간` +
+      (d.overHours ? ` + 8시간 초과 ${n(d.overHours)}시간` : "")
+  );
+  return `<div class="small">· 휴일근로 내역: ${esc(items.join(" · "))}</div>`;
+}
+
 /* ============================ 급여명세서 / 사업소득명세서 ============================ */
 export function payslipHtml(args: {
   employee: DocEmployee;
@@ -95,7 +108,8 @@ export function payslipHtml(args: {
       ["추가근로수당", p.extraP],
       ["연장근로수당", p.overtimeP],
       ["야간근로수당", p.nightP],
-      ["휴일근로수당", p.holidayP],
+      // 시급제는 휴일근로시간의 기본 시급분이 기본급에 이미 들어 있어 이 칸은 가산분뿐이다
+      [p.payScheme === "HOURLY" ? "휴일근로 가산수당" : "휴일근로수당", p.holidayP],
       ["주휴수당", p.weeklyHolidayP],
       ["직책수당", p.positionP],
       ["식대(비과세)", p.mealP],
@@ -209,14 +223,15 @@ export function payslipHtml(args: {
         : 0;
     const exH = p.extraHours ?? 0;
     const otH = p.overtimeHours ?? 0;
-    const holH = p.holidayHours ?? 0;
+    const holH = (p.holidayHours ?? 0) + (p.holidayOverHours ?? 0);
     const nightH = p.nightHours ?? 0;
-    const total = baseHours + exH + otH + holH;
+    // 휴일근로시간은 기본 근로시간 **안에** 이미 들어 있다(출퇴근 기록 그대로) — 더하면 두 번 센다
+    const total = baseHours + exH + otH;
     const parts = [
       `기본 ${hm(baseHours)}`,
       exH ? `추가 ${hm(exH)}` : "",
       otH ? `연장 ${hm(otH)}` : "",
-      holH ? `휴일 ${hm(holH)}` : "",
+      holH ? `그중 휴일근로 ${hm(holH)}(가산)` : "",
       nightH ? `야간 ${hm(nightH)}(가산)` : "",
     ].filter(Boolean);
     hoursRow = `<tr><th>총 근로시간</th><td colspan="3"><b>${hm(total)}</b> <span class="muted">( ${parts.join(" · ")} )</span></td></tr>`;
@@ -409,7 +424,11 @@ export function payslipHtml(args: {
   <div class="clause" style="margin-top:10px">
     ${isHourly ? `<div class="small">· 기본급 = 기본 근로시간 × 시급</div>` : ""}
     <div class="small">· 추가근로수당(연장) = 연장근로시간 × 통상시급 <span class="muted">(주 40시간 이내 — 가산 없음)</span> &nbsp; · 연장근로수당(법정초과) = 1일 8시간·주 40시간 초과시간 × 통상시급 × 1.5</div>
-    <div class="small">· 휴일근로수당 = 휴일근로시간 × 통상시급 × 1.5 <span class="muted">(1일 8시간 초과분은 × 2.0)</span> &nbsp; · 야간근로수당 = 야간근로시간 × 통상시급 × 0.5</div>
+    ${
+      isHourly
+        ? `<div class="small">· 휴일근로 가산수당 = 일요일(주휴일)·공휴일 근로시간 × 시급 × 0.5 <span class="muted">(1일 8시간 초과분은 × 1.0)</span> — 그 시간의 기본 시급분은 기본급에 이미 포함되어 합계 × 1.5(초과분 × 2.0)가 됩니다 (근로기준법 §56②). 근로시간은 휴게 30분을 뺀 순 근로시간입니다.</div>${holidayWorkNote(bd)} &nbsp;<div class="small">· 야간근로수당 = 야간근로시간 × 통상시급 × 0.5</div>`
+        : `<div class="small">· 휴일근로수당 = 휴일근로시간 × 통상시급 × 1.5 <span class="muted">(1일 8시간 초과분은 × 2.0)</span> &nbsp; · 야간근로수당 = 야간근로시간 × 통상시급 × 0.5</div>`
+    }
     ${timeNote}
     ${holidayNote}
     ${isFree

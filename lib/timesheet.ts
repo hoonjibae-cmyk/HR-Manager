@@ -34,9 +34,12 @@
 //     그래서 주휴 판정에 쓰는 시간은 급여 산정시간(paidHours)과 다를 수 있다.
 //   · 연차 사용일은 1일 소정근로시간을 채운 것으로 본다 · 지각·조퇴는 시간만큼만 줄어든다
 //
-//  **시급제에는 연장·휴일 가산을 따로 붙이지 않는다.** 주 15시간을 넘긴 주마다 주휴를 인정해 주는
-//  것이 그 자리를 대신해 온 구조이고, 1일 4.5시간 내외·주 20시간 안쪽이라 법정 가산 요건
-//  (1일 8시간·주 40시간 초과)에 애초에 닿지 않는다. 보강 오버타임(lib/overtime.ts)만 별도 산정한다.
+//  **시급제에는 연장 가산을 붙이지 않는다** — 1일 4.5시간 내외·주 20시간 안쪽이라 연장 가산 요건
+//  (1일 8시간·주 40시간 초과)에 애초에 닿지 않는다.
+//  **휴일근로 가산은 붙인다**(`holidayWorkFromEntries`) — §56② 는 시간 길이와 무관하게 '휴일에 일했다'
+//  는 사실만으로 붙고, 단시간근로자도 같다(5인 이상 사업장: 주휴일 + 관공서 공휴일). 주휴수당은 별개의
+//  법정 수당이라 이것을 갈음하지 못한다(예전엔 '주휴가 대신한다' 고 보고 안 붙였다 — 체불 소지였다).
+//  그 시간은 이미 실근로로 ×1.0 지급되므로 엔진은 **가산분만** 더한다(8시간까지 +0.5, 초과분 +1.0).
 //
 //  근로시간표(Employee.schedule)는 이제 주휴 판정에 쓰지 않는다 — **연차를 쓴 날 몇 시간을
 //  채운 것으로 볼지**(1일 소정근로시간) 계산에만 쓴다.
@@ -407,6 +410,59 @@ export interface MonthlyOptions {
    * (첫 업로드 달의 첫 주처럼 앞달 기록이 아예 없는 경우)
    */
   knownFrom?: string | null;
+}
+
+/** 휴일근로 — 주휴일(일요일)·공휴일에 실제로 일한 시간 */
+export interface HolidayWork {
+  /** 1일 8시간까지의 휴일근로시간 합계 (가산 +0.5) */
+  hours: number;
+  /** 1일 8시간을 넘긴 휴일근로시간 합계 (가산 +1.0 — 합쳐 ×2.0) */
+  overHours: number;
+  /** 날짜별 근거 — 명세서·화면이 그대로 편다 */
+  days: { date: string; kind: "SUNDAY" | "HOLIDAY"; hours: number; overHours: number }[];
+}
+
+/**
+ * 대상 월의 **휴일근로시간**을 날짜별로 센다(근로기준법 §56②).
+ *
+ * - 휴일 = **일요일(이 학원의 주휴일) + 공휴일 표**의 날. 둘이 겹치면 한 번만 센다.
+ * - 시간은 **순 근로시간**(체류 − 휴게 30분)이다 — 휴게는 근로시간이 아니라서(§54) 가산 대상도 아니다.
+ *   휴게가 유급인 직원이라도 그 30분은 기본 시급(×1.0)으로 이미 받고 가산은 붙지 않는다.
+ * - **1일 8시간**을 기준으로 이내·초과를 가른다(초과분은 ×2.0).
+ * - 대상 월에 속한 날만 센다(달을 걸친 주라도 그 날짜가 속한 달의 급여에 싣는다).
+ */
+export function holidayWorkFromEntries(
+  entries: TimesheetEntry[],
+  opts: { year: number; month: number; holidays?: string[] }
+): HolidayWork {
+  const prefix = `${opts.year}-${String(opts.month).padStart(2, "0")}-`;
+  const holidays = new Set(opts.holidays ?? []);
+  const byDate = new Map<string, number>();
+  for (const e of entries) {
+    if (!e.date.startsWith(prefix)) continue;
+    byDate.set(e.date, (byDate.get(e.date) ?? 0) + e.hours);
+  }
+  const r3 = (n: number) => Math.round(n * 1000) / 1000;
+  const days: HolidayWork["days"] = [];
+  for (const [date, raw] of [...byDate].sort(([a], [b]) => a.localeCompare(b))) {
+    if (raw <= 0) continue;
+    const sunday = day(date).getUTCDay() === 0;
+    const holiday = holidays.has(date);
+    if (!sunday && !holiday) continue;
+    const net = Math.max(raw - Math.min(0.5, raw), 0);
+    if (net <= 0) continue;
+    days.push({
+      date,
+      kind: holiday ? "HOLIDAY" : "SUNDAY",
+      hours: r3(Math.min(net, 8)),
+      overHours: r3(Math.max(net - 8, 0)),
+    });
+  }
+  return {
+    hours: r3(days.reduce((a, d) => a + d.hours, 0)),
+    overHours: r3(days.reduce((a, d) => a + d.overHours, 0)),
+    days,
+  };
 }
 
 /** 계약 근로시간표에서 주 소정근로시간·주 근무일수를 뽑는다 */

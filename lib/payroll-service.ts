@@ -10,7 +10,8 @@ import { getActiveRates, getTaxTable, empToPayInput } from "./repo";
 import { summarizeIncentive, isRevenueRoster, type RosterStudent } from "./incentive";
 import { overtimeInputsFor } from "./makeup-service";
 import { mergeOvertimeHours, ledgerApplied } from "./overtime-inputs";
-import { parkingDeductionOf } from "./constants";
+import { parkingDeductionOf, isContractorContract } from "./constants";
+import { holidayWorkFromEntries, type HolidayWork } from "./timesheet";
 import {
   planSheetCleanup,
   employedInMonth,
@@ -20,6 +21,41 @@ import { logActivity } from "./activity";
 
 export interface PayrollInputMap {
   [employeeId: number]: MonthlyInput;
+}
+
+/**
+ * 시급제 직원의 그 달 휴일근로(일요일·공휴일)를 저장된 일별 기록(TimesheetDay)에서 센다.
+ * 그 달 기록이 하나도 없는 직원은 넣지 않는다 — 기록표 없이 추정 산정한 달에 휴일근로 0 을
+ * 박아 두면 관리자가 손으로 넣은 값을 지워 버린다.
+ * 위탁계약은 근로기준법 가산 대상이 아니라 뺀다(엔진도 0 으로 둔다).
+ */
+async function hourlyHolidayWorkFor(
+  emps: Array<{ id: number; payScheme: string; isContractor?: boolean | null }>,
+  year: number,
+  month: number
+): Promise<Map<number, HolidayWork>> {
+  const out = new Map<number, HolidayWork>();
+  const ids = emps.filter((e) => e.payScheme === "HOURLY" && !isContractorContract(e as any)).map((e) => e.id);
+  if (!ids.length) return out;
+  const from = new Date(Date.UTC(year, month - 1, 1));
+  const to = new Date(Date.UTC(year, month, 0, 23, 59, 59));
+  const [days, holidays] = await Promise.all([
+    prisma.timesheetDay.findMany({
+      where: { employeeId: { in: ids }, date: { gte: from, lte: to } },
+      select: { employeeId: true, date: true, hours: true },
+    }),
+    prisma.holiday.findMany({ where: { date: { gte: from, lte: to } }, select: { date: true } }),
+  ]);
+  const ymd = (d: Date) => d.toISOString().slice(0, 10);
+  const hol = holidays.map((h) => ymd(h.date));
+  const byEmp = new Map<number, Array<{ date: string; hours: number }>>();
+  for (const d of days) {
+    const arr = byEmp.get(d.employeeId) ?? [];
+    arr.push({ date: ymd(d.date), hours: d.hours });
+    byEmp.set(d.employeeId, arr);
+  }
+  for (const [id, entries] of byEmp) out.set(id, holidayWorkFromEntries(entries, { year, month, holidays: hol }));
+  return out;
 }
 
 /** 월중 입/퇴사 일할계산 비율 = 해당 월 재직 역일수 / 해당 월 총 역일수 */
@@ -368,6 +404,9 @@ export async function runPayrollMonth(
     month,
     emps.map((e) => e.id)
   );
+  // 시급제 휴일근로(일요일·공휴일) — 저장된 일별 출퇴근 기록에서 **산정 때마다 다시 센다**.
+  // 그래서 기록표를 다시 올리지 않아도 일괄 산정만 다시 누르면 반영된다.
+  const holidayWorkMap = await hourlyHolidayWorkFor(emps, year, month);
   // 학생 명단 일괄 조회 — 월급+인센티브(인원 기준·매출 기준)와 완전비율제(사업소득 매출) 둘 다.
   const incEmpIds = emps
     .filter((e) => e.payScheme === "INCENTIVE" || e.payScheme === "RATIO")
@@ -418,6 +457,15 @@ export async function runPayrollMonth(
     const ot = otMap.get(emp.id);
     const otHours = mergeOvertimeHours(mInput as any, ot ?? null, existing);
     Object.assign(mInput, otHours);
+    // 시급제는 보강 원장에서 빠지고(출퇴근 기록이 원본) 휴일근로시간은 **기록표에서** 온다 —
+    // 관리자가 그 칸을 직접 고쳐 보냈으면 그 값이 이긴다(명시 입력 > 기록표 > 기존 저장값).
+    const holidayWork = holidayWorkMap.get(emp.id) ?? null;
+    const explicitHoliday =
+      inputs[emp.id]?.holidayHours != null || inputs[emp.id]?.holidayOverHours != null;
+    if (holidayWork && !explicitHoliday) {
+      mInput.holidayHours = holidayWork.hours;
+      mInput.holidayOverHours = holidayWork.overHours;
+    }
     mInput.prorationRatio = prorationRatioFor(
       year,
       month,
@@ -570,6 +618,8 @@ export async function runPayrollMonth(
             : null,
         // 시간기록표 근거 — 명세서의 체류/휴게/순 근로/연차 구분 표기용
         timesheet: mInput.timesheet ?? null,
+        // 시급제 휴일근로 근거(날짜별) — 명세서가 어느 날 몇 시간에 가산이 붙었는지 적는다
+        holidayWork: holidayWork && !explicitHoliday && holidayWork.days.length ? holidayWork : null,
         // 보강 오버타임 산정 내역 — 명세서 첨부 '오버타임 산정 내역서' 가 이걸 그대로 쓴다.
         // **원장 시간을 그대로 산정에 썼을 때만** 남긴다 — 관리자가 시간을 직접 고쳐
         // 원장과 다르게 산정한 달에 원장 내역서를 붙이면 별첨과 지급액이 어긋난 문서가 나간다.

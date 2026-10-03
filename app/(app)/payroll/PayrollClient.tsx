@@ -1209,7 +1209,7 @@ export default function PayrollClient({ today }: { today: string }) {
                         <>
                           <InlineInput label="" title="추가h (법내연장)" value={inputs[r.employeeId]?.extraHours ?? ""} onChange={(v) => setInput(r.employeeId, "extraHours", v)} />
                           <InlineInput label="" title="연장h (법정 초과 ×1.5)" value={inputs[r.employeeId]?.overtimeHours ?? ""} onChange={(v) => setInput(r.employeeId, "overtimeHours", v)} />
-                          <InlineInput label="" title="휴일h (×1.5)" value={inputs[r.employeeId]?.holidayHours ?? ""} onChange={(v) => setInput(r.employeeId, "holidayHours", v)} />
+                          <InlineInput label="" title={r.payScheme === "HOURLY" ? "휴일h — 시급제: 출퇴근 기록에서 자동(일요일·공휴일 순 근로). 시간은 기본급에 이미 포함되어 가산 ×0.5 만 더한다. 직접 넣으면 그 값이 우선" : "휴일h (×1.5)"} value={inputs[r.employeeId]?.holidayHours ?? ""} onChange={(v) => setInput(r.employeeId, "holidayHours", v)} />
                           <InlineInput label="" title="야간h (+0.5)" value={inputs[r.employeeId]?.nightHours ?? ""} onChange={(v) => setInput(r.employeeId, "nightHours", v)} />
                         </>
                       ) : (

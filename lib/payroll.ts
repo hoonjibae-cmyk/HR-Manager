@@ -340,6 +340,21 @@ export function inclusiveWageBreakdown(t: InclusiveWageTerms): InclusiveWageBrea
 
 /* ───────────── 포괄임금 약정분 ↔ 그 달 변동분 가르기 ───────────── */
 
+/**
+ * 휴일근로 배수 — **시급제는 가산분만** 붙인다.
+ *
+ * 월급제·인센티브는 휴일근로시간이 월급 밖이라 시간 전체를 ×1.5(8시간 초과분 ×2.0)로 준다.
+ * 시급제는 그 시간이 이미 출퇴근 기록의 실근로시간으로 **×1.0 지급**되므로, 여기서 ×1.5 를 또
+ * 주면 2.5배가 된다. 그래서 시급제의 `holidayHours`·`holidayOverHours` 는 '이미 지급된 휴일근로
+ * 시간' 이고 가산분 +0.5(초과분 +1.0)만 더한다 — 합치면 법정 ×1.5·×2.0 이 된다(§56②).
+ * 엔진·세무 시트·퇴직급여·명세서가 이 함수 하나를 쓴다.
+ */
+export function holidayMultipliers(payScheme?: string | null): { within8: number; over8: number; premiumOnly: boolean } {
+  return payScheme === "HOURLY"
+    ? { within8: 0.5, over8: 1, premiumOnly: true }
+    : { within8: 1.5, over8: 2, premiumOnly: false };
+}
+
 /** 시간 기반 오버타임을 다시 세우는 데 필요한 값 */
 export interface VariableOvertimeInput {
   extraHours?: number;
@@ -348,6 +363,8 @@ export interface VariableOvertimeInput {
   holidayHours?: number;
   holidayOverHours?: number;
   hourlyWage?: number;
+  /** 시급제면 휴일근로를 가산분만 센다(`holidayMultipliers`) */
+  payScheme?: string | null;
 }
 
 /**
@@ -368,8 +385,8 @@ export function variableOvertimeOf(r: VariableOvertimeInput): number {
     round0((r.extraHours || 0) * hw) + // 법내연장 — 가산 없음(×1.0)
     round0((r.overtimeHours || 0) * hw * 1.5) +
     round0((r.nightHours || 0) * hw * 0.5) + // 야간은 가산분만
-    round0((r.holidayHours || 0) * hw * 1.5) +
-    round0((r.holidayOverHours || 0) * hw * 2) // 휴일 8시간 초과분
+    round0((r.holidayHours || 0) * hw * holidayMultipliers(r.payScheme).within8) +
+    round0((r.holidayOverHours || 0) * hw * holidayMultipliers(r.payScheme).over8) // 휴일 8시간 초과분
   );
 }
 
@@ -654,8 +671,16 @@ export function computePayroll(
   // 포괄임금 약정분은 매월 고정 지급(일할 적용), 실적분은 그 위에 추가 가산
   const overtimeP = inclusive.overtimePay + round0(otH * hourlyWage * 1.5);
   const nightP = inclusive.nightPay + round0(nightH * hourlyWage * 0.5);
-  // 휴일근로는 8시간까지 ×1.5, 그 초과분은 ×2.0 (근로기준법 §56②)
-  const holidayP = round0(holH * hourlyWage * 1.5) + round0(holOverH * hourlyWage * 2);
+  // 휴일근로는 8시간까지 ×1.5, 그 초과분은 ×2.0 (근로기준법 §56②).
+  // 시급제는 그 시간이 이미 실근로로 ×1.0 지급돼 있어 가산분(+0.5 / +1.0)만 더한다.
+  const holMul = holidayMultipliers(emp.payScheme);
+  const holidayP = round0(holH * hourlyWage * holMul.within8) + round0(holOverH * hourlyWage * holMul.over8);
+  if (holMul.premiumOnly && holidayP > 0)
+    notes.push(
+      `휴일근로 가산: 일요일·공휴일 근로 ${holH}시간 × 시급 × 0.5` +
+        (holOverH ? ` + 1일 8시간 초과 ${holOverH}시간 × 시급 × 1.0` : "") +
+        ` (기본 시급분은 근로시간에 이미 포함 — 근로기준법 §56②)`
+    );
 
   // --- 수당 (월 정액 수당은 일할 적용) ---
   // 식대·차량유지비는 월급제/인센티브에서는 기본급에서 이미 빼 두었으므로 여기서 더해도

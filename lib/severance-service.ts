@@ -52,6 +52,7 @@ const payItemsOf = (r: any): SeverancePayItems => ({
   holidayHours: r.holidayHours ?? 0,
   holidayOverHours: r.holidayOverHours ?? 0,
   hourlyWage: r.hourlyWage ?? 0,
+  payScheme: r.payScheme ?? null,
 });
 
 /** 그 달 마지막 날 (KST 벽시계를 UTC 필드에 담는 앱 규칙 그대로) */

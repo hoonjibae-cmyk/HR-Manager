@@ -196,6 +196,8 @@ export interface SeverancePayItems {
   holidayHours: number;
   holidayOverHours: number;
   hourlyWage: number;
+  /** 시급제면 휴일근로를 가산분만 센다(holidayMultipliers) */
+  payScheme?: string | null;
 }
 
 export interface SeveranceBase {

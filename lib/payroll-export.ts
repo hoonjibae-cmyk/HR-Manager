@@ -27,6 +27,8 @@ import { variableOvertimeOf } from "./payroll";
 
 export interface ExportPayrollRecord {
   incomeType: string;
+  /** 시급제면 휴일근로를 가산분만 센다(holidayMultipliers) — 시간은 이미 세전급여에 들어 있다 */
+  payScheme?: string | null;
   baseP: number;
   extraP: number;
   overtimeP: number;
