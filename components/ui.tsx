@@ -11,10 +11,11 @@ export function PageHeader({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between mb-6 gap-4">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">{title}</h1>
-        {desc && <p className="text-sm text-slate-500 mt-1">{desc}</p>}
+    // 좁은 화면에서는 버튼 묶음이 제목 아래로 내려온다 — 한 줄에 억지로 두면 제목이 한 글자씩 꺾인다
+    <div className="flex flex-wrap items-start justify-between mb-5 lg:mb-6 gap-3 lg:gap-4">
+      <div className="min-w-0">
+        <h1 className="text-xl lg:text-2xl font-bold text-slate-900 break-keep">{title}</h1>
+        {desc && <p className="text-sm text-slate-500 mt-1 break-keep">{desc}</p>}
       </div>
       {action}
     </div>
@@ -35,10 +36,11 @@ export function StatCard({
   accent?: string;
 }) {
   const inner = (
-    <div className="card p-5 h-full hover:shadow-md transition">
-      <div className="text-xs font-semibold text-slate-500">{label}</div>
+    // `break-keep` — 한글은 기본값이면 글자 단위로 꺾여 좁은 칸에서 한 글자씩 세로로 내려앉는다
+    <div className="card p-4 lg:p-5 h-full hover:shadow-md transition">
+      <div className="text-xs font-semibold text-slate-500 break-keep">{label}</div>
       <div className={`stat-num mt-2 ${accent ?? ""}`}>{value}</div>
-      {sub && <div className="text-xs text-slate-400 mt-1">{sub}</div>}
+      {sub && <div className="text-xs text-slate-400 mt-1 break-keep">{sub}</div>}
     </div>
   );
   return href ? <Link href={href}>{inner}</Link> : inner;

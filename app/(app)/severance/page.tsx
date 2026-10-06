@@ -22,7 +22,7 @@ export default async function SeverancePage({
 
   return (
     // 긴 명단 화면은 화면 높이에 맞춰 두 층으로 — 머리글·합계는 고정, 행만 표 안에서 스크롤
-    <div className="flex flex-col h-[calc(100dvh-6rem)] min-h-[28rem]">
+    <div className="flex flex-col lg:h-[calc(100dvh-6rem)] lg:min-h-[28rem]">
       <PageHeader
         title="퇴직급여"
         desc="근속 1년 미만은 퇴직급여충당금으로 적립하고, 1년이 지나면 DC형 퇴직연금 부담금으로 산정합니다."

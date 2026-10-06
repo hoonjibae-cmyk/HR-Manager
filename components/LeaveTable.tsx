@@ -248,7 +248,7 @@ export default function LeaveTable({
             <tbody>
               {sorted.map((r) => (
                 <tr key={r.id} className={r.active ? "hover:bg-slate-50" : "bg-rose-50/40 hover:bg-rose-50"}>
-                  <td className="td">
+                  <td className="td whitespace-nowrap">
                     <Link
                       href={`/leave/${r.id}`}
                       className="font-semibold text-brand-700 hover:underline"
@@ -274,7 +274,7 @@ export default function LeaveTable({
                       </div>
                     )}
                   </td>
-                  <td className="td text-slate-500 text-xs">{r.serviceLabel}</td>
+                  <td className="td text-slate-500 text-xs whitespace-nowrap">{r.serviceLabel}</td>
                   <td className="td text-slate-500 text-xs tnum whitespace-nowrap">
                     {r.periodStart} ~ {r.periodEnd}
                     <div className="text-slate-300">{r.periodLabel}</div>

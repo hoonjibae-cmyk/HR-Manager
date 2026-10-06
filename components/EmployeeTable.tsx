@@ -250,7 +250,8 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
             <tbody>
               {sorted.map((e) => (
                 <tr key={e.id} className="hover:bg-slate-50">
-                  <td className="td">
+                  {/* 이름은 꺾지 않는다 — 좁은 화면에서 '김서/준' 으로 두 줄이 되면 명단이 안 읽힌다 */}
+                  <td className="td whitespace-nowrap">
                     <Link
                       href={`/employees/${e.id}`}
                       className="font-semibold text-brand-700 hover:underline"

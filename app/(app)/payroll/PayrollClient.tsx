@@ -645,7 +645,7 @@ export default function PayrollClient({ today }: { today: string }) {
     /* 화면을 두 층으로 나눈다 — 연·월 선택과 합계는 늘 붙어 있고 **표만 안에서 스크롤**한다.
        47명을 넘어가면 아래로 내려갈수록 어느 입력칸인지 분간이 안 돼 잘못 적기 쉬웠다.
        창이 짧으면 min-h 가 걸려 예전처럼 페이지째 스크롤된다. */
-    <div className="flex flex-col h-[calc(100dvh-8rem)] lg:h-[calc(100dvh-9rem)] min-h-[28rem]">
+    <div className="flex flex-col lg:h-[calc(100dvh-9rem)] lg:min-h-[28rem]">
       <div className="shrink-0">
       <div className="card p-4 mb-5 flex flex-wrap items-center gap-3">
         <select className="input w-28" value={year} onChange={(e) => setYear(Number(e.target.value))}>

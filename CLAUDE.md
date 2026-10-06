@@ -147,11 +147,20 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   `lib/email.ts`, `lib/scheduler.ts`, `lib/slack.ts`.
 - **API**: `app/api/**` — 모두 `isAuthed()` 가드(슬랙/크론 제외, 자체 서명검증).
 - **화면**: `app/(app)/**` — 서버컴포넌트가 데이터 로드, `components/*Client.tsx` 가 상호작용.
-  **긴 명단 화면(`/payroll`·`/employees`·`/leave`)은 화면 높이에 맞춰 두 층으로 나눈다** —
-  연·월 선택·검색·필터·합계·표 머리글은 고정이고 **행만 표 안에서 스크롤**한다.
+  - **좌측 메뉴는 `lg` 미만에서 위쪽 막대 + ≡ 서랍으로 접힌다**(`components/Sidebar.tsx`,
+    `app/(app)/layout.tsx` 가 `flex-col lg:flex-row`). 240px 고정 메뉴가 휴대폰에서 그대로 남으면
+    본문이 60px 남짓으로 쪼그라들어 통계 카드 글자가 **한 글자씩 세로로** 내려앉았다(겪었다).
+    서랍은 경로가 바뀌면 닫고, 열린 동안 뒤 본문 스크롤을 막는다. 막대에는 지금 화면 이름을 적는다.
+  - **한글 라벨에는 `break-keep`** — 기본값이면 글자 단위로 꺾여 좁은 칸에서 세로로 선다(StatCard·
+    PageHeader·승인 대기 사유). 이름·날짜·종류처럼 한 덩어리로 읽혀야 하는 칸은 `whitespace-nowrap`
+    ('김서/준' 으로 갈리면 명단이 안 읽힌다). 표 자체는 `overflow-auto` 라 옆으로 밀어 본다.
+  **긴 명단 화면(`/payroll`·`/employees`·`/leave`·`/severance`)은 `lg` 이상에서만 화면 높이에 맞춰
+  두 층으로 나눈다** — 연·월 선택·검색·필터·합계·표 머리글은 고정이고 **행만 표 안에서 스크롤**한다.
   수십 명이 넘어가면 아래로 내려갈수록 어느 열·입력칸인지 분간이 안 돼 잘못 적기 쉬웠다.
-  페이지 뿌리를 `flex flex-col h-[calc(100dvh-…)] min-h-[28rem]` 로 잡고(창이 짧으면 예전처럼
-  페이지째 스크롤된다) 표 카드가 `flex-1 min-h-0 overflow-auto` 로 남은 높이를 먹는다.
+  페이지 뿌리를 `flex flex-col lg:h-[calc(100dvh-…)] lg:min-h-[28rem]` 로 잡고 표 카드가
+  `flex-1 min-h-0 overflow-auto` 로 남은 높이를 먹는다. ⚠ **휴대폰에서는 높이를 묶지 않는다** —
+  묶으면 승인 대기·필터 줄만으로 높이가 차서 표가 0 이 되고 필터가 카드 밖으로 흘러넘쳤다(겪었다).
+  거기서는 페이지째 스크롤한다.
   머리글은 `.sticky-head`(globals.css) — **`thead` 와 `th` 에 둘 다** 건다. thead 째로 붙여야
   연차 표처럼 **두 줄짜리(rowSpan) 머리글**이 겹치지 않고, thead sticky 를 모르는 옛 브라우저에서는
   th 쪽이 첫 줄만이라도 붙여 준다. 머리글 아래 경계선은 border 가 아니라 inset shadow 로 그린다 —

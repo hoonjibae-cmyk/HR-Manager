@@ -69,7 +69,7 @@ export default function LeaveApprovals({ requests }: { requests: Req[] }) {
       <tbody>
         {requests.map((r) => (
           <tr key={r.id}>
-            <td className="td font-semibold">
+            <td className="td font-semibold whitespace-nowrap">
               {r.employee.name}
               {r.status === "PRE_PENDING" && (
                 <span
@@ -80,7 +80,7 @@ export default function LeaveApprovals({ requests }: { requests: Req[] }) {
                 </span>
               )}
             </td>
-            <td className="td tnum">
+            <td className="td tnum whitespace-nowrap">
               {ymd(r.startDate)}
               {r.days > 1 ? ` ~ ${ymd(r.endDate)}` : ""}
             </td>
@@ -98,9 +98,10 @@ export default function LeaveApprovals({ requests }: { requests: Req[] }) {
                 </a>
               )}
             </td>
-            <td className="td">{LEAVE_TYPE_LABEL[r.leaveType] ?? r.leaveType}</td>
-            <td className="td text-slate-500">{r.reason ?? "-"}</td>
-            <td className="td text-slate-500 whitespace-pre-line">{r.workPlan || "-"}</td>
+            <td className="td whitespace-nowrap">{LEAVE_TYPE_LABEL[r.leaveType] ?? r.leaveType}</td>
+            {/* 사유·업무조치는 글이 길어질 수 있어 최소 폭을 준다 — 좁은 화면에서 한 글자씩 세로로 꺾이지 않게 */}
+            <td className="td text-slate-500 min-w-[8rem] break-keep">{r.reason ?? "-"}</td>
+            <td className="td text-slate-500 whitespace-pre-line min-w-[8rem] break-keep">{r.workPlan || "-"}</td>
             <td className="td"><Pill kind={r.source === "SLACK" ? "INCENTIVE" : "DRAFT"}>{r.source}</Pill></td>
             <td className="td text-right">
               <div className="flex gap-1 justify-end">

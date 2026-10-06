@@ -259,7 +259,7 @@ export default function SeveranceTable({
                   className="hover:bg-slate-50 cursor-pointer"
                   onClick={() => setOpen(r)}
                 >
-                  <td className="td">
+                  <td className="td whitespace-nowrap">
                     <Link
                       href={`/employees/${r.employeeId}`}
                       className="font-medium text-slate-700 hover:text-brand-600"

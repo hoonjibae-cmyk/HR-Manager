@@ -182,7 +182,7 @@ export default async function LeavePage({
 
   return (
     /* 화면 높이에 맞춰 표만 안에서 스크롤한다 — 조회 기간·필터·머리글이 늘 붙어 있게 */
-    <div className="flex flex-col h-[calc(100dvh-6.5rem)] lg:h-[calc(100dvh-7.5rem)] min-h-[28rem]">
+    <div className="flex flex-col lg:h-[calc(100dvh-7.5rem)] lg:min-h-[28rem]">
       <PageHeader
         title="연차 관리"
         desc="본래 연차(근로기준법 자동 산정) + 대휴보상연차(운영자 수동 부여) · 슬랙 신청 → 승인 → 반영"
@@ -221,8 +221,8 @@ export default async function LeavePage({
         month={now.getMonth() + 1}
         todayYmd={kstTodayYmd(now)}
         rangeLabel={
-          <form method="get" className="flex items-center gap-2 text-xs">
-            <span className="text-slate-400">사용 조회 기간</span>
+          <form method="get" className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-slate-400 whitespace-nowrap">사용 조회 기간</span>
             <input type="date" name="from" defaultValue={fmt(from)} className="input py-1 w-36 text-xs" />
             <span className="text-slate-400">~</span>
             <input type="date" name="to" defaultValue={fmt(to)} className="input py-1 w-36 text-xs" />
