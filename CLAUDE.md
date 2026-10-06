@@ -1392,6 +1392,11 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   **생일 알림은 쉬는 날에 나가지 않는다** — 주말·공휴일 생일은 그 전 마지막 평일에 미리 나가므로,
   토요일에 *지금 보내기* 를 눌러도 아무것도 안 나가는 것이 정상이다(화면이 그렇게 적는다).
 - **슬랙 명령 추가** → `app/api/slack/command/route.ts`.
+- **슬랙 ⚡ 단축키 추가** → 두 곳을 함께 고친다: 매니페스트(`app/api/slack/manifest/route.ts` +
+  사본 `docs/slack-app-manifest.yml`)의 `shortcuts` 에 `callback_id` 를 적고, `app/api/slack/interactivity`
+  에 `payload.type === "shortcut"` 분기를 둔다. **코드 배포만으로는 메뉴에 안 뜬다** — 배포 뒤
+  `/api/slack/manifest` 를 열어 복사 → api.slack.com/apps → App Manifest 에 붙여넣고 저장해야 한다.
+  지금 셋: 휴가 신청 · 보강 신청 · 주말·초과근무 신청(보강과 직원 근무는 채널 버튼처럼 입구를 가른다).
 - **시간기록표 양식 변경** → `lib/timesheet.ts`(파서·주휴 산정, 테스트 있음) + `/api/payroll/timesheet`.
   휴게 30분은 Employee.breakPaid 로 유급/무급.
 - **인센티브 입력은 세 갈래**다 — `인센티브 = 인원 기준 + 매출 기준 + 직접 입력분`.

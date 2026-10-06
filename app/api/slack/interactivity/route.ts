@@ -753,6 +753,19 @@ export async function POST(req: Request) {
     return new Response("", { status: 200 });
   }
 
+  /* ---------- 전역 단축키(⚡) → 보강계획 신청 / 주말·초과근무 신청 ---------- */
+  // 입구를 둘로 둔 이유는 채널 버튼과 같다 — 모달이 선택값에 따라 스스로 다시 그려지지 않아서
+  // 한 양식에서 고르게 하면 보강 전용 칸(대상반·수강인원)이 직원 근무 신청자에게도 보인다.
+  // 단축키에는 채널이 없으므로 미연동 안내 등은 DM 으로 간다(휴가 단축키와 같다).
+  if (payload.type === "shortcut" && payload.callback_id === "makeup_request_shortcut") {
+    await openMakeupForm(payload.trigger_id, payload.user?.id, undefined, "MAKEUP");
+    return new Response("", { status: 200 });
+  }
+  if (payload.type === "shortcut" && payload.callback_id === "weekend_request_shortcut") {
+    await openMakeupForm(payload.trigger_id, payload.user?.id, undefined, "WEEKEND");
+    return new Response("", { status: 200 });
+  }
+
   const action = payload.actions?.[0];
   if (!action) return new Response("", { status: 200 });
 

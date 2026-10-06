@@ -37,6 +37,14 @@ features:
       type: global
       callback_id: leave_request_shortcut
       description: 휴가신청서 양식을 엽니다
+    - name: 보강 신청
+      type: global
+      callback_id: makeup_request_shortcut
+      description: 보강계획 사전신청 양식을 엽니다
+    - name: 주말·초과근무 신청
+      type: global
+      callback_id: weekend_request_shortcut
+      description: 주말근무·평일 초과근무 신청 양식을 엽니다
   slash_commands:
     - command: /연차
       url: https://YOUR-DOMAIN.vercel.app/api/slack/command
