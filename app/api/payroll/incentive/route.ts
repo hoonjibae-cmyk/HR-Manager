@@ -12,6 +12,7 @@ import {
 } from "@/lib/incentive";
 import { matchEmployee } from "@/lib/timesheet";
 import { runPayrollMonth } from "@/lib/payroll-service";
+import { employeesWithMonthTerms } from "@/lib/contracts";
 import { logActivity } from "@/lib/activity";
 
 export const dynamic = "force-dynamic";
@@ -95,7 +96,9 @@ export async function POST(req: Request) {
     );
   }
 
-  const employees = await prisma.employee.findMany();
+  // 기준인원·배분율·급여형태는 **그 달 계약**에서 — 카드는 오늘의 거울이라 발효일 전에
+  // 미리 만든 계약이 빠져 있을 수 있다(김지연 9월: 계약 37명인데 카드 40명).
+  const employees = await employeesWithMonthTerms(await prisma.employee.findMany(), year, month);
   const results: TeacherResult[] = [];
   const touched: number[] = [];
 
@@ -252,7 +255,7 @@ export async function POST(req: Request) {
       }
       if (b.monthlyPay != null && emp.baseWage && b.monthlyPay !== emp.baseWage) {
         warnings.push(
-          `파일의 월급여(${b.monthlyPay.toLocaleString()}원)와 직원 카드 기본급(${emp.baseWage.toLocaleString()}원)이 다릅니다.`
+          `파일의 월급여(${b.monthlyPay.toLocaleString()}원)와 그 달 계약 기본급(${emp.baseWage.toLocaleString()}원)이 다릅니다.`
         );
       }
     }

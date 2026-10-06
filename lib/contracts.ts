@@ -271,8 +271,98 @@ export function mirrorFromContract(c: ContractLike): Record<string, any> {
 }
 
 /**
+ * 그 달 급여 조건을 정하는 기준일 — 그 달 **마지막 재직일**(말일, 그 전에 퇴사했으면 퇴사일).
+ * 월중에 조건이 바뀌면 바뀐 뒤 조건을 쓴다(기본급·수당의 일할가중은 따로 한다 — wageSegmentsFor).
+ */
+export function monthTermsDate(
+  emp: { resignDate?: Date | null },
+  year: number,
+  month: number
+): Date {
+  const monthEnd = new Date(Date.UTC(year, month, 0));
+  return emp.resignDate && emp.resignDate < monthEnd ? emp.resignDate : monthEnd;
+}
+
+/**
+ * 직원 카드에 'asOf 시점 지배 계약' 의 보수조건을 덮어씌운 **사본** (순수 함수).
+ *
+ * 카드는 '오늘' 을 비추는 거울이라 **그 달** 급여에 그대로 쓰면 틀린다 —
+ * 발효일 전에 미리 만든 계약(8월에 작성한 9/1 계약)은 만들 때 카드에 반영되지 않고,
+ * 발효일이 지나도 카드를 다시 맞추는 일이 없어 9월 급여가 옛 조건(기준인원 40명)으로
+ * 산정됐다(김지연 9월 — 계약은 37명). 거꾸로 지난달을 다시 산정할 때는 카드가 이미
+ * 새 조건이라 옛 달에 새 조건이 들어간다. 그래서 급여는 **그 달 계약**을 읽는다.
+ * 계약이 없으면 카드 그대로 둔다(계약 도입 전 직원).
+ */
+export function withContractTerms<T extends Record<string, any>>(
+  emp: T,
+  contracts: Array<ContractLike & { status?: string }>,
+  asOf: Date
+): T {
+  const gov = governingContract(
+    contracts.filter((c) => c.status !== "DRAFT"),
+    asOf
+  );
+  if (!gov) return emp;
+  const m = mirrorFromContract(gov);
+  // 모르는 templateKey 를 월급제로 떨어뜨리지 않는다 — 카드의 급여형태로 물러난다
+  m.payScheme = paySchemeOfTemplate(gov.templateKey) ?? emp.payScheme;
+  m.isContractor = gov.isContractor === true || m.payScheme === "RATIO";
+  return { ...emp, ...m };
+}
+
+/** 직원들에게 그 달(year·month) 계약 조건을 덮어씌운 사본 — 급여 산정·명단 반영·명세서용 */
+export async function employeesWithMonthTerms<
+  T extends { id: number; resignDate?: Date | null } & Record<string, any>
+>(emps: T[], year: number, month: number): Promise<T[]> {
+  if (!emps.length) return emps;
+  const contracts = await prisma.contract.findMany({
+    where: { employeeId: { in: emps.map((e) => e.id) }, status: { not: "DRAFT" } },
+    orderBy: [{ startDate: "asc" }, { id: "asc" }],
+  });
+  const byEmp = new Map<number, typeof contracts>();
+  for (const c of contracts) {
+    const arr = byEmp.get(c.employeeId) ?? [];
+    arr.push(c);
+    byEmp.set(c.employeeId, arr);
+  }
+  return emps.map((e) =>
+    withContractTerms(e, (byEmp.get(e.id) ?? []) as any, monthTermsDate(e, year, month))
+  );
+}
+
+/**
+ * 발효일이 지난 계약을 카드에 반영한다 — 카드가 지배 계약과 다른 직원만 고친다.
+ * 크론이 매시 부른다. 미래 시작 계약은 만들 때 카드에 안 들어가고, 그 뒤로 카드를 다시
+ * 맞추는 길이 없어 발효일이 지나도 카드(그리고 카드를 읽는 화면·연차수당·퇴직급여)가
+ * 옛 조건에 머물렀다.
+ */
+export async function refreshStaleEmployeeCards(asOf: Date = new Date()) {
+  const emps = await prisma.employee.findMany({
+    where: { contracts: { some: { status: { not: "DRAFT" } } } },
+    include: {
+      contracts: {
+        where: { status: { not: "DRAFT" } },
+        orderBy: [{ startDate: "asc" }, { id: "asc" }],
+      },
+    },
+  });
+  const fixed: Array<{ id: number; name: string; fields: string[] }> = [];
+  for (const e of emps) {
+    const gov = governingContract(e.contracts, asOf);
+    if (!gov) continue;
+    const want = mirrorFromContract(gov as ContractLike);
+    const diff = Object.keys(want).filter((k) => (e as any)[k] !== want[k]);
+    if (!diff.length) continue;
+    await prisma.employee.update({ where: { id: e.id }, data: want });
+    fixed.push({ id: e.id, name: e.name, fields: diff });
+  }
+  return { fixed };
+}
+
+/**
  * 직원 카드의 보수 필드를 '오늘 시점 지배 계약' 값으로 맞춘다.
- * 계약을 만들거나 고친 뒤 호출한다. (미래 시작 계약은 발효일 전까지 반영되지 않는다)
+ * 계약을 만들거나 고친 뒤 호출한다. (미래 시작 계약은 발효일 전까지 반영되지 않는다 —
+ * 발효일이 지나면 크론의 refreshStaleEmployeeCards 가 맞춘다)
  */
 export async function refreshEmployeeCard(employeeId: number, asOf: Date = new Date()) {
   const contracts = await prisma.contract.findMany({

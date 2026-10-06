@@ -18,6 +18,7 @@ import {
   type SheetCleanupPlan,
 } from "./payroll-roster";
 import { logActivity } from "./activity";
+import { employeesWithMonthTerms } from "./contracts";
 
 export interface PayrollInputMap {
   [employeeId: number]: MonthlyInput;
@@ -394,7 +395,13 @@ export async function runPayrollMonth(
   };
   if (onlyEmployeeIds && onlyEmployeeIds.length)
     where.id = { in: onlyEmployeeIds };
-  const emps = await prisma.employee.findMany({ where });
+  // 보수조건은 카드가 아니라 **그 달 계약**에서 읽는다 — 카드는 '오늘' 의 거울이라
+  // 발효일 전에 미리 만든 계약이 빠져 있거나(김지연 9월 기준인원), 지난달 재산정에 새 조건이 들어간다.
+  const emps = await employeesWithMonthTerms(
+    await prisma.employee.findMany({ where }),
+    year,
+    month
+  );
   // 월중 계약 갱신 대비: 이 달에 적용된 계약 조건 구간(역일수) 일괄 조회
   const segMap = await wageSegmentsFor(emps, year, month);
   // 보강 사전신청 중 '실근무 확정' 된 건 → 연장/휴일/야간 시간 자동 산출

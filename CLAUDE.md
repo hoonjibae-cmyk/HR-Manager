@@ -312,6 +312,19 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   사람이 판단한다. 화면 표시는 저장된 status 가 아니라 `effectiveContractStatus(c, now)` 를 쓴다
   (시간이 지나면 저장값이 뒤처지므로). 기존 데이터는 `npm run db:fix-contracts` 로 한 번 훑는다.
 - 미래 시작 계약을 만들어도 발효일 전까지는 카드·급여에 반영되지 않는다(지배 계약이 아직 이전 계약).
+- **급여는 카드가 아니라 '그 달 계약' 을 읽는다**(`employeesWithMonthTerms` / 순수 함수
+  `withContractTerms`, lib/contracts.ts. 테스트 있음). 기준일은 그 달 **마지막 재직일**
+  (`monthTermsDate` — 말일, 그 전에 퇴사했으면 퇴사일). 급여 산정(`runPayrollMonth`)·학생 명단
+  반영(`/api/payroll/incentive`)·명세서 산정 내역서(`genPayslip`)가 모두 이걸 거친다.
+  - 카드는 '오늘' 의 거울이라 그 달 급여에 그대로 쓰면 두 방향으로 틀린다: **8월에 미리 만든
+    9/1 계약은 만들 때 카드에 안 들어가** 9월 급여가 옛 조건으로 나가고(김지연 9월 — 인센티브
+    기준인원이 계약 37명인데 카드 40명으로 산정됐다. 직원 상세 화면은 계약을 직접 읽어 37명으로
+    보여서 아무도 몰랐다), 거꾸로 지난달을 다시 산정하면 이미 새 조건인 카드가 옛 달에 들어간다.
+  - 월중 변경이면 **바뀐 뒤 계약**의 기준인원·배분율을 쓴다. 기본급·수당의 역일수 가중은 그대로
+    `wageSegmentsFor`/`applyMidMonthBlend` 가 한다.
+  - **카드도 발효일에 따라잡는다** — 크론이 매시 `refreshStaleEmployeeCards()` 로 지배 계약과 다른
+    카드만 고치고 작업 이력에 `CONTRACT_EFFECTIVE` 로 남긴다. 그 전엔 계약을 다시 고치기 전까지
+    카드(그리고 카드를 읽는 화면·연차수당·퇴직급여)가 옛 조건에 머물렀다.
 - 이식성을 위해 Prisma **enum 대신 문자열** + `lib/constants.ts` 의 상수/라벨 사용.
 - DB는 Postgres. 스키마 변경 시 `npx prisma db push`(DIRECT_URL 사용). 서버리스 런타임은 pgbouncer(DATABASE_URL).
   **Vercel 배포는 빌드가 알아서 맞춘다** — `vercel-build` 가 `scripts/db-deploy.mjs` 를 먼저 돌린다

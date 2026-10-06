@@ -29,6 +29,7 @@ export const ACTION_LABEL: Record<string, string> = {
   CONTRACT_CREATE: "계약 작성",
   CONTRACT_UPDATE: "계약 수정",
   CONTRACT_DELETE: "계약 삭제",
+  CONTRACT_EFFECTIVE: "계약 발효 — 직원 카드 반영",
   CONTRACT_FILE_ADD: "계약 서명본 스캔 첨부",
   CONTRACT_FILE_DELETE: "계약 서명본 스캔 삭제",
   EMPLOYEE_FILE_ADD: "직원 서류함 파일 업로드",

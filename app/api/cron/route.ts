@@ -5,6 +5,8 @@ import { holidayStatus, holidayApiConfigured, syncHolidays } from "@/lib/holiday
 import { runHrNotices } from "@/lib/hr-notify-service";
 import { syncDayOffs } from "@/lib/dayoff-service";
 import { runDailyBriefs } from "@/lib/daily-brief-service";
+import { refreshStaleEmployeeCards } from "@/lib/contracts";
+import { logActivity } from "@/lib/activity";
 
 export const dynamic = "force-dynamic";
 // Vercel Pro: 함수 최대 실행시간 300초 (인원이 많아도 한 번에 발송 가능)
@@ -89,7 +91,28 @@ async function handle(req: Request) {
     dailyBriefs = await runDailyBriefs(new Date()).catch((e) => ({ error: String(e?.message ?? e) }));
   }
 
-  return NextResponse.json({ ...result, makeupReminders, holidaySync, hrNotices, dayOffSync, dailyBriefs });
+  // 발효일이 지난 계약을 직원 카드에 반영한다 — 미리 만든 계약(8월 작성·9/1 시작)은 만들 때
+  // 카드에 안 들어가고, 그 뒤로 카드를 다시 맞추는 길이 없어 옛 조건에 머물렀다.
+  // 카드가 지배 계약과 다른 직원만 고치므로 매시 돌아도 평소엔 조회 한 번이다.
+  let cardRefresh: any = null;
+  if (!dryRun) {
+    cardRefresh = await (async () => {
+      const out = await refreshStaleEmployeeCards(new Date());
+      for (const f of out.fixed) {
+        await logActivity({
+          action: "CONTRACT_EFFECTIVE",
+          actor: "CRON",
+          employeeId: f.id,
+          target: f.name,
+          summary: `${f.name} — 발효된 계약 조건을 직원 카드에 반영 (${f.fields.join(", ")})`,
+          meta: f,
+        });
+      }
+      return { fixed: out.fixed.length };
+    })().catch((e) => ({ error: String(e?.message ?? e) }));
+  }
+
+  return NextResponse.json({ ...result, makeupReminders, holidaySync, hrNotices, dayOffSync, dailyBriefs, cardRefresh });
 }
 
 export async function GET(req: Request) {

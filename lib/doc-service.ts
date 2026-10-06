@@ -14,6 +14,7 @@ import { getCompany, empToDoc, contractToDoc } from "./repo";
 import { docPolicyFor, documentBlockReason } from "./departments";
 import { MAKEUP_CATEGORY_LABEL, isContractorContract } from "./constants";
 import { incentiveRosterFor, rosterToStudents } from "./payroll-service";
+import { employeesWithMonthTerms } from "./contracts";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { existsSync } from "fs";
@@ -154,9 +155,12 @@ export async function genPayslip(payrollId: number) {
     include: { employee: true },
   });
   if (!pr) throw new Error("급여기록 없음");
+  // 산정 내역서의 기준인원·배분율은 **그 달 계약**에서 — 카드는 오늘의 거울이라
+  // 지난달 명세서를 다시 뽑으면 새 조건이 찍히고, 산정과 별지가 어긋난다.
+  const [monthEmp] = await employeesWithMonthTerms([pr.employee], pr.year, pr.month);
   const company = await getCompany();
-  const payroll: DocPayroll = { ...(pr as any), parkingFee: (pr.employee as any).parkingFee ?? 0 };
-  const employee = empToDoc(pr.employee);
+  const payroll: DocPayroll = { ...(pr as any), parkingFee: (monthEmp as any).parkingFee ?? 0 };
+  const employee = empToDoc(monthEmp);
   const pages = [payslipHtml({ employee, payroll, company })];
 
   // 월급+인센티브·완전비율제: 그 달 학생 명단이 있으면 산정 내역서를 뒤에 붙인다.
@@ -164,10 +168,10 @@ export async function genPayslip(payrollId: number) {
   //  · 없으면 「인센티브 산정 내역서」(가중 인원 − 기준 인원)
   // 명단이 없는 달은 **첨부 없이 명세서만** 나간다 — 자동산정을 안 쓰고 금액을 직접 넣는
   // 달에는 붙일 근거가 없다. 그런 달에 내역서를 붙이려면 관리시트를 올리면 된다.
-  if (pr.employee.payScheme === "INCENTIVE" || pr.employee.payScheme === "RATIO") {
+  if (monthEmp.payScheme === "INCENTIVE" || monthEmp.payScheme === "RATIO") {
     const roster = await incentiveRosterFor(pr.employeeId, pr.year, pr.month);
     if (roster?.length) {
-      const isRatio = pr.employee.payScheme === "RATIO";
+      const isRatio = monthEmp.payScheme === "RATIO";
       const detail = rosterDetailHtml({
         employee,
         company,
@@ -176,10 +180,10 @@ export async function genPayslip(payrollId: number) {
         students: rosterToStudents(roster),
         kind: isRatio ? "BUSINESS" : "INCENTIVE",
         // 배분율은 계약이 진실이다 — 명단에 적힌 율은 대조용으로만 넘긴다
-        percent: isRatio ? pr.employee.ratioPercent : pr.employee.incRevenuePercent,
+        percent: isRatio ? monthEmp.ratioPercent : monthEmp.incRevenuePercent,
         sheetPercent: roster.find((r) => r.sharePercent != null)?.sharePercent ?? null,
-        threshold: pr.employee.incThreshold ?? 0,
-        perStudent: pr.employee.incPerStudent ?? 0,
+        threshold: monthEmp.incThreshold ?? 0,
+        perStudent: monthEmp.incPerStudent ?? 0,
         // 완전비율제는 기본급이 곧 사업소득이라 '월급여' 로 겹쳐 적지 않는다
         monthlyPay: isRatio ? null : pr.baseP,
         retention: pr.retentionD,
