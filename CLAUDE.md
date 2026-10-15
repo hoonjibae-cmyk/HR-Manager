@@ -1073,6 +1073,23 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   남은 세션 시간과 무관하게 즉시 차단된다. 예전 `ADMIN_PASSWORD` 로그인과 `admin:<timestamp>`
   공용 쿠키는 받지 않는다. 미인증 페이지는 미들웨어가 `/login`으로 보내며, API는 각 라우트의
   `isAuthed()` 또는 Slack·cron·directory 전용 서명으로 보호한다.
+- **로그인 기록은 설정 → 「최근 로그인」에서 본다**(`lib/login-log.ts` 순수 함수·테스트 있음 +
+  `lib/login-log-service.ts` + `components/LoginLogPanel.tsx`). 저장소는 따로 없고 **`AuditLog` 의
+  LOGIN / LOGIN_FAILED / LOGOUT** 이다 — 포털 SSO 가 처음부터 LOGIN 을 거기 남겨 왔고(기록이 이미
+  쌓여 있다), 접속기록은 작업 이력과 한 표에 있어야 한 번에 점검된다. 작업 이력의 「로그인」 탭
+  (`filter=login`)이 셋을 함께 보여 준다.
+  - **거부도 남긴다 — 단 누구의 시도인지 알 수 있을 때만.** 서명이 확인된 신원(퇴사자·타 부서가
+    HR 카드를 누름)은 `verified: true`. 서명이 안 맞는 토큰은 본문만 읽어(`peekPortalSsoClaims`,
+    접근 판단에는 절대 안 쓴다) 이름을 붙이되 화면에 **「미검증」**으로 표시한다 — 대개 HR 카드를
+    누른 뒤 1분 유효기간이 지난 경우(`expired`)라 "왜 안 되냐" 에 답하려면 이 기록이 있어야 한다.
+    ⚠ 토큰이 아예 없거나 모양부터 다른 POST 는 **기록하지 않는다** — 공개 주소라 스캐너가 던지는
+    요청까지 남기면 표가 쓰레기로 찬다(콘솔에만 남는다).
+  - 접속 기기는 User-Agent 를 300자에서 잘라 `ua` 로, 요약(`summarizeUserAgent` — 「Chrome · Windows」)을
+    `device` 로 `detail` 에 남긴다. 이 전의 LOGIN 기록에는 둘 다 없어 「—」 로 나온다.
+  - 이름·사번·부서는 **지금 원장**에서 다시 읽는다(삭제된 직원은 기록에 적힌 이름으로 남는다).
+  - **지우지 않는다.** 개인정보 안전성 확보조치 기준 §8 의 접속기록이고, 주민등록번호(고유식별정보)를
+    다루는 시스템이라 **2년 이상 보관·월 1회 이상 점검** 대상이다. 양은 경영지원 두 사람의 하루 몇 건이라
+    걱정할 수준이 아니다.
 - **Supabase 의 `public` 스키마는 공개 API(PostgREST)로 자동 노출된다 — RLS 로 막아 둔다.**
   `https://<ref>.supabase.co/rest/v1/...` 는 `anon` 키만 있으면 열리고, 그 키는 원래
   브라우저에 심으라고 주는 **공개 키**다. RLS 가 꺼져 있으면 그 키를 가진 누구나 전 직원의

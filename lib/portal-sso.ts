@@ -45,3 +45,23 @@ export function verifyPortalSsoToken(
     return null;
   }
 }
+
+/**
+ * 서명을 **검증하지 않고** 토큰 본문만 읽는다 — 거부 기록에 '누구 이름으로 온 시도였나' 를
+ * 붙이기 위한 것이지 접근 판단에는 절대 쓰지 않는다. 위조할 수 있는 값이므로 받는 쪽은
+ * 「미검증」으로 표시한다. 모양부터 다른 입력(스캐너가 던진 아무 문자열)은 null — 그런 건
+ * 기록도 하지 않는다(공개 주소라 아무 POST 나 DB 에 남기면 표가 쓰레기로 찬다).
+ */
+export function peekPortalSsoClaims(token: unknown): Partial<PortalSsoClaims> | null {
+  if (typeof token !== "string" || !token || token.length > 8192) return null;
+  const body = token.split(".")[0];
+  if (!body) return null;
+  try {
+    const p = JSON.parse(Buffer.from(body, "base64url").toString());
+    if (!p || typeof p !== "object" || p.kind !== "hr-sso" || typeof p.empNo !== "string" || !p.empNo)
+      return null;
+    return p as Partial<PortalSsoClaims>;
+  } catch {
+    return null;
+  }
+}

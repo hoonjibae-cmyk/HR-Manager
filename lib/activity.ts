@@ -9,7 +9,7 @@ import { headers } from "next/headers";
 
 export const ACTION_LABEL: Record<string, string> = {
   LOGIN: "로그인",
-  LOGIN_FAILED: "로그인 실패",
+  LOGIN_FAILED: "로그인 거부",
   LOGOUT: "로그아웃",
   PAYROLL_RUN: "급여 일괄 산정",
   PAYROLL_EDIT: "급여 개별 수정",

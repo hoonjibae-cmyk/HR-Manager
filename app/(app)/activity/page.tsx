@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { PageHeader, Pill, Empty } from "@/components/ui";
 import { ACTION_LABEL, SENSITIVE_ACTIONS } from "@/lib/activity";
+import { LOGIN_ACTIONS } from "@/lib/login-log";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,8 @@ export default async function ActivityPage({
   const filter = searchParams.filter ?? "sensitive";
   const where: any = {};
   if (filter === "sensitive") where.action = { in: SENSITIVE_ACTIONS };
+  // 로그인 탭은 성공·거부·로그아웃을 함께 — 설정 → 최근 로그인의 '전체 보기' 가 여기로 온다
+  else if (filter === "login") where.action = { in: [...LOGIN_ACTIONS] };
   else if (filter !== "all") where.action = filter;
   if (searchParams.q)
     where.OR = [
@@ -62,7 +65,7 @@ export default async function ActivityPage({
     { key: "PAYSLIP_SEND", label: "명세서 발송" },
     { key: "CONTRACT_UPDATE", label: "계약 수정" },
     { key: "LEAVE_APPROVE", label: "휴가 승인" },
-    { key: "LOGIN", label: "로그인" },
+    { key: "login", label: "로그인" },
   ];
 
   return (
