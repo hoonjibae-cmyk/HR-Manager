@@ -19,6 +19,8 @@ const dedicatedAuth = new Set([
   "app/api/auth/portal/route.ts",
   "app/api/cron/route.ts",
   "app/api/directory/app-users/route.ts",
+  // 휴일 표 — 학생 카드가 x-api-key 로 받아 간다 (명부 창구와 같은 열쇠)
+  "app/api/directory/holidays/route.ts",
   "app/api/directory/teachers/route.ts",
   "app/api/portal/self-service/route.ts",
   "app/api/portal/self-service/certificate/route.ts",
