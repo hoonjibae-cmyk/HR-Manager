@@ -19,7 +19,7 @@ import {
   SCHOOL_BREAK_KEYWORD,
   type BriefSession,
 } from "./daily-brief";
-import type { LeaveDay } from "./leave-calendar";
+import { buildLeaveCalendar, type LeaveDay } from "./leave-calendar";
 
 const TODAY = "2026-08-12"; // 수요일
 const t = (hm: string) => new Date(`${TODAY}T${hm}:00Z`); // KST 벽시계를 UTC 필드에 담는다
@@ -126,9 +126,37 @@ describe("오늘 휴가", () => {
     expect(s).toContain("2명");
   });
 
-  it("여러 날짜리는 며칠째인지 적는다", () => {
-    const s = leaveBriefText([day({ span: { index: 1, total: 3 } })], TODAY)!;
+  it("여러 날짜리는 며칠째인지 적는다 — span.index 는 첫날이 1 이라 그대로 적는다", () => {
+    const s = leaveBriefText([day({ span: { index: 2, total: 3 } })], TODAY)!;
     expect(s).toContain("3일 중 2일째");
+  });
+
+  // 달력 모듈이 만든 span 을 **그대로** 먹여 두 모듈의 약속(첫날 = 1)을 함께 묶는다.
+  // 손으로 만든 span 으로만 검사하면 받는 쪽이 1 을 더해도 통과한다 —
+  // 실제로 그렇게 이틀짜리 둘째 날이 「2일 중 3일째」 로 슬랙에 나갔다.
+  it("이틀짜리 휴가는 첫날 '2일 중 1일째', 둘째 날 '2일 중 2일째' — 총 일수를 넘지 않는다", () => {
+    // 2026-08-11(화) ~ 08-12(수)
+    const cal = buildLeaveCalendar({
+      requests: [
+        {
+          id: 9,
+          employeeId: 1,
+          name: "김서준",
+          department: "교수부",
+          startDate: "2026-08-11",
+          endDate: TODAY,
+          days: 2,
+          leaveType: "ANNUAL",
+          status: "APPROVED",
+          reason: null,
+        },
+      ],
+      txns: [],
+    });
+    expect(leaveBriefText(cal, "2026-08-11")!).toContain("2일 중 1일째");
+    const last = leaveBriefText(cal, TODAY)!;
+    expect(last).toContain("2일 중 2일째");
+    expect(last).not.toContain("3일째");
   });
 
   it("부서가 없으면 괄호를 붙이지 않는다", () => {

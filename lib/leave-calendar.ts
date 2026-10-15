@@ -85,7 +85,11 @@ export interface LeaveDay {
   status: LeaveStatus;
   requestId: number | null;
   note: string | null;
-  /** 여러 날짜리의 몇째 날인지 — 툴팁에 쓴다 */
+  /**
+   * 여러 날짜리의 몇째 날인지 — 달력 툴팁·운영진 일일 안내가 쓴다.
+   * ⚠ **`index` 는 첫날이 1** 이다(0 이 아니다). 받는 쪽은 그대로 적어야 한다 —
+   * 1 을 더하면 둘째 날이 「2일 중 3일째」 가 된다(실제로 나갔다).
+   */
   span: { index: number; total: number } | null;
 }
 

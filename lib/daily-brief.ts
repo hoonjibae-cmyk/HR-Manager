@@ -91,7 +91,9 @@ export function hhmm(d: Date): string {
 function leaveLine(d: LeaveDay): string {
   const who = d.department ? `${d.name} (${d.department})` : d.name;
   const kind = d.days === 0.5 ? "반차" : POOL_LABEL[d.pool];
-  const span = d.span && d.span.total > 1 ? ` · ${d.span.total}일 중 ${d.span.index + 1}일째` : "";
+  // `span.index` 는 **첫날이 1** 이다(lib/leave-calendar.ts — 달력 툴팁도 그대로 적는다).
+  // 여기서 1 을 또 더해 이틀짜리 둘째 날이 「2일 중 3일째」 로 나간 적이 있다(2026-10).
+  const span = d.span && d.span.total > 1 ? ` · ${d.span.total}일 중 ${d.span.index}일째` : "";
   return `• ${who} — ${kind}${span}`;
 }
 
