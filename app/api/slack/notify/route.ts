@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { postMessage, slackConfigured } from "@/lib/slack";
 import { directoryApiKey, directoryRequestAuthorized } from "@/lib/directory-api-auth";
+import {placementImageBlocks} from '@/lib/placement-image';
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,7 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { empNo?: unknown; email?: unknown; channel?: unknown; text?: unknown };
+  let body: { empNo?: unknown; email?: unknown; channel?: unknown; text?: unknown; imageUrl?:unknown;imageAlt?:unknown };
   try {
     body = await req.json();
   } catch {
@@ -66,11 +67,12 @@ export async function POST(req: Request) {
   const text = typeof body.text === "string" ? body.text.trim() : "";
 
   if (!text) return NextResponse.json({ error: "보낼 내용(text)이 없습니다." }, { status: 400 });
+  let blocks;try{blocks=placementImageBlocks(app,channel,text,body.imageUrl,body.imageAlt);}catch(error){return NextResponse.json({delivered:false,error:error instanceof Error?error.message:'이미지 주소 오류'},{status:400});}
 
   // 채널로 보내는 경우 — 사람이 아니라 방(예: 운영진 채널)에 알린다. 직원 조회는
   // 필요 없고, 봇이 그 채널에 들어가 있어야 한다(초대되지 않았으면 슬랙이 거부한다).
   if (channel) {
-    const res = (await postMessage(channel, text)) as { ok?: boolean; error?: string };
+    const res = (await postMessage(channel, text, blocks)) as { ok?: boolean; error?: string };
     if (!res?.ok) {
       const hint = res?.error === "not_in_channel" || res?.error === "channel_not_found"
         ? " 봇이 그 채널에 초대되어 있는지, 채널 ID가 맞는지 확인하세요."
@@ -80,7 +82,7 @@ export async function POST(req: Request) {
         { status: 502 },
       );
     }
-    return NextResponse.json({ delivered: true, channel });
+    return NextResponse.json({ delivered: true, channel, imageIncluded:Boolean(blocks) });
   }
 
   if (!empNo && !email) {
