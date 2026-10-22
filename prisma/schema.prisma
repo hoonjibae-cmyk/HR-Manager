@@ -15,6 +15,43 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+/// 캘린더 알림 전용 상태. 첫 전체 조회는 기준값만 저장하고 과거 일정을 발송하지 않는다.
+model CalendarAlertState {
+  calendarId       String    @id
+  syncToken        String?
+  pageToken        String?
+  initializedAt    DateTime?
+  leaseOwner       String?
+  leaseUntil       DateTime?
+  lastPolledAt     DateTime?
+  lastSuccessAt    DateTime?
+  lastError        String?
+}
+
+model CalendarAlertEvent {
+  calendarId  String
+  eventId     String
+  fingerprint String
+  snapshot    Json
+
+  @@id([calendarId, eventId])
+}
+
+/// 스냅샷·syncToken과 같은 트랜잭션에 넣는 발송함. Slack 실패는 다음 실행에서 재시도.
+model CalendarAlertDelivery {
+  id            String    @id
+  calendarId    String
+  channelId     String
+  payload       Json
+  createdAt     DateTime  @default(now())
+  sentAt        DateTime?
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastError     String?
+
+  @@index([calendarId, sentAt, nextAttemptAt])
+}
+
 /// 회사 기본정보 + 급여 기본설정 (단일 레코드, id=1)
 model Company {
   id                   Int      @id @default(1)
