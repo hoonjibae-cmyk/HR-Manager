@@ -1114,6 +1114,31 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
   남은 세션 시간과 무관하게 즉시 차단된다. 예전 `ADMIN_PASSWORD` 로그인과 `admin:<timestamp>`
   공용 쿠키는 받지 않는다. 미인증 페이지는 미들웨어가 `/login`으로 보내며, API는 각 라우트의
   `isAuthed()` 또는 Slack·cron·directory 전용 서명으로 보호한다.
+  - **세션은 쓰는 동안 끊기지 않는다 — 12시간 동안 아무 요청이 없을 때만 끊긴다**(`middleware.ts`
+    슬라이딩 갱신). 검증된 세션이 발급 후 10분을 넘겼으면 미들웨어가 **같은 사람으로 새 12시간짜리**를
+    다시 서명해 쿠키를 갈아 끼운다(`renewSessionEdge`, lib/auth-edge.ts). 갱신이 없으면 로그인 12시간째에
+    **열린 화면은 멀쩡한데 버튼만 전부 'unauthorized' 로 떨어진다**(2026-11 학생 명단 업로드 — 월초
+    급여 작업을 아침부터 밤까지 하다 막혔다. v1.35.1 에서 고쳤던 증상인데 포털 로그인으로 바꾸며 갱신이 빠졌다).
+    - 신원 확인은 갱신과 무관하게 **매 요청마다** `isAuthed()` 가 원장과 다시 대조한다 — 갱신된 쿠키를 가진
+      퇴사자·타 부서도 곧바로 막힌다. 미들웨어(엣지)는 DB 를 못 읽으므로 서명·만료만 본다.
+    - ⚠ **엣지와 node 가 같은 토큰을 만들어야 한다** — 엣지가 갱신한 토큰을 node `verifyHrSession`
+      이 받는지(`exp − iat = 12시간`, 한글 이름 UTF-8, 패딩 없는 base64url) 테스트로 못박아 둔다
+      (lib/auth-edge.test.ts). 한쪽만 바꾸면 갱신하는 순간 전원이 로그아웃된다. 수치(12시간·10분)는
+      `lib/hr-session-config.ts` 한곳에 둔다 — hr-session.ts 는 node `crypto` 를 불러 엣지에 못 들어간다.
+    - 쿠키 속성은 로그인(`/api/auth/portal`)과 **같아야 한다**(httpOnly·secure·lax·path·maxAge·priority) —
+      다르면 쿠키가 두 벌이 된다. 로그인·로그아웃 API(`/api/auth/*`)는 matcher 에서 빠져 갱신이 안 붙는다
+      (로그아웃 응답에 갱신 쿠키가 붙으면 로그아웃이 안 된다).
+  - **끊겼을 때 화면이 할 일을 알려 준다**(`components/SessionGuard.tsx` + `lib/session-expired.ts`, 테스트 있음).
+    12시간 넘게 둔 탭은 여전히 멀쩡해 보이고 버튼만 실패한다. 60여 개 라우트의 `{ error: "unauthorized" }`
+    가 그대로 「업로드 실패: unauthorized」 로 떠서 무엇을 해야 할지 알 수 없었다 — 버튼마다 고치지 않고
+    앱 레이아웃에 붙인 이 컴포넌트가 **같은 출처 `/api/` 의 401 을 한곳에서 잡는다**(`/api/auth/*`·다른 출처는 제외).
+    - 응답 본문의 `error` 를 알아듣는 문구(`SESSION_EXPIRED_MESSAGE`)로 바꿔 넘긴다 — 각 화면의 실패 알림이
+      그 문구를 그대로 보여 준다(JSON 이면 `error` 만 갈아 끼우고, text 면 문구만).
+    - 화면 위에 다시 로그인 안내를 띄운다. **로그인 화면으로 강제로 보내지 않는다** — 입력해 둔 값이
+      날아간다. *새 탭에서 다시 로그인*(`/login?expired=1`) 한 뒤 돌아와 같은 버튼을 다시 누르면 된다
+      (쿠키는 탭끼리 함께 쓴다). 그 뒤 세션 API 가 성공하면 안내를 거둔다.
+    - `currentHrUser()` 가 원장을 못 읽은 것(DB 연결 문제)도 401 로 보이므로 그때는 `[auth] HR 원장 대조 실패`
+      를 로그에 남긴다 — Vercel 로그에서 '세션 만료' 와 가려낸다.
 - **로그인 기록은 설정 → 「최근 로그인」에서 본다**(`lib/login-log.ts` 순수 함수·테스트 있음 +
   `lib/login-log-service.ts` + `components/LoginLogPanel.tsx`). 저장소는 따로 없고 **`AuditLog` 의
   LOGIN / LOGIN_FAILED / LOGOUT** 이다 — 포털 SSO 가 처음부터 LOGIN 을 거기 남겨 왔고(기록이 이미

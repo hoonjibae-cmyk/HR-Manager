@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: { error?: string };
+  searchParams: { error?: string; expired?: string };
 }) {
   const company = await prisma.company.findFirst({ where: { id: 1 } }).catch(() => null);
   const portalUrl = new URL(
@@ -21,6 +21,7 @@ export default async function LoginPage({
       commit={COMMIT_SHA}
       portalUrl={portalUrl}
       accessDenied={searchParams.error === "access_denied"}
+      expired={searchParams.expired === "1"}
     />
   );
 }

@@ -4,12 +4,15 @@ export default function LoginForm({
   commit,
   portalUrl,
   accessDenied,
+  expired = false,
 }: {
   logo: string | null;
   version: string;
   commit?: string | null;
   portalUrl: string;
   accessDenied: boolean;
+  /** 앱 화면의 만료 안내(새 탭에서 다시 로그인)로 들어왔다 */
+  expired?: boolean;
 }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-brand-50 to-slate-100 p-4">
@@ -28,6 +31,12 @@ export default function LoginForm({
         {accessDenied && (
           <p className="text-sm text-red-600 mb-4" role="alert">
             경영지원 재직 상태를 확인하지 못해 접속을 차단했습니다.
+          </p>
+        )}
+        {expired && !accessDenied && (
+          <p className="text-sm text-slate-700 mb-4 break-keep" role="status">
+            12시간 동안 사용이 없어 로그인이 만료되었습니다. 다시 로그인한 뒤 원래 탭으로 돌아가
+            같은 버튼을 다시 누르세요.
           </p>
         )}
         <a className="btn-primary w-full text-center block" href={portalUrl}>

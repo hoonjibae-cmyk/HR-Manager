@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import Sidebar from "@/components/Sidebar";
+import SessionGuard from "@/components/SessionGuard";
 import { versionLabel, COMMIT_SHA } from "@/lib/version";
 
 export default async function AppLayout({
@@ -15,6 +16,8 @@ export default async function AppLayout({
     // 좁은 화면에서는 메뉴가 위쪽 막대로 접히므로(components/Sidebar.tsx) 세로로 쌓고,
     // lg 부터 예전처럼 좌우로 놓는다.
     <div className="flex flex-col lg:flex-row min-h-screen">
+      {/* 로그인 만료(401) 안내 — 이미 그려진 화면에서 버튼만 실패할 때 무엇을 해야 하는지 알려 준다 */}
+      <SessionGuard />
       <Sidebar
         logo={(company as any)?.logo ?? null}
         companyName={company?.name}

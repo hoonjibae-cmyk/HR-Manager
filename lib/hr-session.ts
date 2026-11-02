@@ -1,7 +1,9 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import type { HrIdentity } from "./hr-access";
+import { HR_SESSION_TTL_SECONDS } from "./hr-session-config";
 
-export const HR_SESSION_TTL_SECONDS = 12 * 60 * 60;
+// 수치는 엣지(미들웨어 갱신)와 함께 쓰므로 node 의존이 없는 파일에 둔다
+export { HR_SESSION_TTL_SECONDS };
 
 export interface HrSessionClaims extends HrIdentity {
   kind: "hr-management";

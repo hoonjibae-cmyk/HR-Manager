@@ -48,7 +48,9 @@ export async function currentHrUser(): Promise<HrIdentity | null> {
       slackUserId: employee.slackUserId!,
       department: employee.department!,
     };
-  } catch {
+  } catch (e: any) {
+    // 원장을 못 읽은 것(DB 연결 문제)도 화면엔 401 로 보인다 — 로그에는 남겨 '세션 만료' 와 가려낸다
+    console.error("[auth] HR 원장 대조 실패:", e?.message ?? e);
     return null;
   }
 }
