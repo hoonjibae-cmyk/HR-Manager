@@ -12,6 +12,9 @@
  * **넣을지 말지는 사람이 누른다**.
  */
 
+import { addYears } from "date-fns";
+import { summarizeLeave, currentLeavePeriod, type LeaveTxn } from "./leave";
+
 const DAY = 86400000;
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -29,6 +32,70 @@ export function periodLastDay(endExclusive: Date): Date {
 /** 그 날짜가 이 연·월에 속하는가 */
 export function inMonth(d: Date, year: number, month: number): boolean {
   return d.getUTCFullYear() === year && d.getUTCMonth() + 1 === month;
+}
+
+/** 그날 23:59:59.999 — 잔여를 '그날까지 쓴 것' 기준으로 재는 시점 */
+const endOfDay = (d: Date) => new Date(d.getTime() + DAY - 1);
+
+/**
+ * 그 달 안에서 **마지막 날을 맞는 연차기간**. 없으면 null.
+ *
+ * 연차기간은 입사기념일마다 바뀌므로 k 주년 기념일(= 다음 기간 첫날)의 **전날**이 그 달에
+ * 들면 그 기간이 그 달에 끝난다 — 기념일이 그달 2일 ~ 다음달 1일 사이일 때다.
+ *
+ * ⚠ 말일 시점의 `currentLeavePeriod` 로 가리면 **입사일이 1일인 사람만 잡힌다.** 11/2 입사자는
+ * 10월 말일 기준으로는 '11/1 에 끝나는 기간' 이라 10월에서 빠지고, 11월 말일 기준으로는 이미
+ * 새 기간(11/2~)이라 11월에서도 빠져 **어느 달에도 올라오지 않았다**(2026-11 박영은 — 실제로 겪었다).
+ */
+export function leavePeriodEndingIn(
+  hireDate: Date,
+  year: number,
+  month: number
+): { endExclusive: Date; lastDay: Date; serviceYear: number } | null {
+  const hireYear = hireDate.getUTCFullYear();
+  // 기념일은 해마다 하나라 후보는 셋뿐이다 (1/1 입사자의 12월 = 다음 해 기념일의 전날이라 +1 까지 본다)
+  for (let k = Math.max(1, year - hireYear - 1); k <= year - hireYear + 1; k++) {
+    const endExclusive = addYears(hireDate, k);
+    const lastDay = periodLastDay(endExclusive);
+    if (inMonth(lastDay, year, month)) return { endExclusive, lastDay, serviceYear: k };
+  }
+  return null;
+}
+
+/**
+ * 그 달 정산에 쓸 **기준 시점과 잔여**를 정한다.
+ *
+ * - 퇴사자(그 달 말일 전 퇴사)는 **퇴사일** 기준 — 말일 기준이면 퇴사 후에 발생할 리 없는
+ *   월 개근분이 끼어 잔여가 부푼다(연차 화면과 같은 규칙).
+ * - 그 달에 끝나는 연차기간이 있으면 **그 기간의 마지막 날** 기준 — 말일 기준이면 11/2 에 새로
+ *   생긴 17일이 잔여로 잡혀, 11/1 에 만료된 5일 대신 엉뚱한 수가 나온다. 월초로 잡으면 그 달
+ *   개근분(1년 미만)이 아직 안 생겨 기간이 하나 앞으로 밀려 잡힌다.
+ * - 둘 다 아니면 말일 — 어차피 그 달 정산 대상이 아니다(`payoutSuggestions` 가 거른다).
+ * - 같은 달에 기간이 끝난 **뒤** 퇴사하면(기념일 11/2 · 퇴사 11/20) 만료된 기간의 미사용분과
+ *   새 기간 잔여를 **합친다** — 둘 다 더는 쓸 수 없게 된 연차라 마지막 급여에서 함께 정산한다.
+ *
+ * 다음 기간 날짜로 미리 승인해 둔 휴가는 `summarizeLeave` 가 이번 기간 lot 에서 빼지 않으므로
+ * 여기 잔여도 그만큼 줄지 않는다.
+ */
+export function payoutRemaining(
+  hireDate: Date,
+  year: number,
+  month: number,
+  txns: LeaveTxn[],
+  opts: { eligible: boolean; resignDate?: Date | null }
+): { asOf: Date; periodEnd: Date; remaining: number } {
+  const monthEnd = new Date(Date.UTC(year, month, 0, 23, 59, 59));
+  const ending = leavePeriodEndingIn(hireDate, year, month);
+  const resignEod = opts.resignDate ? endOfDay(opts.resignDate) : null;
+  const asOf =
+    resignEod && resignEod < monthEnd ? resignEod : ending ? endOfDay(ending.lastDay) : monthEnd;
+  const summarize = (at: Date) => summarizeLeave(hireDate, at, txns, { eligible: opts.eligible });
+  let remaining = summarize(asOf).period.remaining;
+  if (ending && asOf.getTime() > endOfDay(ending.lastDay).getTime()) {
+    remaining += summarize(endOfDay(ending.lastDay)).period.remaining;
+  }
+  const periodEnd = ending?.lastDay ?? periodLastDay(currentLeavePeriod(hireDate, asOf).endExclusive);
+  return { asOf, periodEnd, remaining };
 }
 
 export interface PayoutInput {

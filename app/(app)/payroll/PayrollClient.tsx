@@ -1447,6 +1447,7 @@ export default function PayrollClient({ today }: { today: string }) {
           year={year}
           month={month}
           list={payout}
+          hasRecords={recs.length > 0}
           onClose={() => setPayoutOpen(false)}
           onDone={async () => {
             setPayoutOpen(false);
@@ -1970,12 +1971,15 @@ function LeavePayoutModal({
   year,
   month,
   list,
+  hasRecords,
   onClose,
   onDone,
 }: {
   year: number;
   month: number;
   list: PayoutSuggestion[];
+  /** 그 달 급여 시트에 행이 있는가 — 없으면 '대상 없음' 이 아니라 '아직 산정 전' 이다 */
+  hasRecords: boolean;
   onClose: () => void;
   onDone: () => Promise<void>;
 }) {
@@ -2045,11 +2049,24 @@ function LeavePayoutModal({
         </p>
 
         {list.length === 0 ? (
-          <div className="text-center text-slate-400 py-10 text-sm">
-            이 달에 연차기간이 끝나거나 퇴사하는 직원이 없습니다.
-            <div className="text-xs mt-1 text-slate-400">
-              연차기간은 <b>입사일 기준 1년 단위</b>라 사람마다 종료월이 다릅니다.
-            </div>
+          // 시트가 비어 있으면 '대상 없음' 으로 읽히면 안 된다 — 시트에 오른 사람만 보기 때문이다
+          <div className="text-center text-slate-400 py-10 text-sm break-keep">
+            {hasRecords ? (
+              <>
+                이 달에 연차기간이 끝나거나 퇴사하는 직원이 없습니다.
+                <div className="text-xs mt-1 text-slate-400">
+                  연차기간은 <b>입사일 기준 1년 단위</b>라 사람마다 종료월이 다르고,
+                  기간의 <b>마지막 날이 드는 달</b>에 올라옵니다 (입사일 11/2 → 11/1 종료 → 11월 급여).
+                </div>
+              </>
+            ) : (
+              <>
+                아직 {month}월 급여를 산정하지 않았습니다.
+                <div className="text-xs mt-1 text-slate-400">
+                  급여 시트에 오른 직원만 봅니다 — <b>급여 일괄 산정</b>을 먼저 누르세요.
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <>

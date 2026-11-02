@@ -402,7 +402,9 @@ export default async function EmployeeLeavePage({
                     return (
                       <tr key={i} className={expired ? "text-slate-400" : ""}>
                         <td className="td tnum">{ymd(l.grantDate)}</td>
-                        <td className="td tnum">{ymd(l.expiryDate)}</td>
+                        {/* expiryDate 는 다음 발생일(그날부터 못 쓴다)이라 사용기한은 그 전날 —
+                            위 '이번 기간' 카드의 사용기한(period.end)과 같은 날짜가 나와야 한다 */}
+                        <td className="td tnum">{ymd(new Date(l.expiryDate.getTime() - 86400000))}</td>
                         <td className="td text-xs">
                           {l.source === "MONTHLY"
                             ? "1년 미만 월 개근"

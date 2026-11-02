@@ -9,13 +9,15 @@ import {
   payoutAmount,
   payoutNotice,
   payoutTotals,
+  leavePeriodEndingIn,
+  payoutRemaining,
   NO_CONSENT_WARNING,
   periodLastDay,
   inMonth,
   ymd,
   type PayoutInput,
 } from "./leave-payout";
-import { currentLeavePeriod } from "./leave";
+import { currentLeavePeriod, type LeaveTxn } from "./leave";
 
 const d = (s: string) => new Date(`${s}T00:00:00Z`);
 
@@ -49,6 +51,143 @@ describe("연차기간의 마지막 날", () => {
   it("윤년 2월도 맞게 잡는다", () => {
     const { endExclusive } = currentLeavePeriod(d("2024-03-01"), d("2028-01-10"));
     expect(ymd(periodLastDay(endExclusive))).toBe("2028-02-29");
+  });
+});
+
+describe("그 달에 끝나는 연차기간 — leavePeriodEndingIn", () => {
+  /*
+   * 2026-11 박영은(입사 11/2). 말일 시점의 currentLeavePeriod 로 가리면 10월 말에는 '11/1 에 끝나는
+   * 기간' 이라 10월에서 빠지고, 11월 말에는 이미 새 기간(11/2~)이라 11월에서도 빠져 **어느 달에도
+   * 올라오지 않았다**. 입사일이 1일인 사람(기간이 말일에 끝난다)만 잡히고 있었다.
+   */
+  it("**입사일이 11/2 면 기간은 11/1 에 끝난다 — 10월이 아니라 11월**", () => {
+    expect(leavePeriodEndingIn(d("2021-11-02"), 2026, 10)).toBeNull();
+    const nov = leavePeriodEndingIn(d("2021-11-02"), 2026, 11)!;
+    expect(ymd(nov.lastDay)).toBe("2026-11-01");
+    expect(ymd(nov.endExclusive)).toBe("2026-11-02");
+    expect(nov.serviceYear).toBe(5);
+    expect(leavePeriodEndingIn(d("2021-11-02"), 2026, 12)).toBeNull();
+  });
+
+  it("입사일이 1일이면 전달 말일에 끝난다 (9/1 → 8월, 종전과 같다)", () => {
+    expect(ymd(leavePeriodEndingIn(d("2024-09-01"), 2026, 8)!.lastDay)).toBe("2026-08-31");
+    expect(leavePeriodEndingIn(d("2024-09-01"), 2026, 9)).toBeNull();
+  });
+
+  it("1/1 입사자는 12월에 끝난다 — 기념일이 다음 해에 있다", () => {
+    expect(ymd(leavePeriodEndingIn(d("2021-01-01"), 2026, 12)!.lastDay)).toBe("2026-12-31");
+    expect(leavePeriodEndingIn(d("2021-01-01"), 2026, 1)).toBeNull();
+  });
+
+  it("월말 입사(1/31)는 같은 달 1/30 에 끝난다", () => {
+    expect(ymd(leavePeriodEndingIn(d("2023-01-31"), 2026, 1)!.lastDay)).toBe("2026-01-30");
+  });
+
+  it("첫 기간이 아직 안 끝났거나 입사 전이면 null", () => {
+    expect(leavePeriodEndingIn(d("2026-10-05"), 2026, 10)).toBeNull();
+    expect(leavePeriodEndingIn(d("2026-10-05"), 2027, 9)).toBeNull();
+    expect(ymd(leavePeriodEndingIn(d("2026-10-05"), 2027, 10)!.lastDay)).toBe("2027-10-04");
+    expect(leavePeriodEndingIn(d("2027-03-01"), 2026, 10)).toBeNull();
+  });
+
+  it("윤년 2월도 맞춘다 (3/1 입사 → 2/29)", () => {
+    expect(ymd(leavePeriodEndingIn(d("2024-03-01"), 2028, 2)!.lastDay)).toBe("2028-02-29");
+  });
+});
+
+describe("payoutRemaining — 기준 시점과 잔여", () => {
+  const hire = d("2021-11-02"); // 2025-11-02 에 16일 발생 → 사용기한 2026-11-01
+  const used11: LeaveTxn[] = [
+    { date: d("2026-01-05"), days: 5, type: "USE" },
+    { date: d("2026-05-04"), days: 4, type: "USE" },
+    { date: d("2026-08-10"), days: 2, type: "USE" },
+  ];
+  const pick = (r: { periodEnd: Date; remaining: number }, over: Partial<PayoutInput> = {}) =>
+    row({ periodEnd: r.periodEnd, remaining: r.remaining, ...over });
+
+  it("**11/2 입사자의 만료분(16 − 11 = 5일)은 11월 정산에 올라온다** — 10월에는 없다", () => {
+    const oct = payoutRemaining(hire, 2026, 10, used11, { eligible: true });
+    expect(payoutSuggestions([pick(oct)], 2026, 10)).toHaveLength(0);
+
+    const nov = payoutRemaining(hire, 2026, 11, used11, { eligible: true });
+    expect(ymd(nov.asOf)).toBe("2026-11-01"); // 말일(11/30)이 아니라 기간 마지막 날
+    expect(ymd(nov.periodEnd)).toBe("2026-11-01");
+    expect(nov.remaining).toBe(5);
+    const [s] = payoutSuggestions([pick(nov)], 2026, 11);
+    expect(s).toMatchObject({ kind: "EXPIRY", expiry: "2026-11-01", remaining: 5, suggestDays: 5 });
+  });
+
+  it("**다음 기간 날짜로 미리 승인한 휴가는 만료 잔여를 줄이지 않는다** (11/5 3일이 있어도 5일)", () => {
+    const nov = payoutRemaining(hire, 2026, 11, [...used11, { date: d("2026-11-05"), days: 3, type: "USE" }], {
+      eligible: true,
+    });
+    expect(nov.remaining).toBe(5);
+  });
+
+  it("말일 기준으로 재면 새 기간의 17일이 잡힌다 — 그래서 기간 마지막 날 기준이다", () => {
+    const nov = payoutRemaining(hire, 2026, 11, used11, { eligible: true });
+    expect(nov.remaining).not.toBe(17);
+    expect(nov.remaining).toBe(5);
+  });
+
+  it("입사일이 1일이면 종전대로 말일 기준 (9/1 입사 → 8월, 8/31)", () => {
+    const r = payoutRemaining(d("2024-09-01"), 2026, 8, [{ date: d("2026-03-02"), days: 10, type: "USE" }], {
+      eligible: true,
+    });
+    expect(ymd(r.asOf)).toBe("2026-08-31");
+    expect(ymd(r.periodEnd)).toBe("2026-08-31");
+    expect(r.remaining).toBe(5);
+  });
+
+  it("1년 미만(월 개근 11일)도 1주년 전날이 드는 달에 올라온다", () => {
+    const r = payoutRemaining(
+      d("2025-11-02"),
+      2026,
+      11,
+      [
+        { date: d("2026-03-02"), days: 2, type: "USE" },
+        { date: d("2026-07-01"), days: 3, type: "USE" },
+        { date: d("2026-10-05"), days: 3, type: "USE" },
+      ],
+      { eligible: true }
+    );
+    expect(ymd(r.periodEnd)).toBe("2026-11-01");
+    expect(r.remaining).toBe(3);
+    expect(payoutSuggestions([pick(r)], 2026, 11)[0]?.kind).toBe("EXPIRY");
+  });
+
+  it("기간이 그 달에 안 끝나면 말일 기준이고 제안에서 빠진다", () => {
+    const r = payoutRemaining(hire, 2026, 6, used11, { eligible: true });
+    expect(ymd(r.asOf)).toBe("2026-06-30");
+    expect(ymd(r.periodEnd)).toBe("2026-11-01");
+    expect(payoutSuggestions([pick(r)], 2026, 6)).toHaveLength(0);
+  });
+
+  it("퇴사자는 퇴사일 기준 — 기간이 안 끝났어도 그날 잔여", () => {
+    const r = payoutRemaining(hire, 2026, 8, used11, { eligible: true, resignDate: d("2026-08-20") });
+    expect(ymd(r.asOf)).toBe("2026-08-20");
+    expect(r.remaining).toBe(5);
+    const [s] = payoutSuggestions([pick(r, { resignDate: d("2026-08-20") })], 2026, 8);
+    expect(s.kind).toBe("RESIGN");
+  });
+
+  it("**같은 달에 기간이 끝난 뒤 퇴사하면 만료분과 새 기간 잔여를 합친다** (11/1 만료 5일 + 새 17일 중 15일)", () => {
+    const r = payoutRemaining(hire, 2026, 11, [...used11, { date: d("2026-11-10"), days: 2, type: "USE" }], {
+      eligible: true,
+      resignDate: d("2026-11-20"),
+    });
+    expect(ymd(r.asOf)).toBe("2026-11-20");
+    expect(r.remaining).toBe(20);
+    const [s] = payoutSuggestions([pick(r, { resignDate: d("2026-11-20") })], 2026, 11);
+    expect(s.kind).toBe("RESIGN");
+    expect(s.suggestDays).toBe(20);
+  });
+
+  it("기간이 끝나기 전에 퇴사하면 합치지 않는다 (기념일 11/16 · 퇴사 11/5)", () => {
+    const r = payoutRemaining(d("2021-11-16"), 2026, 11, used11, { eligible: true, resignDate: d("2026-11-05") });
+    expect(ymd(r.asOf)).toBe("2026-11-05");
+    expect(ymd(r.periodEnd)).toBe("2026-11-15");
+    expect(r.remaining).toBe(5);
   });
 });
 

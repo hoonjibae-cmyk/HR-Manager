@@ -385,3 +385,49 @@ describe("지난 연차기간 날짜의 사용 — 이번 기간 잔여에 닿�
     expect(s.period.remaining).toBe(base.period.remaining - 1.5);
   });
 });
+
+describe("다음 연차기간 날짜로 미리 승인해 둔 휴가 — 이번 기간 잔여에서 빠지지 않는다", () => {
+  // 2026-11 박영은: 입사 2021-11-02 → 2025-11-02 에 16일 발생(사용기한 2026-11-01), 2026-11-02 에 17일.
+  // 10월에 11/5 연차를 미리 승인하면 그 날짜에 유효한 lot 이 아직 없어 예전엔 '초과사용' 으로
+  // 흘러 이번 기간 마지막 lot 에서 빠졌다 — 11/1 기준 잔여가 5일이 아니라 2일로 보였고,
+  // 연차수당 상세(기간 만료 정산)가 그 잔여를 읽어 미사용 3일이 조용히 사라졌다.
+  const hire = d("2021-11-02");
+  const txns: LeaveTxn[] = [
+    { date: d("2026-05-04"), days: 11, type: "USE" },
+    { date: d("2026-11-05"), days: 3, type: "USE" }, // 다음 기간 날짜 (10월에 승인)
+  ];
+
+  it("**기간 마지막 날 기준 잔여는 5일 그대로** — 누계 사용에도 아직 들어가지 않는다", () => {
+    const s = summarizeLeave(hire, new Date("2026-11-01T23:59:59Z"), txns);
+    expect(s.period.start.toISOString().slice(0, 10)).toBe("2025-11-02");
+    expect(s.period.end.toISOString().slice(0, 10)).toBe("2026-11-01");
+    expect(s.period.used).toBe(11);
+    expect(s.period.remaining).toBe(5);
+    expect(s.used).toBe(11);
+  });
+
+  it("그 기간이 시작되면 새 lot 에서 차감되고 지난 기간 5일은 소멸로 남는다", () => {
+    const s = summarizeLeave(hire, d("2026-11-06"), txns);
+    expect(s.period.granted).toBe(17);
+    expect(s.period.used).toBe(3);
+    expect(s.period.remaining).toBe(14);
+    const old = s.lots.find((l) => l.grantDate.getTime() === d("2025-11-02").getTime())!;
+    expect(old.used).toBe(11);
+    expect(old.expiredLost).toBe(5);
+  });
+
+  it("이번 기간 안의 미래 휴가는 종전대로 잔여에서 뺀다 (승인된 휴가는 이미 쓴 것으로 본다)", () => {
+    const s = summarizeLeave(hire, d("2026-10-20"), [{ date: d("2026-10-28"), days: 2, type: "USE" }]);
+    expect(s.period.used).toBe(2);
+    expect(s.period.remaining).toBe(14);
+  });
+
+  it("1년 미만(월 개근분)도 같다 — 1주년 뒤 날짜의 휴가가 개근분 잔여를 깎지 않는다", () => {
+    const s = summarizeLeave(d("2025-11-02"), new Date("2026-11-01T23:59:59Z"), [
+      { date: d("2026-07-01"), days: 8, type: "USE" },
+      { date: d("2026-11-09"), days: 3, type: "USE" },
+    ]);
+    expect(s.period.granted).toBe(11);
+    expect(s.period.remaining).toBe(3);
+  });
+});

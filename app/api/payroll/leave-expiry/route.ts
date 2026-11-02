@@ -9,15 +9,10 @@
 import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import {
-  summarizeLeave,
-  currentLeavePeriod,
-  isLeaveEligible,
-  type LeaveTxn,
-} from "@/lib/leave";
+import { isLeaveEligible, type LeaveTxn } from "@/lib/leave";
 import { computeWeeklyHours, dailyLeaveHours } from "@/lib/payroll";
 import { parseSchedule } from "@/lib/constants";
-import { payoutSuggestions, periodLastDay, type PayoutInput } from "@/lib/leave-payout";
+import { payoutSuggestions, payoutRemaining, type PayoutInput } from "@/lib/leave-payout";
 import { runPayrollMonth, type PayrollInputMap } from "@/lib/payroll-service";
 import { logActivity } from "@/lib/activity";
 
@@ -69,33 +64,24 @@ export async function GET(req: Request) {
   const consentsOf = new Map<number, number[]>();
   for (const c of consentRows) consentsOf.set(c.employeeId, [...(consentsOf.get(c.employeeId) ?? []), c.id]);
 
-  /*
-   * 기준 시점은 **그 달의 마지막 날**이다.
-   * 연차기간이 그 달 안에서 끝나므로, 월초를 기준으로 잡으면 아직 발생하지 않은 월 개근분이
-   * 빠지고 기간이 하나 앞으로 밀려 잡힌다.
-   */
-  const monthEnd = new Date(Date.UTC(year, month, 0, 23, 59, 59));
-
   const rows: PayoutInput[] = records.map((r) => {
     const e = r.employee;
     const { weeklyContractual } = computeWeeklyHours(parseSchedule(e.schedule));
     const eligible = isLeaveEligible(weeklyContractual, (e as any).leaveEligible);
     const list = byEmp.get(e.id) ?? [];
-    // **퇴사자는 퇴사일 기준으로 잔여를 본다** — 말일 기준이면 퇴사 후에 발생할 리 없는
-    // 월 개근분(1년 미만)이 끼어 잔여가 부풀 수 있다(연차 화면과 같은 규칙).
-    const asOf =
-      e.resignDate && e.resignDate < monthEnd
-        ? new Date(e.resignDate.getTime() + 86399999)
-        : monthEnd;
-    const s = summarizeLeave(e.hireDate, asOf, list, { eligible });
-    const { endExclusive } = currentLeavePeriod(e.hireDate, asOf);
+    // 기준 시점(퇴사일 / 그 달에 끝나는 기간의 마지막 날 / 말일)과 잔여는 `payoutRemaining` 하나가
+    // 정한다 — 말일 시점의 '지금 기간' 으로 가리면 입사일이 1일인 사람만 잡힌다(lib/leave-payout.ts).
+    const { periodEnd, remaining } = payoutRemaining(e.hireDate, year, month, list, {
+      eligible,
+      resignDate: e.resignDate,
+    });
     return {
       employeeId: e.id,
       name: e.name,
       eligible,
-      periodEnd: periodLastDay(endExclusive),
+      periodEnd,
       resignDate: e.resignDate,
-      remaining: s.period.remaining,
+      remaining,
       alreadyDays: r.unusedLeaveDays ?? 0,
       hourlyWage: r.hourlyWage ?? 0,
       // 엔진과 같은 함수로 구한다 — 미리보기 금액과 실제 명세서가 원 단위까지 같아야 한다

@@ -242,6 +242,13 @@ export function summarizeLeave(
 
   // FIFO: 각 사용을 '사용시점에 유효한 가장 오래된 lot'에서 차감
   for (const use of uses) {
+    // **asOf 가 속한 기간 뒤의 사용은 아직 생기지 않은 발생분의 몫이다.** 다음 기간 날짜로 미리
+    // 승인해 둔 휴가(10월에 승인한 11/5 연차)는 그 날짜에 유효한 lot 이 아직 없어 아래 초과사용
+    // 처리로 흘러 **이번 기간의 마지막 lot 에서 빠져나갔다** — 이번 기간 잔여가 그만큼 줄어 보이고,
+    // 기간 만료 정산(연차수당 상세)이 그 잔여를 읽으므로 미사용 일수가 조용히 사라졌다.
+    // 그 기간이 시작되면(asOf 가 넘어가면) 새 lot 에서 정상 차감된다. 지난 기간 날짜의 사용이
+    // 지난 lot 에서 빠지는 것(lib/leave.test.ts)과 대칭이다.
+    if (!isBefore(use.date, period.endExclusive)) continue;
     let need = use.days;
     for (let i = 0; i < lots.length; i++) {
       const lot = lots[i];
