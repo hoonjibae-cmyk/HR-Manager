@@ -64,12 +64,6 @@ async function monthlyOperationsChannel() {
   return found;
 }
 
-function cycleLabel(cycle: string) {
-  const [year, month] = cycle.split("-").map(Number);
-  const next = new Date(Date.UTC(year, month, 1));
-  return `${year}년 ${month}월 15일 ~ ${next.getUTCFullYear()}년 ${next.getUTCMonth() + 1}월 14일`;
-}
-
 function accountLabel(person: { name: string; slackUserId?: string | null }) {
   const slackUserId = person.slackUserId?.trim() || "";
   return /^U[A-Z0-9]+$/.test(slackUserId)
@@ -84,9 +78,6 @@ export function monthlyOperationMessage(args: {
   assignees: { name: string; slackUserId?: string | null }[];
 }) {
   const actor = accountLabel(args.completedBy);
-  const assignees = args.assignees.length
-    ? args.assignees.map(accountLabel).join(", ")
-    : "담당자 미지정";
   const title = slackText(args.taskTitle);
   return {
     text: `✅ ${args.completedBy.name}님이 '${args.taskTitle}' 업무를 완료했습니다.`,
@@ -100,8 +91,6 @@ export function monthlyOperationMessage(args: {
         fields: [
           { type: "mrkdwn", text: `*완료 항목*\n${title}` },
           { type: "mrkdwn", text: `*완료 체크*\n${actor}` },
-          { type: "mrkdwn", text: `*담당자*\n${assignees}` },
-          { type: "mrkdwn", text: `*업무 사이클*\n${cycleLabel(args.cycle)}` },
         ],
       },
     ],

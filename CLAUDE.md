@@ -4,6 +4,7 @@ Next.js 14 (App Router) + TypeScript + Prisma(PostgreSQL/Supabase) HR 관리 웹
 배포: Vercel + Supabase (서버리스). 로컬/Codespaces는 로컬 Postgres. 자세히는 docs/DEPLOY.md.
 
 ## 명령어
+- 캘린더 → Slack 알림: `lib/calendar-alert-service.ts`, 매분 `/api/calendar-alerts`. 두 대상·양식은 `lib/calendar-alerts.ts`, 운영 문서는 `docs/CALENDAR-ALERTS.md`. 최초에는 기존 일정 알림을 생략하고 기준값만 저장한다.
 - `npm run dev` — 개발 서버 (http://localhost:3000)
 - `npm run build && npm start` — 프로덕션
 - `npm test` — 급여/연차 엔진 단위 테스트 (Vitest)

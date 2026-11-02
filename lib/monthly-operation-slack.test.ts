@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { monthlyOperationMessage } from "./monthly-operation-slack";
 
 describe("monthly operation Slack message", () => {
-  it("names the completed item, checker, assignees and cycle", () => {
+  it("shows only the completed item and checker", () => {
     const message = monthlyOperationMessage({
       cycle: "2026-09",
       taskTitle: "원비 안내 <2차>",
@@ -15,7 +15,8 @@ describe("monthly operation Slack message", () => {
     const serialized = JSON.stringify(message.blocks);
     expect(serialized).toContain("원비 안내 &lt;2차&gt;");
     expect(serialized).toContain("<@UCHECKER1>");
-    expect(serialized).toContain("<@UOWNER1>, 계정없음");
-    expect(serialized).toContain("2026년 9월 15일 ~ 2026년 10월 14일");
+    expect(serialized).not.toContain("<@UOWNER1>");
+    expect(serialized).not.toContain("담당자");
+    expect(serialized).not.toContain("업무 사이클");
   });
 });

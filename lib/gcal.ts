@@ -75,7 +75,7 @@ function b64url(input: string | Buffer): string {
 
 let cachedToken: { token: string; exp: number } | null = null;
 
-async function accessToken(): Promise<string | null> {
+export async function accessToken(): Promise<string | null> {
   if (!gcalConfigured()) return null;
   const now = Math.floor(Date.now() / 1000);
   if (cachedToken && cachedToken.exp - 60 > now) return cachedToken.token;
