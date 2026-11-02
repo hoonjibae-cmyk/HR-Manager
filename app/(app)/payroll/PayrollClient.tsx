@@ -12,7 +12,13 @@ import { Pill } from "@/components/ui";
 import { resignStatusOf, resignBadgeLabel, resignedSummary } from "@/lib/payroll-roster";
 import { isEstimatedHourly } from "@/lib/payroll";
 import { openPdfTab, closePdfTab, deliverPdf } from "@/lib/open-pdf";
-import { payoutNotice, payoutTotals, type PayoutSuggestion } from "@/lib/leave-payout";
+import {
+  CARRYOVER_BLOCK_LABEL,
+  carryoverPlan,
+  payoutNotice,
+  payoutTotals,
+  type PayoutSuggestion,
+} from "@/lib/leave-payout";
 import { planPayslipSend, sendConfirmText, nothingToSendNotice, payslipEmailOf } from "@/lib/payslip-send";
 import {
   useTableSort,
@@ -1448,6 +1454,7 @@ export default function PayrollClient({ today }: { today: string }) {
           month={month}
           list={payout}
           hasRecords={recs.length > 0}
+          today={today}
           onClose={() => setPayoutOpen(false)}
           onDone={async () => {
             setPayoutOpen(false);
@@ -1972,6 +1979,7 @@ function LeavePayoutModal({
   month,
   list,
   hasRecords,
+  today,
   onClose,
   onDone,
 }: {
@@ -1980,6 +1988,8 @@ function LeavePayoutModal({
   list: PayoutSuggestion[];
   /** 그 달 급여 시트에 행이 있는가 — 없으면 '대상 없음' 이 아니라 '아직 산정 전' 이다 */
   hasRecords: boolean;
+  /** 오늘(KST, 서버가 넘긴 값) — 이월은 연차기간이 끝난 다음 날부터만 된다 */
+  today: string;
   onClose: () => void;
   onDone: () => Promise<void>;
 }) {
@@ -1994,6 +2004,50 @@ function LeavePayoutModal({
   const chosen = list.filter((s) => picked.includes(s.employeeId));
   const totals = payoutTotals(chosen);
   const chosenNoConsent = chosen.filter((s) => !s.done && s.evidenceWarning);
+
+  // 이월 — 고른 줄 가운데 이월할 수 있는 것(기간 만료 · 기간이 끝난 뒤 · 남은 일수 있음)만 간다.
+  // 서버도 같은 판정(carryoverPlan)을 다시 하므로 여기 표시는 미리 보여 주는 것이다.
+  const [carryMode, setCarryMode] = useState(false);
+  const [carryConsent, setCarryConsent] = useState(false);
+  const carryOk: Array<{ s: PayoutSuggestion; days: number }> = [];
+  const carryBlocked: Array<{ s: PayoutSuggestion; reason: string }> = [];
+  for (const s of chosen) {
+    const plan = carryoverPlan(s, today);
+    if (plan.ok) carryOk.push({ s, days: plan.days });
+    else carryBlocked.push({ s, reason: CARRYOVER_BLOCK_LABEL[plan.reason] });
+  }
+  const carryDays = Math.round(carryOk.reduce((a, p) => a + p.days, 0) * 10) / 10;
+
+  async function applyCarryover() {
+    if (!carryOk.length || !carryConsent) return;
+    setSaving(true);
+    setErr("");
+    try {
+      const res = await fetch("/api/leave/carryover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ year, month, employeeIds: carryOk.map((p) => p.s.employeeId), consent: true }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "이월 처리 실패");
+      const lines: string[] = [];
+      if (j.applied?.length)
+        lines.push(`이월 처리: ${j.applied.map((a: any) => `${a.name} ${a.days}일`).join(", ")}`);
+      if (j.skipped?.length)
+        lines.push(`처리하지 않음: ${j.skipped.map((a: any) => `${a.name} — ${a.reason}`).join(" / ")}`);
+      if (j.sentNotice?.length)
+        lines.push(
+          `이미 명세서가 발송된 ${j.sentNotice.join(", ")}: 발송된 명세서에는 이월 안내가 없습니다. ` +
+            `잠금 해제 후 정정 재발송해야 실립니다.`
+        );
+      if (lines.length) alert(lines.join("\n\n"));
+      await onDone();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function apply() {
     if (!chosen.length) return;
@@ -2088,6 +2142,11 @@ function LeavePayoutModal({
                 있습니다 — 판단이 서지 않으면 노무 자문을 거쳐 반영하세요.
               </div>
               <div>
+                · <b>수당 대신 이월</b>할 수도 있습니다(<b>이월 처리…</b>) — 근로자 동의(또는 노사 합의)가
+                있어야 하고, 이월분은 다음 연차기간 안에서 쓰며 못 쓰면 그때 수당으로 정산합니다.
+                이월하면 <b>이 달 급여명세서</b>에 그 사실이 적힙니다(명세서 발송 전에 처리하세요).
+              </div>
+              <div>
                 · 잔여가 <b className="text-rose-600">마이너스(초과 사용)</b>인 퇴사자는 초과
                 일수를 (−)로 정산해 마지막 급여에서 <b>공제</b>합니다 — 근거는 신청 때 받은
                 <b> 초과사용 급여공제 동의 기록</b>과 임금공제 동의서의 연차 정산 조항입니다.
@@ -2103,7 +2162,7 @@ function LeavePayoutModal({
                     <th className="px-2 py-2 text-left">직원</th>
                     <th className="px-2 py-2 text-left">구분 · 기준일</th>
                     <th className="px-2 py-2 text-right">잔여</th>
-                    <th className="px-2 py-2 text-right">이미 반영</th>
+                    <th className="px-2 py-2 text-right">반영·이월</th>
                     <th className="px-2 py-2 text-right">추가 반영</th>
                     <th className="px-2 py-2 text-right">예상 수당</th>
                   </tr>
@@ -2125,7 +2184,7 @@ function LeavePayoutModal({
                         {s.name}
                         {s.done && (
                           <span className="ml-1.5 pill bg-emerald-50 text-emerald-700 text-[10px]">
-                            반영 완료
+                            {s.carriedDays && !s.alreadyDays ? "이월 완료" : s.carriedDays ? "반영·이월 완료" : "반영 완료"}
                           </span>
                         )}
                         {s.overdraft && (
@@ -2165,8 +2224,12 @@ function LeavePayoutModal({
                       <td className={`px-2 py-2 text-right tnum whitespace-nowrap ${s.remaining < 0 ? "text-rose-600 font-semibold" : ""}`}>
                         {s.remaining}일
                       </td>
-                      <td className="px-2 py-2 text-right tnum text-slate-400">
-                        {s.alreadyDays ? `${s.alreadyDays}일` : "-"}
+                      <td className="px-2 py-2 text-right tnum text-slate-400 whitespace-nowrap">
+                        {/* 수당으로 넣은 일수와 이월한 일수를 갈라 적는다 — 둘 다 '처리됨' 이지만 뜻이 다르다 */}
+                        {s.alreadyDays ? `${s.alreadyDays}일` : ""}
+                        {s.alreadyDays && s.carriedDays ? " · " : ""}
+                        {s.carriedDays ? <span className="text-sky-700">이월 {s.carriedDays}일</span> : ""}
+                        {!s.alreadyDays && !s.carriedDays ? "-" : ""}
                       </td>
                       <td className={`px-2 py-2 text-right tnum font-semibold whitespace-nowrap ${s.suggestDays < 0 ? "text-rose-600" : ""}`}>
                         {s.suggestDays ? `${s.suggestDays}일` : "-"}
@@ -2182,7 +2245,58 @@ function LeavePayoutModal({
 
             {err && <div className="text-xs text-rose-600 mt-2">{err}</div>}
 
-            <div className="flex items-center justify-end gap-2 mt-3">
+            {carryMode && (
+              // 수당 대신 이월 — 누구를 며칠 넘기는지, 왜 빠지는지, 무엇에 동의해야 하는지를 한 판에 보여 준다
+              <div className="mt-3 rounded border border-sky-200 bg-sky-50 p-3 text-xs text-slate-700 space-y-2">
+                <div className="font-semibold text-slate-800">수당 대신 다음 연차기간으로 이월</div>
+                {carryOk.length ? (
+                  <div className="break-keep">
+                    이월:{" "}
+                    {carryOk.map((p) => `${p.s.name} ${p.days}일 (${p.s.expiry} 만료분 → 다음 날부터 1년)`).join(", ")}
+                    {" "}· 합계 <b>{carryDays}일</b>
+                  </div>
+                ) : (
+                  <div className="text-rose-600">고른 직원 중 이월할 수 있는 줄이 없습니다.</div>
+                )}
+                {carryBlocked.length > 0 && (
+                  <div className="text-slate-500 break-keep">
+                    제외: {carryBlocked.map((p) => `${p.s.name} — ${p.reason}`).join(" / ")}
+                  </div>
+                )}
+                <div className="text-slate-500 break-keep">
+                  이월분은 다음 기간 첫날 날짜의 「이월」 줄로 연차 원장에 적히고 그 기간 안에서 쓸 수 있습니다.
+                  다음 기간에도 못 쓰면 그때 수당으로 정산해야 합니다(소멸시키면 체불). 이 달 급여명세서에
+                  이월 사실이 함께 적히므로 <b>명세서 발송 전에</b> 처리하세요. 되돌리려면 직원별 연차 내역에서
+                  그 줄을 지우면 됩니다.
+                </div>
+                <label className="flex items-start gap-2 text-slate-800">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={carryConsent}
+                    onChange={(e) => setCarryConsent(e.target.checked)}
+                  />
+                  <span className="break-keep">
+                    근로자 본인의 동의(또는 노사 합의)를 받았습니다 — 미사용 연차는 수당 지급이 원칙이라 동의 없이
+                    이월하면 수당 미지급(체불)이 됩니다.
+                  </span>
+                </label>
+                <div className="flex justify-end gap-2">
+                  <button className="btn-outline py-1 text-xs" onClick={() => setCarryMode(false)} disabled={saving}>
+                    취소
+                  </button>
+                  <button
+                    className="btn-primary py-1 text-xs"
+                    onClick={applyCarryover}
+                    disabled={saving || !carryOk.length || !carryConsent}
+                  >
+                    {saving ? "처리 중…" : `${carryOk.length}명 이월 확정`}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-end gap-2 mt-3">
               <span className="text-xs text-slate-500 mr-auto">
                 {chosen.length
                   ? // 지급과 공제를 갈라 적는다 — 한데 더하면 서로 상쇄돼 공제가 있다는 사실이 사라진다
@@ -2194,7 +2308,16 @@ function LeavePayoutModal({
               <button className="btn-outline" onClick={onClose} disabled={saving}>
                 닫기
               </button>
-              <button className="btn-primary" onClick={apply} disabled={saving || !chosen.length}>
+              {/* 수당 대신 이월 — 고른 줄이 있을 때만 (이월할 수 없는 줄은 판에서 이유와 함께 빠진다) */}
+              <button
+                className="btn-outline"
+                onClick={() => setCarryMode((v) => !v)}
+                disabled={saving || !chosen.length}
+                title="수당으로 지급하지 않고 다음 연차기간으로 넘깁니다 (근로자 동의 필요)"
+              >
+                이월 처리…
+              </button>
+              <button className="btn-primary" onClick={apply} disabled={saving || !chosen.length || carryMode}>
                 {saving ? "반영 중…" : "급여에 반영"}
               </button>
             </div>

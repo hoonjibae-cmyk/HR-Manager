@@ -431,3 +431,65 @@ describe("다음 연차기간 날짜로 미리 승인해 둔 휴가 — 이번 �
     expect(s.period.remaining).toBe(3);
   });
 });
+
+describe("이월(CARRYOVER) — 지난 기간 미사용분을 수당 대신 다음 기간으로 넘긴다", () => {
+  // 입사 2021-11-02. 2025-11-02 발생 16일 중 11일 사용 → 2026-11-01 에 5일 만료.
+  // 관리자가 이월 처리하면 다음 기간 첫날(2026-11-02) 날짜의 CARRYOVER 줄이 생긴다.
+  const hire = d("2021-11-02");
+  const txns: LeaveTxn[] = [
+    { date: d("2026-05-04"), days: 11, type: "USE" },
+    { date: d("2026-11-02"), days: 5, type: "CARRYOVER", note: "이월" },
+  ];
+
+  it("지난 기간 마지막 날 기준으로는 아직 없는 것 — 만료 잔여 5일이 그대로다 (연차수당 상세가 읽는 값)", () => {
+    const s = summarizeLeave(hire, new Date("2026-11-01T23:59:59Z"), txns);
+    expect(s.period.remaining).toBe(5);
+    expect(s.lots.some((l) => l.source === "CARRYOVER")).toBe(false);
+  });
+
+  it("새 기간에서는 발생 17 + 이월 5 = 잔여 22 — 이월을 발생에 섞지 않는다", () => {
+    const s = summarizeLeave(hire, d("2026-11-06"), txns);
+    expect(s.period.granted).toBe(17);
+    expect(s.period.carriedOver).toBe(5);
+    expect(s.period.remaining).toBe(22);
+    expect(s.period.granted + s.period.carriedOver - s.period.used).toBe(s.period.remaining);
+  });
+
+  it("**같은 날 만료된 lot 의 '소멸' 이 '이월' 로 바뀐다** — 발생 누계·소멸 누계도 두 번 세지 않는다", () => {
+    const s = summarizeLeave(hire, d("2026-11-06"), txns);
+    const old = s.lots.find((l) => l.grantDate.getTime() === d("2025-11-02").getTime())!;
+    expect(old.expiredLost).toBe(0);
+    expect(old.carriedOut).toBe(5);
+    expect(s.expired).toBe(11 + 15 + 15 + 16); // 1년 미만 11 + 1~3년차 — 이월한 5일은 소멸이 아니다
+    expect(s.granted).toBe(11 + 15 + 15 + 16 + 16 + 17); // 이월 5 는 발생이 아니다
+  });
+
+  it("이월분은 새 기간 발생분 다음에 쓰이고, 둘 다 다음 기념일에 함께 소멸한다 — 그때 만료 정산 대상", () => {
+    const used = [...txns, { date: d("2027-03-02"), days: 10, type: "USE" as const }];
+    const s = summarizeLeave(hire, new Date("2027-11-01T23:59:59Z"), used);
+    expect(s.period.remaining).toBe(12); // 17 + 5 − 10
+    const after = summarizeLeave(hire, d("2027-11-03"), used);
+    expect(after.expired).toBe(11 + 15 + 15 + 16 + 12);
+    expect(after.period.remaining).toBe(17);
+  });
+
+  it("실제로 만료된 일수보다 많이 이월해도(3일 남았는데 5일) 소멸은 0 이고 나머지는 이월로 더해진다", () => {
+    const s = summarizeLeave(hire, d("2026-11-06"), [
+      { date: d("2026-05-04"), days: 13, type: "USE" },
+      { date: d("2026-11-02"), days: 5, type: "CARRYOVER" },
+    ]);
+    const old = s.lots.find((l) => l.grantDate.getTime() === d("2025-11-02").getTime())!;
+    expect(old.expiredLost).toBe(0);
+    expect(old.carriedOut).toBe(3);
+    expect(s.period.carriedOver).toBe(5);
+  });
+});
+
+describe("조정(ADJUST +) 의 발생일이 기준일 뒤면 아직 없는 것으로 본다 — 대휴(summarizeComp)와 같은 규칙", () => {
+  it("미래 날짜의 부여는 그날이 와야 잔여에 든다", () => {
+    const hire = d("2021-01-01");
+    const future: LeaveTxn[] = [{ date: d("2026-09-01"), days: 3, type: "ADJUST" }];
+    expect(summarizeLeave(hire, d("2026-07-26"), future).period.remaining).toBe(17);
+    expect(summarizeLeave(hire, d("2026-09-01"), future).period.remaining).toBe(20);
+  });
+});

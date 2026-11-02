@@ -31,6 +31,7 @@ function txnLabel(t: { days: number; type: string; category: string }): string {
   if (t.days < 0) return `${pool} ${n}일 사용`;
   if (t.type === "GRANT") return `${pool} ${n}일 발생`;
   if (t.type === "PAYOUT") return `${pool} ${n}일 수당 지급`;
+  if (t.type === "CARRYOVER") return `${pool} ${n}일 이월 (지난 기간 미사용분)`;
   return `${pool} ${n}일 부여(조정)`;
 }
 
@@ -410,6 +411,8 @@ export default async function EmployeeLeavePage({
                             ? "1년 미만 월 개근"
                             : l.source === "ANNUAL"
                             ? `${l.serviceYear}년차 연차`
+                            : l.source === "CARRYOVER"
+                            ? "이월 (지난 기간 미사용분)"
                             : "관리자 부여"}
                         </td>
                         <td className="td text-right tnum">{l.days}</td>
@@ -417,8 +420,10 @@ export default async function EmployeeLeavePage({
                         <td className="td text-right tnum font-semibold">
                           {expired ? "-" : l.remaining}
                         </td>
-                        <td className="td text-right tnum text-red-500">
-                          {l.expiredLost || "-"}
+                        <td className="td text-right tnum whitespace-nowrap">
+                          {/* 이월한 일수는 소멸이 아니다 — 같은 날짜의 「이월」 줄로 이어진다 */}
+                          {l.carriedOut ? <span className="text-sky-700 mr-1">이월 {l.carriedOut}</span> : null}
+                          <span className="text-red-500">{l.expiredLost || (l.carriedOut ? "" : "-")}</span>
                         </td>
                       </tr>
                     );

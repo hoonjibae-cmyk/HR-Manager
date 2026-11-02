@@ -83,19 +83,39 @@ export function payoutRemaining(
   month: number,
   txns: LeaveTxn[],
   opts: { eligible: boolean; resignDate?: Date | null }
-): { asOf: Date; periodEnd: Date; remaining: number } {
+): { asOf: Date; periodEnd: Date; remaining: number; carriedDays: number } {
   const monthEnd = new Date(Date.UTC(year, month, 0, 23, 59, 59));
   const ending = leavePeriodEndingIn(hireDate, year, month);
+  // 그 기념일 날짜로 이미 이월해 둔 일수 — 지급할 것이 아니라 제안에서 빠지고, 화면엔 '이월' 로 남는다
+  const carriedDays = ending ? carriedOverDays(txns, ending.endExclusive) : 0;
   const resignEod = opts.resignDate ? endOfDay(opts.resignDate) : null;
   const asOf =
     resignEod && resignEod < monthEnd ? resignEod : ending ? endOfDay(ending.lastDay) : monthEnd;
   const summarize = (at: Date) => summarizeLeave(hireDate, at, txns, { eligible: opts.eligible });
   let remaining = summarize(asOf).period.remaining;
   if (ending && asOf.getTime() > endOfDay(ending.lastDay).getTime()) {
-    remaining += summarize(endOfDay(ending.lastDay)).period.remaining;
+    // 기간이 끝난 뒤 같은 달에 퇴사 — 만료분을 더하되, 이미 이월한 일수는 새 기간 잔여에 들어 있으므로
+    // 뺀다(두 번 세지 않게)
+    remaining += Math.max(0, round1(summarize(endOfDay(ending.lastDay)).period.remaining - carriedDays));
   }
   const periodEnd = ending?.lastDay ?? periodLastDay(currentLeavePeriod(hireDate, asOf).endExclusive);
-  return { asOf, periodEnd, remaining };
+  return { asOf, periodEnd, remaining, carriedDays };
+}
+
+/**
+ * 그 기념일(다음 기간 첫날) 날짜로 적힌 **이월 처리 일수** — 연차수당 상세가 '이미 이월했다' 를
+ * 알아보는 열쇠. 이월 줄은 `leavePeriodEndingIn().endExclusive` 날짜로만 적는다(lib/leave-payout-service.ts).
+ */
+export function carriedOverDays(txns: LeaveTxn[], endExclusive: Date): number {
+  const key = ymd(endExclusive);
+  return round1(
+    txns
+      .filter(
+        (t) =>
+          t.type === "CARRYOVER" && t.days > 0 && (t.category ?? "STATUTORY") !== "COMP" && ymd(t.date) === key
+      )
+      .reduce((a, t) => a + t.days, 0)
+  );
 }
 
 export interface PayoutInput {
@@ -111,6 +131,8 @@ export interface PayoutInput {
   remaining: number;
   /** 이미 그 달 급여의 '미사용' 칸에 넣어 둔 일수 */
   alreadyDays: number;
+  /** 수당 대신 다음 기간으로 이미 이월해 둔 일수 (`payoutRemaining().carriedDays`) */
+  carriedDays?: number;
   /** 통상시급 — 금액 미리보기용. 0 이면 금액을 못 보여 준다 */
   hourlyWage: number;
   /** 연차 하루의 유급 시간 (주 소정 ÷ 근무일수, 상한 8) — 엔진의 dailyLeaveHours 와 같은 값 */
@@ -131,7 +153,9 @@ export interface PayoutSuggestion {
   expiry: string;
   remaining: number;
   alreadyDays: number;
-  /** 넣기를 제안하는 일수 = 남은 − 이미 넣은 (음수면 0) */
+  /** 다음 기간으로 이월해 둔 일수 — 기간 만료 줄에만 (퇴사 정산은 0) */
+  carriedDays: number;
+  /** 넣기를 제안하는 일수 = 남은 − 이미 넣은 − 이월한 (음수면 0) */
   suggestDays: number;
   /** 제안 일수로 계산한 수당 (원) — 엔진과 **같은 식**: 일수 × 통상시급 × 1일 소정근로시간 */
   suggestAmount: number;
@@ -185,8 +209,11 @@ export function payoutSuggestions(
     })
     .map((r) => {
       const resigns = !!r.resignDate && inMonth(r.resignDate!, year, month);
+      // 이월해 둔 일수는 지급할 것이 아니다 — 퇴사 정산 줄에서는 따로 빼지 않는다(그 일수는 이미
+      // 새 기간 잔여에 들어 있고 `payoutRemaining` 이 만료분에서 뺐다)
+      const carried = resigns ? 0 : round1(r.carriedDays ?? 0);
       // 퇴사 정산은 음수 제안을 그대로 둔다(공제). 기간 만료는 0 밑으로 내려가지 않는다.
-      const raw = round1(r.remaining - r.alreadyDays);
+      const raw = round1(r.remaining - r.alreadyDays - carried);
       const suggest = resigns ? raw : Math.max(0, raw);
       // 초과사용 공제 여부는 **잔여**로 가른다(이미 일부 넣어 제안이 0 이 된 줄도 공제 줄이다)
       const overdraft = resigns && r.remaining < 0;
@@ -198,6 +225,7 @@ export function payoutSuggestions(
         expiry: resigns ? ymd(r.resignDate!) : ymd(r.periodEnd),
         remaining: round1(r.remaining),
         alreadyDays: round1(r.alreadyDays),
+        carriedDays: carried,
         suggestDays: suggest,
         suggestAmount: payoutAmount(suggest, r.hourlyWage, r.dailyHours),
         done: suggest === 0,
@@ -254,4 +282,66 @@ export function payoutNotice(list: PayoutSuggestion[]): string | null {
     );
   }
   return `이 달 ${parts.join(" / ")}`;
+}
+
+/* ============================ 이월 ============================ */
+
+/** 수당 대신 이월하지 못하는 이유 */
+export type CarryoverBlock = "RESIGN" | "NOT_ENDED" | "NOTHING";
+export const CARRYOVER_BLOCK_LABEL: Record<CarryoverBlock, string> = {
+  RESIGN: "퇴사 정산은 이월할 수 없습니다 — 수당으로 정산합니다",
+  NOT_ENDED: "연차기간이 아직 끝나지 않았습니다 — 끝난 다음 날부터 처리할 수 있습니다",
+  NOTHING: "이월하거나 지급할 남은 일수가 없습니다",
+};
+
+/**
+ * 이 줄을 **이월 처리할 수 있는가**, 며칠인가.
+ * - 퇴사 정산(RESIGN)은 안 된다 — 넘겨 줄 다음 기간이 없다.
+ * - **기간이 끝나기 전에는 안 된다** — 남은 날에 연차를 더 쓸 수 있어 잔여가 아직 움직인다. 미리 적으면
+ *   다음 기간 첫날에 실제보다 많은 이월 lot 이 생기고, 직원은 슬랙에서 그 잔여를 곧바로 본다.
+ *   수당 반영은 급여 입력값이라 나중에 고치면 되지만 이월은 원장에 바로 적히는 발생분이라 더 엄격하다.
+ * - 이미 넣은(수당)·이월한 만큼을 뺀 나머지(`suggestDays`)만 이월한다.
+ */
+export function carryoverPlan(
+  s: PayoutSuggestion,
+  todayYmd: string
+): { ok: true; days: number } | { ok: false; reason: CarryoverBlock } {
+  if (s.kind === "RESIGN") return { ok: false, reason: "RESIGN" };
+  if (s.suggestDays <= 0) return { ok: false, reason: "NOTHING" };
+  if (todayYmd <= s.expiry) return { ok: false, reason: "NOT_ENDED" };
+  return { ok: true, days: s.suggestDays };
+}
+
+/** 명세서·원장·이력에 적는 이월 내용 */
+export interface CarryoverInfo {
+  days: number;
+  /** 끝난 연차기간 */
+  periodStart: string;
+  periodEnd: string;
+  /** 이월분이 사는 다음 연차기간 */
+  nextStart: string;
+  nextEnd: string;
+  /** 처리일(KST) — 없으면 안 적는다 */
+  processedOn?: string | null;
+}
+
+/**
+ * 급여명세서에 싣는 이월 안내 — 수당이 왜 없는지, 그 일수가 어디로 갔는지를 **문서만 보고** 알 수 있어야
+ * 한다. 이월분을 다음 기간에도 못 쓰면 그때 수당으로 정산한다는 것까지 적는다(소멸시키면 체불이다).
+ */
+export function carryoverNotice(c: CarryoverInfo): string {
+  return (
+    `연차 이월: 연차기간 ${c.periodStart} ~ ${c.periodEnd}의 미사용 연차 ${c.days}일은 근로자 동의에 따라 ` +
+    `수당으로 지급하지 않고 다음 연차기간(${c.nextStart} ~ ${c.nextEnd})으로 이월하였습니다. ` +
+    `이월분은 다음 기간 안에 사용할 수 있으며, 기간 안에 사용하지 못한 일수는 그때 연차미사용수당으로 정산합니다.` +
+    (c.processedOn ? ` (처리일 ${c.processedOn})` : "")
+  );
+}
+
+/** 원장(CARRYOVER 줄)의 메모 — 직원별 연차 내역·작업 이력에 그대로 보인다 */
+export function carryoverTxnNote(
+  c: Pick<CarryoverInfo, "days" | "periodStart" | "periodEnd">,
+  by?: string | null
+): string {
+  return `연차기간 ${c.periodStart}~${c.periodEnd} 미사용 ${c.days}일 이월 — 근로자 동의 확인${by ? ` (${by})` : ""}`;
 }

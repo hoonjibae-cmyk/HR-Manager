@@ -15,6 +15,7 @@ import { docPolicyFor, documentBlockReason } from "./departments";
 import { MAKEUP_CATEGORY_LABEL, isContractorContract } from "./constants";
 import { incentiveRosterFor, rosterToStudents } from "./payroll-service";
 import { employeesWithMonthTerms } from "./contracts";
+import { carryoverFor } from "./leave-payout-service";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { existsSync } from "fs";
@@ -159,7 +160,12 @@ export async function genPayslip(payrollId: number) {
   // 지난달 명세서를 다시 뽑으면 새 조건이 찍히고, 산정과 별지가 어긋난다.
   const [monthEmp] = await employeesWithMonthTerms([pr.employee], pr.year, pr.month);
   const company = await getCompany();
-  const payroll: DocPayroll = { ...(pr as any), parkingFee: (monthEmp as any).parkingFee ?? 0 };
+  // 그 달에 미사용 연차를 수당 대신 이월 처리했으면 명세서에 적는다 — 원장이 진실이라 되돌리면
+  // (이월 줄 삭제) 다시 뽑는 명세서에서 사라진다. 못 읽어도 명세서 발급은 막지 않는다.
+  const leaveCarryover = await carryoverFor(pr.employeeId, pr.employee.hireDate, pr.year, pr.month).catch(
+    () => null
+  );
+  const payroll: DocPayroll = { ...(pr as any), parkingFee: (monthEmp as any).parkingFee ?? 0, leaveCarryover };
   const employee = empToDoc(monthEmp);
   const pages = [payslipHtml({ employee, payroll, company })];
 

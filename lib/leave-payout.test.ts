@@ -11,6 +11,10 @@ import {
   payoutTotals,
   leavePeriodEndingIn,
   payoutRemaining,
+  carriedOverDays,
+  carryoverPlan,
+  carryoverNotice,
+  carryoverTxnNote,
   NO_CONSENT_WARNING,
   periodLastDay,
   inMonth,
@@ -188,6 +192,98 @@ describe("payoutRemaining — 기준 시점과 잔여", () => {
     expect(ymd(r.asOf)).toBe("2026-11-05");
     expect(ymd(r.periodEnd)).toBe("2026-11-15");
     expect(r.remaining).toBe(5);
+  });
+});
+
+describe("이월 — 수당 대신 다음 기간으로", () => {
+  const hire = d("2021-11-02"); // 2025-11-02 발생 16일 → 2026-11-01 까지. 11일 사용 → 5일 남음
+  const used11: LeaveTxn[] = [
+    { date: d("2026-01-05"), days: 5, type: "USE" },
+    { date: d("2026-05-04"), days: 4, type: "USE" },
+    { date: d("2026-08-10"), days: 2, type: "USE" },
+  ];
+  const carried: LeaveTxn = { date: d("2026-11-02"), days: 5, type: "CARRYOVER" };
+  const pick = (r: { periodEnd: Date; remaining: number; carriedDays: number }, over: Partial<PayoutInput> = {}) =>
+    row({ periodEnd: r.periodEnd, remaining: r.remaining, carriedDays: r.carriedDays, ...over });
+
+  it("기념일 날짜의 CARRYOVER 줄만 이월로 센다 (다른 날짜·대휴·음수는 아니다)", () => {
+    expect(carriedOverDays([carried], d("2026-11-02"))).toBe(5);
+    expect(carriedOverDays([carried], d("2026-11-01"))).toBe(0);
+    expect(carriedOverDays([{ ...carried, category: "COMP" }], d("2026-11-02"))).toBe(0);
+    expect(carriedOverDays([{ ...carried, days: -5 }], d("2026-11-02"))).toBe(0);
+  });
+
+  it("**이월해 둔 만큼 제안이 줄고, 다 이월했으면 done** — 줄은 '이월' 표시로 남는다", () => {
+    const r = payoutRemaining(hire, 2026, 11, [...used11, carried], { eligible: true });
+    expect(r.remaining).toBe(5); // 기간 마지막 날 기준 — 이월 lot 은 아직 없다
+    expect(r.carriedDays).toBe(5);
+    const [s] = payoutSuggestions([pick(r)], 2026, 11);
+    expect(s.kind).toBe("EXPIRY");
+    expect(s.carriedDays).toBe(5);
+    expect(s.suggestDays).toBe(0);
+    expect(s.suggestAmount).toBe(0);
+    expect(s.done).toBe(true);
+  });
+
+  it("일부만 이월했으면 나머지만 제안한다 (5일 중 2일 이월 → 3일)", () => {
+    const r = payoutRemaining(hire, 2026, 11, [...used11, { ...carried, days: 2 }], { eligible: true });
+    const [s] = payoutSuggestions([pick(r)], 2026, 11);
+    expect(s.suggestDays).toBe(3);
+    expect(s.done).toBe(false);
+  });
+
+  it("수당 일부 + 이월 일부도 합쳐서 본다 (2일 수당 + 3일 이월 → done)", () => {
+    const r = payoutRemaining(hire, 2026, 11, [...used11, { ...carried, days: 3 }], { eligible: true });
+    const [s] = payoutSuggestions([pick(r, { alreadyDays: 2 })], 2026, 11);
+    expect(s.suggestDays).toBe(0);
+    expect(s.done).toBe(true);
+  });
+
+  it("**같은 달에 기간이 끝난 뒤 퇴사 — 이월분을 두 번 세지 않는다**", () => {
+    const r = payoutRemaining(hire, 2026, 11, [...used11, carried, { date: d("2026-11-10"), days: 2, type: "USE" }], {
+      eligible: true,
+      resignDate: d("2026-11-20"),
+    });
+    expect(r.remaining).toBe(20); // 새 기간 17 + 이월 5 − 2. 만료분 5 는 이미 이월됐으니 더하지 않는다
+    const [s] = payoutSuggestions([pick(r, { resignDate: d("2026-11-20") })], 2026, 11);
+    expect(s.kind).toBe("RESIGN");
+    expect(s.suggestDays).toBe(20);
+    expect(s.carriedDays).toBe(0); // 퇴사 정산 줄에서는 따로 빼지 않는다
+  });
+
+  it("carryoverPlan — 기간이 끝난 다음 날부터, 남은 일수만큼. 퇴사 정산·남은 것 없음은 막는다", () => {
+    const base = payoutSuggestions([row({ periodEnd: d("2026-11-01"), remaining: 5 })], 2026, 11)[0];
+    expect(carryoverPlan(base, "2026-11-01")).toEqual({ ok: false, reason: "NOT_ENDED" });
+    expect(carryoverPlan(base, "2026-11-02")).toEqual({ ok: true, days: 5 });
+    const partly = payoutSuggestions([row({ periodEnd: d("2026-11-01"), remaining: 5, alreadyDays: 2 })], 2026, 11)[0];
+    expect(carryoverPlan(partly, "2026-11-03")).toEqual({ ok: true, days: 3 });
+    const done = payoutSuggestions([row({ periodEnd: d("2026-11-01"), remaining: 5, carriedDays: 5 })], 2026, 11)[0];
+    expect(carryoverPlan(done, "2026-11-03")).toEqual({ ok: false, reason: "NOTHING" });
+    const resign = payoutSuggestions([row({ periodEnd: d("2027-02-28"), resignDate: d("2026-11-20") })], 2026, 11)[0];
+    expect(carryoverPlan(resign, "2026-11-25")).toEqual({ ok: false, reason: "RESIGN" });
+  });
+
+  it("명세서 안내 — 어느 기간의 며칠이 어디로 갔고, 못 쓰면 그때 정산한다는 것까지 적는다", () => {
+    const txt = carryoverNotice({
+      days: 5,
+      periodStart: "2025-11-02",
+      periodEnd: "2026-11-01",
+      nextStart: "2026-11-02",
+      nextEnd: "2027-11-01",
+      processedOn: "2026-11-03",
+    });
+    expect(txt).toContain("미사용 연차 5일");
+    expect(txt).toContain("2025-11-02 ~ 2026-11-01");
+    expect(txt).toContain("2026-11-02 ~ 2027-11-01");
+    expect(txt).toContain("근로자 동의");
+    expect(txt).toContain("연차미사용수당으로 정산");
+    expect(txt).toContain("처리일 2026-11-03");
+  });
+
+  it("원장 메모에 기간·일수·동의 확인자를 남긴다", () => {
+    expect(carryoverTxnNote({ days: 5, periodStart: "2025-11-02", periodEnd: "2026-11-01" }, "관리자")).toBe(
+      "연차기간 2025-11-02~2026-11-01 미사용 5일 이월 — 근로자 동의 확인 (관리자)"
+    );
   });
 });
 

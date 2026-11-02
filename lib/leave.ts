@@ -6,6 +6,8 @@
 //  - 3년 이상: 매 2년마다 1일 가산, 최대 25일.  → 15 + floor((근속연수-1)/2), 상한 25.
 //  - 회사 정책상 '입사일 기준(anniversary)'으로 산정 (근로계약서 제6조①).
 //  - 발생 연차는 발생일로부터 1년간 사용, 미사용분은 소멸(수당 정산 대상).
+//  - 소멸 대신 **이월**할 수 있다(근로자 동의) — `CARRYOVER` 줄을 다음 기간 첫날(기념일) 날짜로
+//    적으면 그 날부터 1년짜리 lot 으로 살고, 같은 날 만료된 lot 의 '소멸' 이 그만큼 '이월' 로 바뀐다.
 
 import {
   addDays,
@@ -20,7 +22,8 @@ import {
 export interface LeaveTxn {
   date: Date;
   days: number; // +발생 / -사용 (여기서는 사용/조정만 입력)
-  type: "USE" | "ADJUST" | "PAYOUT" | "GRANT" | "EXPIRE";
+  /** CARRYOVER = 지난 기간 미사용분을 다음 기간으로 이월(+). 날짜는 다음 기간 첫날(입사기념일) */
+  type: "USE" | "ADJUST" | "PAYOUT" | "GRANT" | "EXPIRE" | "CARRYOVER";
   /** STATUTORY(본래 연차, 기본) | COMP(대체휴일 보상연차) */
   category?: string;
   note?: string;
@@ -34,11 +37,14 @@ export interface Lot {
   grantDate: Date;
   expiryDate: Date;
   days: number; // 발생일수
-  source: "MONTHLY" | "ANNUAL" | "ADJUST";
+  /** CARRYOVER = 관리자가 지난 기간 미사용분을 이월한 lot (발생이 아니라 이월로 센다) */
+  source: "MONTHLY" | "ANNUAL" | "ADJUST" | "CARRYOVER";
   serviceYear: number; // 0 = 1년 미만
   remaining: number; // FIFO 차감 후 잔여
   used: number;
   expiredLost: number; // 소멸된 미사용분
+  /** 만료 때 소멸하지 않고 다음 기간으로 이월된 일수 (같은 날짜의 CARRYOVER lot 으로 이어진다) */
+  carriedOut: number;
 }
 
 /**
@@ -51,7 +57,7 @@ export interface LeavePeriod {
   serviceYear: number; // 1 = 입사 1년차(1년 미만), 2 = 2년차 …
   label: string; // "6년차"
   granted: number; // 이 기간에 발생한 일수
-  carriedOver: number; // 이전 기간에서 넘어와 아직 유효한 잔여 (보통 0)
+  carriedOver: number; // 이전 기간에서 넘어와 아직 유효한 잔여 — 관리자 이월 처리분(CARRYOVER) 포함 (보통 0)
   used: number; // 이 기간에 사용한 일수 (승인된 미래 휴가 포함)
   remaining: number; // 지금 쓸 수 있는 잔여
   scheduled: number; // 이 기간에 앞으로 더 발생할 예정 일수 (1년 미만 월 개근분)
@@ -158,6 +164,7 @@ export function generateGrants(hireDate: Date, asOf: Date): Lot[] {
       remaining: 1,
       used: 0,
       expiredLost: 0,
+      carriedOut: 0,
     });
   }
 
@@ -175,6 +182,7 @@ export function generateGrants(hireDate: Date, asOf: Date): Lot[] {
       remaining: days,
       used: 0,
       expiredLost: 0,
+      carriedOut: 0,
     });
   }
 
@@ -182,19 +190,26 @@ export function generateGrants(hireDate: Date, asOf: Date): Lot[] {
   return lots;
 }
 
-/** 수동 조정(ADJUST +) 을 lot 으로 추가 */
-function adjustLots(txns: LeaveTxn[]): Lot[] {
+/**
+ * 수동 조정(ADJUST +)·이월(CARRYOVER) 을 lot 으로 추가.
+ *
+ * **발생일이 asOf 뒤인 것은 아직 생기지 않은 것**이라 넣지 않는다 — 대휴(`summarizeComp`)와 같은
+ * 규칙이다. 이월은 다음 기간 첫날(기념일) 날짜로 적히므로, 지난 기간 마지막 날 기준으로 재는
+ * 잔여(연차수당 상세)에 끼어들지 않고 그 날이 오면 새 기간의 몫으로 산다.
+ */
+function adjustLots(txns: LeaveTxn[], asOf: Date): Lot[] {
   return txns
-    .filter((t) => t.type === "ADJUST" && t.days > 0)
+    .filter((t) => (t.type === "ADJUST" || t.type === "CARRYOVER") && t.days > 0 && !isAfter(t.date, asOf))
     .map((t) => ({
       grantDate: t.date,
       expiryDate: addYears(t.date, 1),
       days: t.days,
-      source: "ADJUST" as const,
+      source: t.type === "CARRYOVER" ? ("CARRYOVER" as const) : ("ADJUST" as const),
       serviceYear: -1,
       remaining: t.days,
       used: 0,
       expiredLost: 0,
+      carriedOut: 0,
     }));
 }
 
@@ -221,7 +236,7 @@ export function summarizeLeave(
   const statTxns = txns.filter((t) => !isComp(t));
   const lots = [
     ...(eligible ? generateGrants(hireDate, asOf) : []),
-    ...adjustLots(statTxns),
+    ...adjustLots(statTxns, asOf),
   ].sort((a, b) => a.grantDate.getTime() - b.grantDate.getTime());
 
   // 사용 이벤트(날짜순)
@@ -283,8 +298,24 @@ export function summarizeLeave(
       lot.remaining = 0;
     }
   }
+  // 이월 lot 이 있으면 **같은 날 만료된 lot 의 '소멸' 을 그만큼 '이월' 로 옮긴다** — 없어진 일수가
+  // 아니라 다음 기간으로 넘어간 일수다. 화면이 '소멸 5' 로 적으면 이월해 준 사람이 놀란다.
+  for (const c of lots) {
+    if (c.source !== "CARRYOVER") continue;
+    let left = c.days;
+    for (const lot of lots) {
+      if (left <= 0) break;
+      if (lot.source === "CARRYOVER" || lot.expiredLost <= 0) continue;
+      if (lot.expiryDate.getTime() !== c.grantDate.getTime()) continue;
+      const move = Math.min(lot.expiredLost, left);
+      lot.expiredLost -= move;
+      lot.carriedOut += move;
+      left -= move;
+    }
+  }
 
-  const granted = lots.reduce((s, l) => s + l.days, 0);
+  // 이월분은 새로 발생한 것이 아니라 지난 lot 에서 넘어온 것이라 발생 누계에 넣지 않는다
+  const granted = lots.filter((l) => l.source !== "CARRYOVER").reduce((s, l) => s + l.days, 0);
   const used = lots.reduce((s, l) => s + l.used, 0) + overdraft;
   const expired = lots.reduce((s, l) => s + l.expiredLost, 0);
   const remaining =
@@ -298,10 +329,13 @@ export function summarizeLeave(
   let periodUsed = overdraftInPeriod;
   lots.forEach((l, i) => {
     periodUsed += usedInThisPeriod[i];
-    if (inPeriod(l.grantDate)) periodGranted += l.days;
+    if (l.source === "CARRYOVER" && inPeriod(l.grantDate)) {
+      // 관리자가 이월한 지난 기간 미사용분 — 이 기간 첫날에 적히지만 발생이 아니라 이월이다
+      periodCarried += l.days;
+    } else if (inPeriod(l.grantDate)) periodGranted += l.days;
     else if (isAfter(l.expiryDate, period.start)) {
       // 이전 기간 발생분이 아직 살아서 넘어온 경우 (기간 시작 시점의 잔여)
-      periodCarried += l.remaining + usedInThisPeriod[i] + l.expiredLost;
+      periodCarried += l.remaining + usedInThisPeriod[i] + l.expiredLost + l.carriedOut;
     }
   });
   // 1년 미만은 매월 개근분이 앞으로 더 발생한다 (최대 11일)

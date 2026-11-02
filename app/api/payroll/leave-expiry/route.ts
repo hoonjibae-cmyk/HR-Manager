@@ -1,7 +1,8 @@
 // 그 달에 **연차기간이 끝나는 직원**과 미사용 연차수당 제안.
 //
 // 급여 화면이 행마다 배지를 띄우고 '연차 수당 반영' 버튼을 여는 데 쓴다.
-// 판정·계산은 lib/leave-payout.ts(순수 함수, 테스트 있음)에 있고 여기서는 읽어 넘기기만 한다.
+// 판정·계산은 lib/leave-payout.ts(순수 함수, 테스트 있음)에 있고 입력은 lib/leave-payout-service.ts 가
+// 읽어 넘긴다 — 이월 처리(POST /api/leave/carryover)와 같은 입력을 쓴다.
 //
 // **급여 목록과 따로 부른다** — 연차 잔여를 내려면 전 직원의 연차 원장을 훑어야 해서
 // 급여 목록(자주 다시 부른다)에 얹으면 화면이 매번 느려진다.
@@ -9,10 +10,8 @@
 import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { isLeaveEligible, type LeaveTxn } from "@/lib/leave";
-import { computeWeeklyHours, dailyLeaveHours } from "@/lib/payroll";
-import { parseSchedule } from "@/lib/constants";
-import { payoutSuggestions, payoutRemaining, type PayoutInput } from "@/lib/leave-payout";
+import { payoutSuggestions } from "@/lib/leave-payout";
+import { payoutRowsFor } from "@/lib/leave-payout-service";
 import { runPayrollMonth, type PayrollInputMap } from "@/lib/payroll-service";
 import { logActivity } from "@/lib/activity";
 
@@ -26,70 +25,7 @@ export async function GET(req: Request) {
   if (!year || !month) return NextResponse.json({ error: "year/month 필요" }, { status: 400 });
 
   // 그 달 급여 시트에 오른 사람만 본다 — 시트에 없는 사람에게 제안해 봐야 넣을 자리가 없다
-  const records = await prisma.payrollRecord.findMany({
-    where: { year, month },
-    include: { employee: true },
-  });
-  if (!records.length) return NextResponse.json({ year, month, suggestions: [] });
-
-  const empIds = records.map((r) => r.employeeId);
-  const txns = await prisma.leaveTransaction.findMany({
-    where: { employeeId: { in: empIds } },
-    orderBy: { date: "asc" },
-  });
-  const byEmp = new Map<number, LeaveTxn[]>();
-  for (const t of txns) {
-    const arr = byEmp.get(t.employeeId) ?? [];
-    arr.push({
-      date: t.date,
-      days: t.days,
-      type: t.type as any,
-      category: (t as any).category ?? "STATUTORY",
-      note: t.note ?? undefined,
-    });
-    byEmp.set(t.employeeId, arr);
-  }
-
-  // 퇴사 정산의 초과사용 공제 근거 — 살아 있는(승인·취소 요청 중) 신청의 동의 기록만 센다.
-  // 반려·취소된 신청은 그 초과가 실제로 일어나지 않았으므로 근거가 아니다.
-  const consentRows = await prisma.leaveRequest.findMany({
-    where: {
-      employeeId: { in: empIds },
-      overdraftConsentAt: { not: null },
-      status: { in: ["APPROVED", "CANCEL_PENDING"] },
-    },
-    select: { id: true, employeeId: true },
-    orderBy: { startDate: "asc" },
-  });
-  const consentsOf = new Map<number, number[]>();
-  for (const c of consentRows) consentsOf.set(c.employeeId, [...(consentsOf.get(c.employeeId) ?? []), c.id]);
-
-  const rows: PayoutInput[] = records.map((r) => {
-    const e = r.employee;
-    const { weeklyContractual } = computeWeeklyHours(parseSchedule(e.schedule));
-    const eligible = isLeaveEligible(weeklyContractual, (e as any).leaveEligible);
-    const list = byEmp.get(e.id) ?? [];
-    // 기준 시점(퇴사일 / 그 달에 끝나는 기간의 마지막 날 / 말일)과 잔여는 `payoutRemaining` 하나가
-    // 정한다 — 말일 시점의 '지금 기간' 으로 가리면 입사일이 1일인 사람만 잡힌다(lib/leave-payout.ts).
-    const { periodEnd, remaining } = payoutRemaining(e.hireDate, year, month, list, {
-      eligible,
-      resignDate: e.resignDate,
-    });
-    return {
-      employeeId: e.id,
-      name: e.name,
-      eligible,
-      periodEnd,
-      resignDate: e.resignDate,
-      remaining,
-      alreadyDays: r.unusedLeaveDays ?? 0,
-      hourlyWage: r.hourlyWage ?? 0,
-      // 엔진과 같은 함수로 구한다 — 미리보기 금액과 실제 명세서가 원 단위까지 같아야 한다
-      dailyHours: dailyLeaveHours(parseSchedule(e.schedule)),
-      consentRequestIds: consentsOf.get(e.id) ?? [],
-    };
-  });
-
+  const { rows } = await payoutRowsFor(year, month);
   return NextResponse.json({ year, month, suggestions: payoutSuggestions(rows, year, month) });
 }
 

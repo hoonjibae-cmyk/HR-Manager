@@ -3,6 +3,7 @@
 import { won, wonUnit, ymd, ymdKo } from "./format";
 import { INCOME_TYPE_LABEL } from "./constants";
 import { logoImg, stampImg, type DocCompany, type DocEmployee } from "./documents";
+import { carryoverNotice, type CarryoverInfo } from "./leave-payout";
 import {
   summarizeIncentive,
   summarizeRevenueShare,
@@ -60,6 +61,8 @@ export interface DocPayroll {
   reissueCount?: number | null;
   /** 최초 발급일 — 정정본에 함께 찍어 앞서 교부된 것과 대조할 수 있게 한다 */
   firstSentAt?: Date | string | null;
+  /** 그 달에 수당 대신 다음 기간으로 이월한 미사용 연차 — 있으면 명세서에 그 사실을 적는다 */
+  leaveCarryover?: CarryoverInfo | null;
 }
 
 function esc(s: any): string {
@@ -452,6 +455,10 @@ export function payslipHtml(args: {
         return `<div class="small">· 연차미사용수당 = 미사용 연차일수 × 통상시급 × 1일 소정근로시간(휴게 제외) — ${daysTxt}<b>${won(p.unusedLeaveP)}원</b></div>`;
       return `<div class="small">· 연차미사용수당(차감) = 초과 사용한 연차일수 × 통상시급 × 1일 소정근로시간(휴게 제외) — ${daysTxt}<b>−${won(Math.abs(p.unusedLeaveP))}원</b>. 퇴직일까지 발생한 연차보다 초과 사용한 일수를 임금공제 동의서에 따라 마지막 급여에서 정산한 금액입니다.</div>`;
     })()}
+    ${
+      // 수당 대신 이월한 달 — 수당 항목이 비어 있는 이유와 그 일수가 어디로 갔는지를 문서에 남긴다
+      p.leaveCarryover ? `<div class="small">· ${esc(carryoverNotice(p.leaveCarryover))}</div>` : ""
+    }
     ${p.retentionD ? `<div class="small">· 퇴직유보금: 인센티브 원천액의 8.3%(1/12)로, 확인서에 따라 별도 통장으로 송금·적립됩니다.</div>` : ""}
     ${
       p.parkingD > 0
