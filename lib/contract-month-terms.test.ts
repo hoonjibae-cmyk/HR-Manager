@@ -59,6 +59,18 @@ describe("그 달 계약 조건 (카드가 아니라 계약에서)", () => {
     expect(withContractTerms(resigned, mid as any, monthTermsDate(resigned, 2026, 10)).incThreshold).toBe(37);
   });
 
+  it("경업금지 보상금도 그 달 계약에서 온다 — 갱신 계약에서 처음 생긴 보상금은 발효 달부터", () => {
+    const withNc = [
+      { ...base, id: 1, startDate: d("2025-09-01"), incThreshold: 40 },
+      { ...base, id: 2, startDate: d("2026-12-01"), incThreshold: 40, nonCompetePay: 300_000 },
+    ];
+    const card = { ...staleCard, nonCompetePay: null as number | null };
+    const nov = withContractTerms(card, withNc as any, monthTermsDate(card, 2026, 11));
+    const dec = withContractTerms(card, withNc as any, monthTermsDate(card, 2026, 12));
+    expect(nov.nonCompetePay).toBeNull();
+    expect(dec.nonCompetePay).toBe(300_000);
+  });
+
   it("DRAFT 계약은 보지 않는다", () => {
     const draft = [...contracts, { ...base, id: 4, startDate: d("2026-09-15"), incThreshold: 10, status: "DRAFT" }];
     expect(withContractTerms(staleCard, draft as any, monthTermsDate(staleCard, 2026, 9)).incThreshold).toBe(37);

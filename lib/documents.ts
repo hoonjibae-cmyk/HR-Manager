@@ -6,6 +6,11 @@ import { DAY_KO, PAY_SCHEME_LABEL, parseSchedule, isContractorContract, type Sch
 import { computeWeeklyHours, inclusiveWageBreakdown, WEEKS_PER_MONTH } from "./payroll";
 import type { DocGroup, PdfOptions } from "./pdf";
 import { paySchemeOfTemplate } from "./contracts";
+import {
+  NON_COMPETE_MONTHS,
+  NON_COMPETE_RADIUS_KM,
+  NON_COMPETE_RETURN_DAYS,
+} from "./non-compete";
 
 /**
  * 부서가 정하는 서류 정책 — 어떤 서류를 발급할지.
@@ -83,6 +88,11 @@ export interface DocContract {
   fixedOtHours?: number | null;
   /** 포괄임금 — 약정(고정) 야간근로시간(월) */
   fixedNightHours?: number | null;
+  /**
+   * 경업금지 보상금(월) — 값이 있으면 제4조에 따로 적고 「경업금지 및 경업금지 보상금」 조항이
+   * 들어간다(월급제·인센티브 근로계약서만). 없으면 계약서는 예전 그대로다.
+   */
+  nonCompetePay?: number | null;
 }
 
 function esc(s: any): string {
@@ -348,6 +358,10 @@ export function contractHtml(args: {
     scheduleTable(sched) +
     art3Post.map((t, i) => `<p class="sub">${CIRC[art3Pre.length + i]} ${t}</p>`).join("\n    ");
 
+  // 경업금지 보상금 — 월급제·인센티브 **근로**계약만(시급제는 떼어 낼 월 총액이 없고, 위탁은 서식이 따로다).
+  // 값이 있을 때만 제4조에 따로 적고 제8조(경업금지 및 경업금지 보상금)를 넣는다 — 없으면 계약서는 예전 그대로다.
+  let nonCompetePaid = 0;
+
   // 제4조 — 임금
   let wageClause = "";
   if (isHourly) {
@@ -376,7 +390,10 @@ export function contractHtml(args: {
       baseHours,
       otHours: ct.fixedOtHours,
       nightHours: ct.fixedNightHours,
+      // 급여 엔진과 같은 자리에서 뗀다 — 계약서 기본급과 명세서 기본급이 원 단위까지 같아야 한다
+      nonCompetePay: ct.isContractor ? 0 : ct.nonCompetePay,
     });
+    nonCompetePaid = iw.nonCompetePay;
 
     // 임금 항목 표 — 약정 시간외·야간이 있으면 시간과 함께 별도 행으로 표기한다.
     const rows: Array<[string, number]> = [
@@ -405,6 +422,14 @@ export function contractHtml(args: {
           `</tr>`
       );
     }
+    // 경업금지 보상금은 임금 항목과 섞지 않고 **선을 그어 따로** 적는다 — 옆 칸에 월 지급 총액을 둬
+    // 위의 임금 항목 + 보상금 = 총액이 표만 보고 맞아떨어지게 한다.
+    if (nonCompetePaid > 0)
+      cells.push(
+        `<tr class="nc-row"><th>경업금지 보상금 <span class="muted">(제8조)</span></th><td><b>${wonUnit(
+          nonCompetePaid
+        )}</b></td><th>월 지급 총액</th><td>${wonUnit(totalWage)}</td></tr>`
+      );
 
     // 포괄임금 합의 조항 — 약정시간이 있을 때만.
     const fixedParts = [
@@ -444,14 +469,40 @@ export function contractHtml(args: {
         ? `<p class="footnote">※ 식대·차량유지비는 위 기준급여에 포함된 금액이며, 소득세법상 비과세 항목으로 구분하여 지급한다.</p>`
         : "";
 
+    // ① — 보상금이 있으면 **기준급여(총액)는 그대로** 두고 그 안의 보상금을 임금 항목과 구분한다고 적는다.
+    // 통상시급(②)은 기준급여로 계산하므로 기준급여를 '총액 − 보상금' 으로 바꿔 적으면 두 숫자가 어긋난다.
+    const head1 =
+      nonCompetePaid > 0
+        ? `① "을"의 급여 산정 및 지급은 <b>${wonUnit(totalWage)}</b>을 기준급여로 하여 아래와 같은 항목으로 포괄하여 지급하며, 이 중 <b>경업금지 보상금 ${wonUnit(
+            nonCompetePaid
+          )}</b>은 제8조에 따른 경업금지 의무의 대가로서 임금 항목과 구분하여 지급한다.`
+        : `① "을"의 급여 산정 및 지급은 <b>${wonUnit(totalWage)}</b>을 기준급여로 하여 아래와 같은 임금 항목으로 포괄하여 지급한다.`;
     wageClause = `<div class="clause"><h3>제 4조 (임금)</h3>
-    <p class="sub">① "을"의 급여 산정 및 지급은 <b>${wonUnit(totalWage)}</b>을 기준급여로 하여 아래와 같은 임금 항목으로 포괄하여 지급한다.</p>
+    <p class="sub">${head1}</p>
     <table class="kv">${cells.join("\n    ")}</table>
     ${nonTaxNote}
     ${items
       .map((t, i) => `<p class="sub">${CIRC[i + 1]} ${t}</p>`)
       .join("\n    ")}</div>`;
   }
+
+  // 제8조 — 경업금지 및 경업금지 보상금 (보상금이 있을 때만. 그 뒤 기타사항이 제9조로 밀린다)
+  //  · 범위(퇴직 후 6개월 · 반경 2km · 원생/학부모/강사 유인 금지)는 보안서약서 제3항과 같은 값이다.
+  //  · 반환(③)은 '이행하지 않은 의무의 대가를 돌려받는 것' 으로 적는다 — 위약금·손해배상액의
+  //    예정으로 읽히면 근로기준법 §20(위약 예정의 금지)에 걸린다. 실손해 배상·금지 청구는 별도로 남긴다(④).
+  const nonCompeteClause =
+    nonCompetePaid > 0
+      ? `<div class="clause"><h3>제 8조 (경업금지 및 경업금지 보상금)</h3>
+    <p class="sub">① "을"은 재직 중은 물론 근로계약 종료일로부터 <b>${NON_COMPETE_MONTHS}개월간</b> "갑"의 사업장으로부터 반경 <b>${NON_COMPETE_RADIUS_KM}km</b> 이내에서 "갑"과 동일한 직종(학원·교습소 등 교습업)에 취업하거나 이를 경영(개설·운영)하여서는 아니 되며, 같은 기간 동안 장소와 관계없이 "갑"의 원생·학부모 또는 강사를 유인하여 본인 또는 제3자의 이익을 취득하여서는 아니 된다.</p>
+    <p class="sub">② "갑"은 제①항의 의무에 대한 대가로 "을"에게 매월 <b>경업금지 보상금 ${wonUnit(
+      nonCompetePaid
+    )}</b>을 제4조의 임금 항목과 구분하여 임금 지급일에 함께 지급한다. 근무 기간이 1개월에 미치지 못하는 달은 일할 계산한다.</p>
+    <p class="sub">③ "을"이 제①항을 위반한 경우 "을"은 그때까지 지급받은 경업금지 보상금 <b>전액</b>을 "갑"의 서면 청구일로부터 ${NON_COMPETE_RETURN_DAYS}일 이내에 "갑"에게 반환하여야 한다.</p>
+    <p class="sub">④ 제③항의 반환은 이행되지 않은 의무에 대하여 지급된 대가를 돌려받는 것으로서 위약금이나 손해배상액의 예정이 아니며, "갑"은 이와 별도로 "을"의 위반으로 발생한 손해의 배상 청구, 위반행위의 금지 청구(가처분 포함) 등 관계 법령에 따른 민·형사상 법적 조치를 취할 수 있다.</p>
+    <div class="avoid"><p class="sub">⑤ "을"은 본 조의 경업금지 기간·지역·범위와 보상금의 금액 및 반환 의무에 관하여 충분히 설명을 듣고 이해하였으며, 이에 동의한다.</p>
+    ${inlineSign("동 의 자")}</div></div>`
+      : "";
+  const etcNo = nonCompetePaid > 0 ? 9 : 8;
 
   // 제5조 — 휴일 (시급제는 주휴 요건을 '실근로 15시간 초과' 기준으로 표기)
   const holidayNo1 = isHourly
@@ -494,8 +545,8 @@ export function contractHtml(args: {
     <p class="sub">${CIRC[art7Head.length]} "을"은 본인이 담당하는 반의 해당 학기 수업이 종료될 때까지 근무를 지속하여야 하며, "갑"이 서면으로 인정하는 불가피한 사유가 없는 한 해당 학기 종료 이전에 사직할 수 없다.</p>
     <div class="avoid"><p class="sub">${CIRC[art7Head.length + 1]} "을"이 퇴직하는 경우 퇴직 월 임금 및 발생 퇴직금은 익월 임금지급일에 일괄 지급하기로 한다.</p>
     ${inlineSign("동 의 자")}</div></div>
-
-  <div class="clause"><h3>제 8조 (기타사항)</h3>
+${nonCompeteClause ? `\n  ${nonCompeteClause}\n` : ""}
+  <div class="clause"><h3>제 ${etcNo}조 (기타사항)</h3>
     <p class="sub">① "을"은 맡은 바 임무를 수행함에 있어 근면, 성실, 친절과 공정을 기하여야 한다.</p>
     <p class="sub">② "을"은 근무기간 중은 물론 근로계약종료 후에도 업무상 취득한 "갑"의 기밀을 유지하여야 한다.</p>
     <div class="avoid"><p class="sub">③ "을"은 급여액을 포함한 근로조건을 누설하지 아니하며 이를 위반할 경우 인사상 불이익을 받을 수 있음을 확인한다.</p>
@@ -1134,7 +1185,9 @@ export function pledgeSecurityHtml(args: {
     "회사 소속 원생 또는 원생이었던 자 및 이들의 학부모에게 영업활동을 하여 원생을 유인 또는 유혹하여 본인 또는 제3자의 이익을 취득하는 행위",
     "회사 소속 강사 또는 강사이었던 자들에게 영업활동을 하여 원생을 유인 또는 유혹하여 본인 또는 제3자의 이익을 취득하는 행위",
   ];
-  if (args.nonCompete) afterTerm.push("회사 반경 2km 내에서 동일직종에 취업 또는 경영하는 행위");
+  // 범위는 근로계약서 제8조(경업금지 및 경업금지 보상금)와 같은 상수 — 두 문서의 범위가 갈리면 다툼이 된다
+  if (args.nonCompete)
+    afterTerm.push(`회사 반경 ${NON_COMPETE_RADIUS_KM}km 내에서 동일직종에 취업 또는 경영하는 행위`);
 
   // 9개 조항 + 하위 항목이라 기본 조판으로는 한 장을 넘겨 서명란만 2장으로 밀린다
   return `<div class="compact">${companyHead(c)}
@@ -1154,7 +1207,7 @@ export function pledgeSecurityHtml(args: {
       "영업비밀을 제3자의 이익을 위하여 사용하는 행위",
     ])}
 
-    <p class="list-num">3. 본인은 <b>근로계약 종료 후 6개월</b> 동안 다음 각 호의 행위를 하지 아니한다.</p>
+    <p class="list-num">3. 본인은 <b>근로계약 종료 후 ${NON_COMPETE_MONTHS}개월</b> 동안 다음 각 호의 행위를 하지 아니한다.</p>
     ${sub(afterTerm)}
 
     <p class="list-num">4. 본인은 업무 수행에 따라 사용하던 서적, 메모, 각서, 매뉴얼, 노트북, 외장하드, USB, 도안, 산출내역, 각종 기록 및 문서 등에 기재된 정보(사본을 포함한다)는 회사의 독점적인 재산임에 동의하고 회사가 이를 요구할 경우에는 언제든지 이를 제출하여야 한다. 이 경우 정보가 기재된 노트북, 서류 등이 개인 소유인 경우에도 회사의 요청이 있는 경우 이를 제출한다.</p>

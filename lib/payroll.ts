@@ -63,6 +63,11 @@ export interface EmployeePayInput {
   fixedOtHours?: number | null;
   /** 포괄임금 약정 야간근로시간(월) */
   fixedNightHours?: number | null;
+  /**
+   * 경업금지 보상금(월) — 월급제·인센티브만. **월 지급 총액(baseWage) 안에서** 떼어 따로 적고
+   * 기본급이 그만큼 줄어든다(지급계는 그대로). 통상시급은 총액 기준 그대로 둔다(lib/non-compete.ts).
+   */
+  nonCompetePay?: number | null;
   // 비율제
   ratioPercent?: number | null;
   /** 위탁 최저보장액(월) — 만근 시 수수료가 이에 못 미쳐도 보장 (계약서 제5조) */
@@ -81,6 +86,8 @@ export interface WageSegment {
   positionAllow: number;
   mealAllow: number;
   carAllow: number;
+  /** 경업금지 보상금(월) — 총액 안에서 떼는 몫이라 총액과 같이 역일수로 가중한다 */
+  nonCompetePay?: number | null;
   ratioPercent?: number | null;
   ratioMinGuarantee?: number | null;
 }
@@ -90,6 +97,7 @@ export interface BlendedWage {
   positionAllow: number;
   mealAllow: number;
   carAllow: number;
+  nonCompetePay: number;
   ratioPercent: number | null;
 }
 
@@ -111,6 +119,7 @@ export function blendWageTerms(segments: WageSegment[]): BlendedWage | null {
     positionAllow: avg((s) => s.positionAllow),
     mealAllow: avg((s) => s.mealAllow),
     carAllow: avg((s) => s.carAllow),
+    nonCompetePay: avg((s) => s.nonCompetePay ?? 0),
     ratioPercent: hasRatio
       ? segs.reduce((a, s) => a + (s.ratioPercent ?? 0) * s.days, 0) / total
       : null,
@@ -169,6 +178,8 @@ export interface PayrollResult {
   positionP: number;
   mealP: number;
   carP: number;
+  /** 경업금지 보상금 — 총액에서 떼어 낸 몫(그만큼 baseP 가 줄었다). 과세 */
+  nonCompeteP: number;
   incentiveP: number;
   bonusP: number;
   unusedLeaveP: number;
@@ -260,6 +271,11 @@ export interface InclusiveWageTerms {
   otHours?: number | null;
   /** 약정(고정) 야간근로시간(월) */
   nightHours?: number | null;
+  /**
+   * 경업금지 보상금(월) — 총액 **안에서** 떼어 따로 적는다(근로계약서 제8조).
+   * 통상시급(분자·분모)에는 손대지 않는다 — 총액 기준 그대로라 연장·야간·연차수당이 줄지 않는다.
+   */
+  nonCompetePay?: number | null;
   /** 일할계산 비율 (월중 입·퇴사). 기본 1 */
   prorate?: number;
 }
@@ -275,13 +291,20 @@ export interface InclusiveWageBreakdown {
   overtimePay: number;
   /** 약정(고정) 야간근로수당 */
   nightPay: number;
-  /** 기본급(과세) — 총액에서 비과세·약정수당을 뺀 잔액 */
+  /** 기본급(과세) — 총액에서 비과세·약정수당·경업금지 보상금을 뺀 잔액 */
   basePay: number;
   nonTax: number; // 식대+차량유지비
+  /**
+   * 경업금지 보상금 지급액(일할 반영). 기본급이 음수가 되지 않게 남는 몫까지만 뗀다 —
+   * 그래서 요청한 금액보다 작을 수 있다(`nonCompeteCapped`). 입력 검사가 미리 막는다.
+   */
+  nonCompetePay: number;
+  /** 보상금이 남는 몫보다 커서 잘렸다 — 계약 조건을 고쳐야 한다 */
+  nonCompeteCapped: boolean;
   hasFixed: boolean;
   /**
    * 이 분해가 맞춰야 할 월 지급 총액 = round0(기준급여 × 일할비율).
-   * `basePay + nonTax(반올림분) + overtimePay + nightPay` 가 항상 이 값과 정확히 같다.
+   * `basePay + nonTax(반올림분) + overtimePay + nightPay + nonCompetePay` 가 항상 이 값과 정확히 같다.
    */
   target: number;
 }
@@ -292,9 +315,11 @@ export interface InclusiveWageBreakdown {
  *   통상시급 = 기준급여 ÷ (기본급 산정시간 + 1.5×약정 시간외 + 0.5×약정 야간)
  *   시간외(고정) = 통상시급 × 1.5 × 약정 시간외시간
  *   야간(고정)   = 통상시급 × 0.5 × 약정 야간시간
- *   기본급       = 기준급여 − 식대·차량유지비 − 시간외(고정) − 야간(고정)
+ *   기본급       = 기준급여 − 식대·차량유지비 − 시간외(고정) − 야간(고정) − 경업금지 보상금
  *
  * 기본급을 잔액으로 두므로 항목 합계는 언제나 기준급여와 정확히 일치한다.
+ * 경업금지 보상금은 통상시급 식에 들어가지 않는다 — 총액에서 떼는 몫일 뿐이라
+ * 통상시급은 보상금이 없을 때와 같다(연장·야간·연차수당이 줄지 않는 쪽 — 보수적).
  * 약정시간이 없으면 통상시급 = 기준급여 ÷ 기본급 산정시간 (기존 동작).
  * 계약서·급여명세서가 같은 결과를 쓰도록 두 곳에서 이 함수를 호출한다.
  */
@@ -320,7 +345,12 @@ export function inclusiveWageBreakdown(t: InclusiveWageTerms): InclusiveWageBrea
   const target = round0(t.baseWage * prorate); // 이 계약이 그 달에 지급해야 할 총액
   const nonTaxPaid =
     round0((t.mealAllow || 0) * prorate) + round0((t.carAllow || 0) * prorate);
-  const basePay = Math.max(target - nonTaxPaid - overtimePay - nightPay, 0);
+  const beforeNonCompete = Math.max(target - nonTaxPaid - overtimePay - nightPay, 0);
+  // 경업금지 보상금도 같은 자리에서 반올림해 뗀다(일할 포함). 기본급이 음수가 되면 합계가
+  // 총액을 넘으므로 남는 몫까지만 뗀다 — 그런 계약은 입력 검사(lib/non-compete.ts)가 먼저 막는다.
+  const wantedNonCompete = Math.max(round0((t.nonCompetePay || 0) * prorate), 0);
+  const nonCompetePay = Math.min(wantedNonCompete, beforeNonCompete);
+  const basePay = beforeNonCompete - nonCompetePay;
 
   return {
     hourlyWage: round0(exactHourly),
@@ -332,8 +362,10 @@ export function inclusiveWageBreakdown(t: InclusiveWageTerms): InclusiveWageBrea
     nightPay,
     basePay,
     nonTax,
+    nonCompetePay,
+    nonCompeteCapped: nonCompetePay < wantedNonCompete,
     hasFixed,
-    /** 이 분해가 맞춰야 할 월 지급 총액 (기본급 + 비과세 + 약정 시간외 + 약정 야간) */
+    /** 이 분해가 맞춰야 할 월 지급 총액 (기본급 + 비과세 + 약정 시간외 + 약정 야간 + 경업금지 보상금) */
     target,
   };
 }
@@ -509,8 +541,11 @@ export function computePayroll(
     baseHours,
     otHours: fixedOt,
     nightHours: fixedNight,
+    // 경업금지 보상금은 월급제·인센티브 근로계약에만 있다(시급제·위탁은 계약서 양식이 다르다)
+    nonCompetePay: isMonthlyScheme ? emp.nonCompetePay : 0,
     prorate,
   });
+  const nonCompeteP = isMonthlyScheme ? inclusive.nonCompetePay : 0;
 
   // --- 통상시급 ---
   let hourlyWage = 0;
@@ -616,6 +651,15 @@ export function computePayroll(
       );
     }
     if (!hasFixed) baseP = inclusive.basePay;
+    if (nonCompeteP > 0)
+      notes.push(
+        `경업금지 보상금 ${nonCompeteP.toLocaleString()}원은 월 급여 총액에 포함된 금액으로, ` +
+          `근로계약서 제8조에 따라 기본급과 구분해 지급합니다(과세).`
+      );
+    if (inclusive.nonCompeteCapped)
+      notes.push(
+        `⚠️ 경업금지 보상금이 기본급으로 남는 금액보다 커서 ${nonCompeteP.toLocaleString()}원까지만 구분했습니다 — 계약 조건을 확인하세요.`
+      );
   }
 
   // --- 인센티브 ---
@@ -708,11 +752,12 @@ export function computePayroll(
     positionP +
     mealP +
     carP +
+    nonCompeteP +
     incentiveP +
     bonusP +
     unusedLeaveP;
 
-  // 비과세 총액 (식대 + 차량유지비 + 기타)
+  // 비과세 총액 (식대 + 차량유지비 + 기타) — 경업금지 보상금은 과세(근로소득)라 여기 넣지 않는다
   const nonTax = mealP + carP + (emp.nonTaxTotal ?? 0);
   const taxableGross = Math.max(gross - nonTax, 0);
 
@@ -792,6 +837,7 @@ export function computePayroll(
     positionP,
     mealP,
     carP,
+    nonCompeteP,
     incentiveP,
     bonusP,
     unusedLeaveP,

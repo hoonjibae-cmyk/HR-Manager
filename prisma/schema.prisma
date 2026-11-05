@@ -233,6 +233,9 @@ model Employee {
   fixedOtHours    Float? // 약정 시간외근로시간(월) — 근로계약서 '시간외근로(2호)'
   fixedNightHours Float? // 약정 야간근로시간(월) — 근로계약서 '야간근로(3호)'
 
+  /// 경업금지 보상금(월) — 계약(Contract.nonCompetePay)을 비추는 거울. lib/non-compete.ts
+  nonCompetePay Int?
+
   // 비율제(RATIO) 설정
   ratioPercent      Float? // 담당 반 매출액의 % (예: 0.5 = 50%)
   ratioMinGuarantee Int? // 위탁 최저보장액(월) — 만근 시 수수료가 이 금액에 못 미쳐도 보장
@@ -302,6 +305,10 @@ model Contract {
   fixedBaseHours    Float? // 포괄임금 기본급 산정시간(월)
   fixedOtHours      Float? // 포괄임금 약정 시간외근로시간(월)
   fixedNightHours   Float? // 포괄임금 약정 야간근로시간(월)
+  /// 경업금지 보상금(월, 원) — 월급제·인센티브 계약에서 **월 지급 총액(baseWage) 안의 일부**를
+  /// 근로의 대가(임금)와 갈라 경업금지 의무의 대가로 적는다. 값이 있으면 근로계약서에
+  /// 「경업금지 및 경업금지 보상금」 조항이 들어간다. 교수부는 필수(lib/non-compete.ts).
+  nonCompetePay     Int?
 
   status  String  @default("ACTIVE") // ACTIVE | EXPIRED | TERMINATED | DRAFT
   pdfPath String?
@@ -503,6 +510,9 @@ model PayrollRecord {
   positionP      Int @default(0) // 직책수당
   mealP          Int @default(0) // 식대
   carP           Int @default(0) // 차량유지비
+  /// 경업금지 보상금 — 계약의 월 지급 총액 안에서 떼어 낸 몫(그만큼 기본급이 줄어 지급계는 그대로).
+  /// 과세 대상. lib/non-compete.ts
+  nonCompeteP    Int @default(0)
   incentiveP     Int @default(0) // 인센티브
   bonusP         Int @default(0) // 상여
   unusedLeaveP   Int @default(0) // 연차미사용수당

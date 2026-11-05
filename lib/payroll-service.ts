@@ -146,6 +146,7 @@ export async function wageSegmentsFor(
         positionAllow: c.positionAllow,
         mealAllow: c.mealAllow,
         carAllow: c.carAllow,
+        nonCompetePay: c.nonCompetePay ?? null,
         ratioPercent: c.ratioPercent,
         ratioMinGuarantee: c.ratioMinGuarantee,
       });
@@ -211,6 +212,8 @@ export function applyMidMonthBlend(
     payInput.positionAllow = s.positionAllow;
     payInput.mealAllow = s.mealAllow;
     payInput.carAllow = s.carAllow;
+    // 경업금지 보상금은 총액(baseWage) 안의 몫이라 총액과 늘 함께 옮긴다
+    payInput.nonCompetePay = s.nonCompetePay ?? null;
     if (s.ratioPercent != null) payInput.ratioPercent = s.ratioPercent;
     if (s.ratioMinGuarantee != null) payInput.ratioMinGuarantee = s.ratioMinGuarantee;
   };
@@ -222,6 +225,7 @@ export function applyMidMonthBlend(
         s.positionAllow !== segs[0].positionAllow ||
         s.mealAllow !== segs[0].mealAllow ||
         s.carAllow !== segs[0].carAllow ||
+        (s.nonCompetePay ?? 0) !== (segs[0].nonCompetePay ?? 0) ||
         (s.ratioPercent ?? null) !== (segs[0].ratioPercent ?? null)
     );
     if (!differs) return null;
@@ -232,6 +236,7 @@ export function applyMidMonthBlend(
     payInput.positionAllow = b.positionAllow;
     payInput.mealAllow = b.mealAllow;
     payInput.carAllow = b.carAllow;
+    payInput.nonCompetePay = b.nonCompetePay || null;
     if (b.ratioPercent != null) payInput.ratioPercent = b.ratioPercent;
     const segDesc = segs
       .map((s) => `${s.days}일×${s.baseWage.toLocaleString()}원`)
@@ -254,6 +259,7 @@ export function applyMidMonthBlend(
       s.positionAllow !== payInput.positionAllow ||
       s.mealAllow !== payInput.mealAllow ||
       s.carAllow !== payInput.carAllow ||
+      (s.nonCompetePay ?? 0) !== (payInput.nonCompetePay ?? 0) ||
       (s.ratioPercent != null && s.ratioPercent !== (payInput.ratioPercent ?? null));
     if (!changed) return null;
     const cardBase = payInput.baseWage;
@@ -598,6 +604,7 @@ export async function runPayrollMonth(
       positionP: r.positionP,
       mealP: r.mealP,
       carP: r.carP,
+      nonCompeteP: r.nonCompeteP,
       incentiveP: r.incentiveP,
       bonusP: r.bonusP,
       unusedLeaveP: r.unusedLeaveP,

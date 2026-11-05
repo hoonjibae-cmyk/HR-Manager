@@ -3,6 +3,12 @@ import { logActivity } from "@/lib/activity";
 import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
 import { templateKeyOf } from "@/lib/contracts";
+import { parseSchedule } from "@/lib/constants";
+import {
+  resolveNonCompetePay,
+  nonCompeteRequired,
+  NON_COMPETE_REQUIRED_MESSAGE,
+} from "@/lib/non-compete";
 
 export const dynamic = "force-dynamic";
 
@@ -67,6 +73,27 @@ export async function POST(req: Request) {
     schedule: typeof body.schedule === "string" ? body.schedule : JSON.stringify(body.schedule || []),
   };
 
+  // 초기 계약의 경업금지 보상금 — 교수부 월급제·인센티브는 필수(신규 계약 작성과 같은 규칙).
+  // 카드(data.nonCompetePay)는 초기 계약을 비추는 거울이라 계약을 만들 때만 같이 적는다.
+  const ncShape = { payScheme: data.payScheme, isContractor: data.payScheme === "RATIO" };
+  const nc = body.createContract
+    ? resolveNonCompetePay({
+        raw: body.nonCompetePay,
+        fallback: null,
+        ...ncShape,
+        terms: { ...data, schedule: parseSchedule(data.schedule) },
+      })
+    : { value: null, error: null };
+  if (nc.error) return NextResponse.json({ error: nc.error }, { status: 400 });
+  const ncRequired = !!body.createContract && nonCompeteRequired(data.department, ncShape);
+  const skipNonCompete = ncRequired && !nc.value && body.skipNonCompete === true;
+  if (ncRequired && !nc.value && !skipNonCompete)
+    return NextResponse.json(
+      { error: NON_COMPETE_REQUIRED_MESSAGE, code: "NON_COMPETE_REQUIRED" },
+      { status: 400 }
+    );
+  data.nonCompetePay = nc.value;
+
   try {
     const emp = await prisma.employee.create({ data });
     // 초기 계약 생성 (선택)
@@ -85,6 +112,7 @@ export async function POST(req: Request) {
           positionAllow: emp.positionAllow,
           mealAllow: emp.mealAllow,
           carAllow: emp.carAllow,
+          nonCompetePay: nc.value,
           incThreshold: emp.incThreshold,
           incPerStudent: emp.incPerStudent,
           incRevenuePercent: emp.incRevenuePercent,
@@ -97,8 +125,16 @@ export async function POST(req: Request) {
       action: "EMPLOYEE_CREATE",
       employeeId: emp.id,
       target: emp.name,
-      summary: `직원 ${emp.name}(${emp.empNo})을 등록했습니다.`,
-      meta: { department: emp.department, hireDate: emp.hireDate },
+      summary:
+        `직원 ${emp.name}(${emp.empNo})을 등록했습니다.` +
+        (nc.value ? ` 초기 계약 경업금지 보상금 월 ${nc.value.toLocaleString()}원.` : "") +
+        (skipNonCompete ? ` 교수부 초기 계약이지만 경업금지 조항 없이 작성했습니다(관리자 선택).` : ""),
+      meta: {
+        department: emp.department,
+        hireDate: emp.hireDate,
+        nonCompetePay: nc.value,
+        ...(skipNonCompete ? { skipNonCompete: true } : {}),
+      },
     });
     return NextResponse.json(emp, { status: 201 });
   } catch (e: any) {

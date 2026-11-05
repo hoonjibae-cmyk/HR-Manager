@@ -2,9 +2,16 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CONTRACT_STAGE_LABEL, PAY_SCHEME_LABEL, INCOME_TYPE_LABEL } from "@/lib/constants";
+import { CONTRACT_STAGE_LABEL, PAY_SCHEME_LABEL, INCOME_TYPE_LABEL, parseSchedule } from "@/lib/constants";
+import {
+  nonCompetePayApplies,
+  nonCompeteRequired,
+  nonCompetePayError,
+  NON_COMPETE_REQUIRED_MESSAGE,
+} from "@/lib/non-compete";
 import FixedHoursFields from "./FixedHoursFields";
 import ContractorField from "./ContractorField";
+import NonCompeteField from "./NonCompeteField";
 
 /** 계약 단계별 수습 기본값 — 신규(단기/파트)만 수습 포함, 갱신·정규는 제외 */
 function defaultProbation(stage: string): boolean {
@@ -27,6 +34,13 @@ interface EmpSnapshot {
   fixedBaseHours?: number | null;
   fixedOtHours?: number | null;
   fixedNightHours?: number | null;
+  /** 경업금지 보상금(월) — 카드(지금 계약)의 값. 갱신 계약에 그대로 이어 적는다 */
+  nonCompetePay?: number | null;
+  isContractor?: boolean;
+  /** 교수부면 보상금이 필수다 */
+  department?: string | null;
+  /** 근로시간표(JSON) — 보상금 미리보기의 기본급 산정시간 환산용 */
+  schedule?: string;
   position: string | null;
   duty: string | null;
 }
@@ -57,20 +71,43 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
     incCountMethod: "SNAPSHOT15",
     ratioPercent: emp.ratioPercent != null ? emp.ratioPercent * 100 : "",
     ratioMinGuarantee: emp.ratioMinGuarantee ?? "",
-    isContractor: !!(emp as any).isContractor,
+    isContractor: !!emp.isContractor,
     fixedBaseHours: emp.fixedBaseHours ?? "",
     fixedOtHours: emp.fixedOtHours ?? "",
     fixedNightHours: emp.fixedNightHours ?? "",
+    nonCompetePay: emp.nonCompetePay ?? ("" as number | ""),
+    skipNonCompete: false,
     position: emp.position ?? "",
     duty: emp.duty ?? "",
     note: "",
   });
   const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v }));
 
+  // 경업금지 보상금 — 월급제·인센티브 근로계약만. 교수부는 필수(서버도 같은 함수로 다시 막는다)
+  const ncShape = { payScheme: f.payScheme, isContractor: f.payScheme === "RATIO" || !!f.isContractor };
+  const ncApplies = nonCompetePayApplies(ncShape);
+  const ncRequired = nonCompeteRequired(emp.department, ncShape);
+  const ncTerms = {
+    baseWage: Number(f.baseWage) || 0,
+    positionAllow: Number(f.positionAllow) || 0,
+    mealAllow: Number(f.mealAllow) || 0,
+    carAllow: Number(f.carAllow) || 0,
+    fixedBaseHours: f.fixedBaseHours === "" ? null : Number(f.fixedBaseHours),
+    fixedOtHours: f.fixedOtHours === "" ? null : Number(f.fixedOtHours),
+    fixedNightHours: f.fixedNightHours === "" ? null : Number(f.fixedNightHours),
+    schedule: parseSchedule(emp.schedule ?? "[]"),
+  };
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setSaving(true);
     setErr("");
+    if (ncApplies) {
+      const ncErr = nonCompetePayError(ncTerms, f.nonCompetePay === "" ? null : f.nonCompetePay);
+      if (ncErr) return setErr(ncErr);
+      if (ncRequired && !(Number(f.nonCompetePay) > 0) && !f.skipNonCompete)
+        return setErr(NON_COMPETE_REQUIRED_MESSAGE);
+    }
+    setSaving(true);
     const res = await fetch("/api/contracts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -97,6 +134,9 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
         fixedBaseHours: f.fixedBaseHours === "" ? null : Number(f.fixedBaseHours),
         fixedOtHours: f.fixedOtHours === "" ? null : Number(f.fixedOtHours),
         fixedNightHours: f.fixedNightHours === "" ? null : Number(f.fixedNightHours),
+        // 대상이 아닌 계약(시급제·위탁)이면 보내지 않는다 — 서버도 지운다
+        nonCompetePay: ncApplies && f.nonCompetePay !== "" ? Number(f.nonCompetePay) : null,
+        skipNonCompete: ncRequired && !(Number(f.nonCompetePay) > 0) ? !!f.skipNonCompete : false,
         position: f.position,
         duty: f.duty,
         note: f.note || null,
@@ -235,6 +275,16 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
       />
       {isMonthly && !f.isContractor && f.payScheme !== "RATIO" && (
         <FixedHoursFields f={f} set={set} />
+      )}
+      {ncApplies && (
+        <NonCompeteField
+          value={f.nonCompetePay}
+          onChange={(v) => set("nonCompetePay", v)}
+          required={ncRequired}
+          terms={ncTerms}
+          skip={f.skipNonCompete}
+          onSkip={(v) => set("skipNonCompete", v)}
+        />
       )}
 
       <L label="메모 (선택)">

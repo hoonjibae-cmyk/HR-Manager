@@ -3,6 +3,12 @@ import { logActivity } from "@/lib/activity";
 import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
 import { templateKeyOf, normalizeContractTimeline, refreshEmployeeCard } from "@/lib/contracts";
+import { parseSchedule } from "@/lib/constants";
+import {
+  resolveNonCompetePay,
+  nonCompeteRequired,
+  NON_COMPETE_REQUIRED_MESSAGE,
+} from "@/lib/non-compete";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +59,39 @@ export async function POST(req: Request) {
   const numOrNull = (v: any, fallback: number | null) =>
     v === undefined ? fallback : v === null || v === "" ? null : Number(v);
 
+  // 금액 조건 — 경업금지 보상금 검사가 '떼고 남는 기본급' 을 봐야 해서 저장 전에 먼저 정한다
+  const wage = {
+    baseWage: num(body.baseWage, emp.baseWage),
+    positionAllow: num(body.positionAllow, emp.positionAllow),
+    mealAllow: num(body.mealAllow, emp.mealAllow),
+    carAllow: num(body.carAllow, emp.carAllow),
+    fixedBaseHours: numOrNull(body.fixedBaseHours, emp.fixedBaseHours),
+    fixedOtHours: numOrNull(body.fixedOtHours, emp.fixedOtHours),
+    fixedNightHours: numOrNull(body.fixedNightHours, emp.fixedNightHours),
+  };
+  // 위탁계약(프리랜서) — 주휴·연차·퇴직금·4대보험 미적용
+  const isContractor =
+    body.isContractor != null ? !!body.isContractor : !!(emp as any).isContractor;
+
+  // 경업금지 보상금 — 월급제·인센티브 근로계약만. **교수부는 새 계약마다 반드시 적는다**
+  // (근로계약서에 경업금지 조항이 들어가는 조건이다). 옛 계약을 옮겨 적는 경우처럼 조항을 넣지
+  // 않을 때는 화면에서 명시적으로 체크해야 하고(skipNonCompete), 작업 이력에 남는다.
+  const nc = resolveNonCompetePay({
+    raw: body.nonCompetePay,
+    fallback: (emp as any).nonCompetePay ?? null,
+    payScheme,
+    isContractor,
+    terms: { ...wage, schedule: parseSchedule(emp.schedule) },
+  });
+  if (nc.error) return NextResponse.json({ error: nc.error }, { status: 400 });
+  const ncRequired = nonCompeteRequired(emp.department, { payScheme, isContractor });
+  const skipNonCompete = ncRequired && !nc.value && body.skipNonCompete === true;
+  if (ncRequired && !nc.value && !skipNonCompete)
+    return NextResponse.json(
+      { error: NON_COMPETE_REQUIRED_MESSAGE, code: "NON_COMPETE_REQUIRED" },
+      { status: 400 }
+    );
+
   try {
     // 1) 새 계약
     const contract = await prisma.contract.create({
@@ -65,10 +104,11 @@ export async function POST(req: Request) {
         endDate,
         isProbation: !!body.isProbation,
         probationMonths: num(body.probationMonths, 2),
-        baseWage: num(body.baseWage, emp.baseWage),
-        positionAllow: num(body.positionAllow, emp.positionAllow),
-        mealAllow: num(body.mealAllow, emp.mealAllow),
-        carAllow: num(body.carAllow, emp.carAllow),
+        baseWage: wage.baseWage,
+        positionAllow: wage.positionAllow,
+        mealAllow: wage.mealAllow,
+        carAllow: wage.carAllow,
+        nonCompetePay: nc.value,
         incThreshold: numOrNull(body.incThreshold, emp.incThreshold),
         incPerStudent: numOrNull(body.incPerStudent, emp.incPerStudent),
         incRevenuePercent: numOrNull(body.incRevenuePercent, emp.incRevenuePercent),
@@ -79,12 +119,10 @@ export async function POST(req: Request) {
           body.incScope === "ACADEMY" ? body.incCountMethod || "SNAPSHOT15" : null,
         ratioPercent: numOrNull(body.ratioPercent, emp.ratioPercent),
         ratioMinGuarantee: numOrNull(body.ratioMinGuarantee, emp.ratioMinGuarantee),
-        // 위탁계약(프리랜서) — 주휴·연차·퇴직금·4대보험 미적용
-        isContractor:
-          body.isContractor != null ? !!body.isContractor : !!(emp as any).isContractor,
-        fixedBaseHours: numOrNull(body.fixedBaseHours, emp.fixedBaseHours),
-        fixedOtHours: numOrNull(body.fixedOtHours, emp.fixedOtHours),
-        fixedNightHours: numOrNull(body.fixedNightHours, emp.fixedNightHours),
+        isContractor,
+        fixedBaseHours: wage.fixedBaseHours,
+        fixedOtHours: wage.fixedOtHours,
+        fixedNightHours: wage.fixedNightHours,
         status: "ACTIVE",
         note: body.note || null,
       },
@@ -111,8 +149,16 @@ export async function POST(req: Request) {
       target: emp.name,
       summary:
         `${emp.name}의 신규 계약을 작성했습니다 (${body.startDate} 시작).` +
+        (nc.value ? ` 경업금지 보상금 월 ${nc.value.toLocaleString()}원.` : "") +
+        (skipNonCompete ? ` 교수부 계약이지만 경업금지 조항 없이 작성했습니다(관리자 선택).` : "") +
         (closed.length ? ` 직전 계약 ${closed.length}건을 자동 종료했습니다.` : ""),
-      meta: { contractId: contract.id, startDate: body.startDate, endDate: body.endDate ?? null },
+      meta: {
+        contractId: contract.id,
+        startDate: body.startDate,
+        endDate: body.endDate ?? null,
+        nonCompetePay: nc.value,
+        ...(skipNonCompete ? { skipNonCompete: true } : {}),
+      },
     });
     return NextResponse.json({ ...contract, closedContractIds: closed }, { status: 201 });
   } catch (e: any) {

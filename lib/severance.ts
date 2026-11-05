@@ -181,6 +181,8 @@ export interface SeverancePayItems {
   positionP: number; // 직책수당
   mealP: number; // 식대
   carP: number; // 차량유지비
+  /** 경업금지 보상금 — 계약 월 급여총액 안에서 기본급과 구분한 몫(없던 기록은 0) */
+  nonCompeteP?: number;
   unusedLeaveP: number; // 연차미사용수당
   incentiveP: number; // 인센티브
   bonusP: number; // 상여
@@ -232,6 +234,10 @@ export function severanceBase(
   take("기본급", p.baseP);
   take("주휴수당", p.weeklyHolidayP);
   take("직책수당", p.positionP);
+  // 경업금지 보상금은 **계약 월 급여총액 안에서 기본급을 갈라 낸 몫**이다 — 빼면 산정기준 임금이
+  // 계약 월 급여보다 작아지고, 법원이 임금으로 보면 그대로 부담금 미달(§20①)이 된다. 그래서
+  // 기본급과 같이 언제나 넣는다(계약 추산 `estimateContractBase` 도 총액 안에 있어 같은 값이 된다).
+  take("경업금지 보상금", p.nonCompeteP ?? 0);
 
   if (policy.includeMealCar) {
     take("식대", p.mealP);

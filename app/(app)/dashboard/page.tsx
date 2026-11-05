@@ -85,6 +85,7 @@ export default async function Dashboard() {
     positionP: p.positionP,
     mealP: p.mealP,
     carP: p.carP,
+    nonCompeteP: p.nonCompeteP,
     incentiveP: p.incentiveP,
     bonusP: p.bonusP,
     unusedLeaveP: p.unusedLeaveP,

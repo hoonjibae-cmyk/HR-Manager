@@ -38,6 +38,7 @@ const payItemsOf = (r: any): SeverancePayItems => ({
   positionP: r.positionP ?? 0,
   mealP: r.mealP ?? 0,
   carP: r.carP ?? 0,
+  nonCompeteP: r.nonCompeteP ?? 0,
   unusedLeaveP: r.unusedLeaveP ?? 0,
   incentiveP: r.incentiveP ?? 0,
   bonusP: r.bonusP ?? 0,

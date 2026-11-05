@@ -32,6 +32,8 @@ export interface DocPayroll {
   positionP: number;
   mealP: number;
   carP: number;
+  /** 경업금지 보상금 — 월 급여 총액 안에서 기본급과 구분한 몫(근로계약서 제8조). 없으면 0 */
+  nonCompeteP?: number;
   incentiveP: number;
   bonusP: number;
   unusedLeaveP: number;
@@ -117,6 +119,7 @@ export function payslipHtml(args: {
       ["직책수당", p.positionP],
       ["식대(비과세)", p.mealP],
       ["차량유지비(비과세)", p.carP],
+      ["경업금지 보상금", p.nonCompeteP ?? 0],
       ["인센티브", p.incentiveP],
       ["상여금", p.bonusP],
       ["연차미사용수당", p.unusedLeaveP],
@@ -362,6 +365,7 @@ export function payslipHtml(args: {
             fx?.nightHours ? "약정 야간근로수당" : "",
             p.mealP ? "식대(비과세)" : "",
             p.carP ? "차량유지비(비과세)" : "",
+            p.nonCompeteP ? "경업금지 보상금" : "",
           ].filter(Boolean);
           basisLines.push(
             `<b>월중 입·퇴사 일할계산</b> — 재직 ${period} (${activeDays}일/${daysInMonth}일): ` +
@@ -417,7 +421,11 @@ export function payslipHtml(args: {
   </table>
   <table class="pay">
     <thead><tr><th colspan="2">지 급</th><th colspan="2">공 제</th></tr>
-    <tr><th>임금 항목</th><th>지급 금액</th><th>공제 항목</th><th>공제 금액</th></tr></thead>
+    <tr><th>${
+      // 경업금지 보상금은 경업금지 의무의 대가라 '임금 항목' 머리글 아래 두면 성격이 흐려진다 —
+      // 그 달만 '지급 항목' 으로 적는다(없는 달은 예전 명세서와 한 글자도 다르지 않게 둔다)
+      p.nonCompeteP ? "지급 항목" : "임금 항목"
+    }</th><th>지급 금액</th><th>공제 항목</th><th>공제 금액</th></tr></thead>
     <tbody>${bodyRows}
       <tr class="total"><td>지급액 계</td><td class="num">${won(p.gross)}</td><td>공제액 계</td><td class="num">${won(p.totalDeduct)}</td></tr>
       <tr class="total"><td colspan="3" style="text-align:right">실수령액</td><td class="num">${won(p.net)}</td></tr>
@@ -458,6 +466,11 @@ export function payslipHtml(args: {
     ${
       // 수당 대신 이월한 달 — 수당 항목이 비어 있는 이유와 그 일수가 어디로 갔는지를 문서에 남긴다
       p.leaveCarryover ? `<div class="small">· ${esc(carryoverNotice(p.leaveCarryover))}</div>` : ""
+    }
+    ${
+      p.nonCompeteP
+        ? `<div class="small">· 경업금지 보상금: 근로계약서 제8조의 경업금지 의무에 대한 대가로, 월 급여 총액 중 기본급과 구분해 지급하는 금액입니다(과세). 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 조).</div>`
+        : ""
     }
     ${p.retentionD ? `<div class="small">· 퇴직유보금: 인센티브 원천액의 8.3%(1/12)로, 확인서에 따라 별도 통장으로 송금·적립됩니다.</div>` : ""}
     ${

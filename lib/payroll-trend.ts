@@ -21,6 +21,8 @@ export interface TrendRecord {
   positionP: number;
   mealP: number;
   carP: number;
+  /** 경업금지 보상금 — 계약 월 급여 안의 몫(없던 기록은 0) */
+  nonCompeteP?: number;
   incentiveP: number;
   bonusP: number;
   unusedLeaveP: number;
@@ -64,12 +66,19 @@ export const NO_DEPARTMENT = "__none";
  * **계약 기본급** — 계약서에 적힌 월 급여로 매달 같게 나가는 몫.
  *
  * 기본급에 더해 **포괄임금 약정 시간외·야간**(계약서 제4조에 이미 들어 있는 고정분)과
- * 직책수당·식대·차량유지비·주휴수당(시급제)을 함께 싣는다. 그 달 새로 생긴 오버타임은
- * 여기가 아니라 `overtimeOf` 로 빠진다 — 판정은 세무 시트·퇴직급여와 **같은 함수**를 쓴다.
+ * 직책수당·식대·차량유지비·주휴수당(시급제)·**경업금지 보상금**(월 급여총액 안에서 갈라 낸 몫)을
+ * 함께 싣는다. 그 달 새로 생긴 오버타임은 여기가 아니라 `overtimeOf` 로 빠진다 —
+ * 판정은 세무 시트·퇴직급여와 **같은 함수**를 쓴다.
  */
 export function contractBaseOf(r: TrendRecord): number {
   return (
-    r.baseP + r.weeklyHolidayP + r.positionP + r.mealP + r.carP + fixedOvertimeOf(r)
+    r.baseP +
+    r.weeklyHolidayP +
+    r.positionP +
+    r.mealP +
+    r.carP +
+    (r.nonCompeteP ?? 0) +
+    fixedOvertimeOf(r)
   );
 }
 
@@ -86,6 +95,7 @@ export function grossOf(r: TrendRecord): number {
     r.positionP +
     r.mealP +
     r.carP +
+    (r.nonCompeteP ?? 0) +
     r.extraP +
     r.overtimeP +
     r.nightP +

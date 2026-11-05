@@ -7,7 +7,10 @@ import {
   refreshEmployeeCard,
   contractIssues,
   normalizeContractTimeline,
+  paySchemeOfTemplate,
 } from "@/lib/contracts";
+import { parseSchedule } from "@/lib/constants";
+import { resolveNonCompetePay } from "@/lib/non-compete";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +71,26 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   const end = data.endDate !== undefined ? data.endDate : cur.endDate;
   if (end && end < start)
     return NextResponse.json({ error: "계약 종료일이 시작일보다 빠릅니다." }, { status: 400 });
+
+  // 경업금지 보상금 — 고친 뒤의 조건으로 **다시 검사**한다. 금액을 안 건드렸어도 월 급여를 줄이면
+  // 보상금을 떼고 남는 기본급이 없어질 수 있고, 시급제·위탁으로 바꾸면 남은 보상금을 지운다.
+  // 교수부 필수 여부는 여기서 묻지 않는다 — 이미 서명한 옛 계약의 오타 정정까지 막게 된다.
+  {
+    const merged = { ...cur, ...data };
+    const owner = await prisma.employee.findUnique({
+      where: { id: cur.employeeId },
+      select: { schedule: true, payScheme: true },
+    });
+    const nc = resolveNonCompetePay({
+      raw: "nonCompetePay" in body ? body.nonCompetePay : undefined,
+      fallback: cur.nonCompetePay,
+      payScheme: paySchemeOfTemplate(merged.templateKey) ?? owner?.payScheme ?? "MONTHLY",
+      isContractor: !!merged.isContractor,
+      terms: { ...merged, schedule: parseSchedule(owner?.schedule ?? "[]") },
+    });
+    if (nc.error) return NextResponse.json({ error: nc.error }, { status: 400 });
+    if (nc.value !== (cur.nonCompetePay ?? null)) data.nonCompetePay = nc.value;
+  }
 
   try {
     await prisma.contract.update({ where: { id }, data });

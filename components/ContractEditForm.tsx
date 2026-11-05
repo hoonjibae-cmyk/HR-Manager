@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CONTRACT_STAGE_LABEL, PAY_SCHEME_LABEL, INCOME_TYPE_LABEL } from "@/lib/constants";
+import { CONTRACT_STAGE_LABEL, PAY_SCHEME_LABEL, INCOME_TYPE_LABEL, parseSchedule } from "@/lib/constants";
+import { nonCompetePayApplies, nonCompeteRequired, nonCompetePayError } from "@/lib/non-compete";
 import FixedHoursFields from "./FixedHoursFields";
 import ContractorField from "./ContractorField";
+import NonCompeteField from "./NonCompeteField";
 
 export interface ContractSnapshot {
   id: number;
@@ -31,6 +33,8 @@ export interface ContractSnapshot {
   fixedBaseHours: number | null;
   fixedOtHours: number | null;
   fixedNightHours: number | null;
+  /** 경업금지 보상금(월) — 있으면 근로계약서에 제8조가 들어간다 */
+  nonCompetePay: number | null;
   note: string;
 }
 
@@ -39,11 +43,17 @@ export default function ContractEditForm({
   contract,
   deletable,
   fileCount = 0,
+  department,
+  schedule,
 }: {
   contract: ContractSnapshot;
   deletable: boolean;
   /** 이 계약에 붙은 서명본 스캔 수 — 삭제 경고에 적는다 */
   fileCount?: number;
+  /** 교수부면 경업금지 보상금 안내를 띄운다(수정에서는 막지 않는다 — 옛 계약 오타 정정) */
+  department?: string | null;
+  /** 근로시간표(JSON) — 보상금 미리보기의 기본급 산정시간 환산용 */
+  schedule?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -61,13 +71,31 @@ export default function ContractEditForm({
     fixedBaseHours: contract.fixedBaseHours ?? "",
     fixedOtHours: contract.fixedOtHours ?? "",
     fixedNightHours: contract.fixedNightHours ?? "",
+    nonCompetePay: contract.nonCompetePay ?? "",
   });
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
 
+  const ncShape = { payScheme: f.payScheme, isContractor: f.payScheme === "RATIO" || !!f.isContractor };
+  const ncApplies = nonCompetePayApplies(ncShape);
+  const ncTerms = {
+    baseWage: Number(f.baseWage) || 0,
+    positionAllow: Number(f.positionAllow) || 0,
+    mealAllow: Number(f.mealAllow) || 0,
+    carAllow: Number(f.carAllow) || 0,
+    fixedBaseHours: f.fixedBaseHours === "" ? null : Number(f.fixedBaseHours),
+    fixedOtHours: f.fixedOtHours === "" ? null : Number(f.fixedOtHours),
+    fixedNightHours: f.fixedNightHours === "" ? null : Number(f.fixedNightHours),
+    schedule: parseSchedule(schedule ?? "[]"),
+  };
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setSaving(true);
     setErr("");
+    if (ncApplies) {
+      const ncErr = nonCompetePayError(ncTerms, f.nonCompetePay === "" ? null : f.nonCompetePay);
+      if (ncErr) return setErr(ncErr);
+    }
+    setSaving(true);
     const res = await fetch(`/api/contracts/${contract.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -93,6 +121,7 @@ export default function ContractEditForm({
         fixedBaseHours: f.fixedBaseHours === "" ? null : Number(f.fixedBaseHours),
         fixedOtHours: f.fixedOtHours === "" ? null : Number(f.fixedOtHours),
         fixedNightHours: f.fixedNightHours === "" ? null : Number(f.fixedNightHours),
+        nonCompetePay: ncApplies && f.nonCompetePay !== "" ? Number(f.nonCompetePay) : null,
         note: f.note || null,
       }),
     });
@@ -227,6 +256,14 @@ export default function ContractEditForm({
       />
       {isMonthly && !f.isContractor && f.payScheme !== "RATIO" && (
         <FixedHoursFields f={f} set={set} />
+      )}
+      {ncApplies && (
+        <NonCompeteField
+          value={f.nonCompetePay}
+          onChange={(v) => set("nonCompetePay", v)}
+          required={nonCompeteRequired(department, ncShape)}
+          terms={ncTerms}
+        />
       )}
       {err && <p className="text-xs text-red-600">{err}</p>}
       <div className="flex gap-2 justify-end">

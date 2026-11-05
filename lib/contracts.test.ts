@@ -138,7 +138,15 @@ describe("mirrorFromContract — 카드에 비출 값", () => {
       fixedBaseHours: null,
       fixedOtHours: null,
       fixedNightHours: null,
+      nonCompetePay: null,
     });
+  });
+
+  it("경업금지 보상금도 계약에서 카드로 옮겨진다 — 발효일에 카드가 따라잡을 때도 같다", () => {
+    const c = ct(1, "2026-01-01", null, { nonCompetePay: 300_000 });
+    expect(mirrorFromContract(c).nonCompetePay).toBe(300_000);
+    // 값이 없는 계약은 null — 새 열이 생긴 직후의 카드(null)와 같아 크론이 헛되이 고치지 않는다
+    expect(mirrorFromContract(ct(2, "2026-01-01", null)).nonCompetePay).toBeNull();
   });
 
   it("위탁계약 체크는 계약에서 카드로 그대로 옮겨진다", () => {

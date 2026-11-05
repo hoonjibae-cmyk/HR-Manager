@@ -9,6 +9,13 @@ import {
   DAY_KO,
   type ScheduleDay,
 } from "@/lib/constants";
+import {
+  nonCompetePayApplies,
+  nonCompeteRequired,
+  nonCompetePayError,
+  NON_COMPETE_REQUIRED_MESSAGE,
+} from "@/lib/non-compete";
+import NonCompeteField from "./NonCompeteField";
 
 const DAYS: ScheduleDay["day"][] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -67,6 +74,9 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     incThreshold: initial?.incThreshold ?? "",
     incPerStudent: initial?.incPerStudent ?? "",
     ratioPercent: initial?.ratioPercent != null ? initial.ratioPercent * 100 : "",
+    // 초기 계약의 경업금지 보상금 — 등록 때만 쓴다(이후 변경은 계약 이력에서)
+    nonCompetePay: "",
+    skipNonCompete: false,
   });
   const [schedule, setSchedule] = useState<ScheduleDay[]>(
     initial?.schedule ? JSON.parse(initial.schedule) : defaultSchedule()
@@ -91,14 +101,33 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
   const setDay = (i: number, k: keyof ScheduleDay, v: any) =>
     setSchedule((s) => s.map((d, idx) => (idx === i ? { ...d, [k]: v } : d)));
 
+  // 경업금지 보상금 — 초기 계약이 월급제·인센티브면 넣을 수 있고, 교수부는 필수(서버도 다시 막는다)
+  const ncShape = { payScheme: f.payScheme, isContractor: f.payScheme === "RATIO" };
+  const ncApplies = !editing && nonCompetePayApplies(ncShape);
+  const ncRequired = !editing && nonCompeteRequired(f.department, ncShape);
+  const ncTerms = {
+    baseWage: Number(f.baseWage) || 0,
+    positionAllow: Number(f.positionAllow) || 0,
+    mealAllow: Number(f.mealAllow) || 0,
+    carAllow: Number(f.carAllow) || 0,
+    schedule,
+  };
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setSaving(true);
     setErr("");
+    if (ncApplies) {
+      const ncErr = nonCompetePayError(ncTerms, f.nonCompetePay === "" ? null : f.nonCompetePay);
+      if (ncErr) return setErr(ncErr);
+      if (ncRequired && !(Number(f.nonCompetePay) > 0) && !f.skipNonCompete)
+        return setErr(NON_COMPETE_REQUIRED_MESSAGE);
+    }
+    setSaving(true);
     // 보수조건은 계약이 정한다 — 수정 모드에서는 인적사항만 보낸다
     const {
       baseWage, positionAllow, mealAllow, carAllow,
       incThreshold, incPerStudent, ratioPercent, payScheme, incomeType, contractEnd,
+      nonCompetePay, skipNonCompete,
       ...personal
     } = f;
     // "" = 자동 판정(null), "1"/"0" = 강제
@@ -110,6 +139,8 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           ...f,
           leaveEligible,
           ratioPercent: f.ratioPercent !== "" ? Number(f.ratioPercent) / 100 : null,
+          nonCompetePay: ncApplies && f.nonCompetePay !== "" ? Number(f.nonCompetePay) : null,
+          skipNonCompete: ncRequired && !(Number(f.nonCompetePay) > 0) ? !!f.skipNonCompete : false,
           schedule: JSON.stringify(schedule),
           createContract: true,
         };
@@ -350,6 +381,18 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
             <Field label="위탁 비율 (%)"><input type="number" step="0.1" className="input" placeholder="50" value={f.ratioPercent} onChange={(e) => set("ratioPercent", e.target.value)} /></Field>
           )}
         </div>
+        {ncApplies && (
+          <div className="mt-4">
+            <NonCompeteField
+              value={f.nonCompetePay}
+              onChange={(v) => set("nonCompetePay", v)}
+              required={ncRequired}
+              terms={ncTerms}
+              skip={f.skipNonCompete}
+              onSkip={(v) => set("skipNonCompete", v)}
+            />
+          </div>
+        )}
       </div>
       )}
 

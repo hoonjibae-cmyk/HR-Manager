@@ -57,6 +57,28 @@ describe("applyMidMonthBlend — 월 적용 임금 조건 결정", () => {
     expect(payInput.baseWage).toBe(3_300_000); // 덮어쓰지 않음
   });
 
+  it("월중 갱신으로 경업금지 보상금이 생기면 총액이 같아도 가중한다 (16일 발효, 31일 월)", () => {
+    const payInput = { ...cardInput(3_500_000), nonCompetePay: 300_000 }; // 카드는 이미 새 계약
+    const entry: MonthContractTerms = {
+      segs: [seg(15, 3_500_000), { ...seg(16, 3_500_000), nonCompetePay: 300_000 }],
+      futureStart: null,
+    };
+    const r = applyMidMonthBlend(payInput, entry);
+    expect(r).not.toBeNull();
+    expect(payInput.baseWage).toBe(3_500_000);
+    expect(payInput.nonCompetePay).toBe(Math.round((300_000 * 16) / 31)); // 154,839
+  });
+
+  it("발효 전 달은 보상금도 기존(지배) 계약 값으로 되돌린다", () => {
+    const payInput = { ...cardInput(3_500_000), nonCompetePay: 300_000 };
+    const entry: MonthContractTerms = {
+      segs: [seg(30, 3_500_000)],
+      futureStart: new Date(Date.UTC(2026, 11, 1)),
+    };
+    applyMidMonthBlend(payInput, entry);
+    expect(payInput.nonCompetePay).toBeNull();
+  });
+
   it("발효 후 달(단일 구간 = 새 계약, 카드와 동일)이면 개입하지 않음", () => {
     const payInput = cardInput(5_000_000);
     const entry: MonthContractTerms = {

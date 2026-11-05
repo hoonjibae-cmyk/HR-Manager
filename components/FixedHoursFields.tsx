@@ -24,7 +24,9 @@ export default function FixedHoursFields({
   const hourly = divisor > 0 ? baseWage / divisor : 0;
   const otPay = Math.round(hourly * 1.5 * ot);
   const ntPay = Math.round(hourly * 0.5 * nt);
-  const basePay = Math.round(Math.max(baseWage - nonTax, 0) - otPay - ntPay);
+  // 경업금지 보상금도 총액 안에서 떼는 몫이라 기본급에서 함께 뺀다(통상시급에는 영향 없음)
+  const ncp = Math.max(Math.round(Number(f.nonCompetePay) || 0), 0);
+  const basePay = Math.round(Math.max(baseWage - nonTax, 0) - otPay - ntPay - ncp);
   const won = (n: number) => n.toLocaleString();
 
   return (
@@ -73,6 +75,7 @@ export default function FixedHoursFields({
           {ot > 0 && <> · 시간외근로(고정) <b>{won(otPay)}원</b></>}
           {nt > 0 && <> · 야간근로(고정) <b>{won(ntPay)}원</b></>}
           {nonTax > 0 && <> · 비과세 <b>{won(nonTax)}원</b></>}
+          {ncp > 0 && <> · 경업금지 보상금 <b>{won(ncp)}원</b></>}
           <br />
           합계는 기준급여 {won(baseWage)}원 그대로이며, 약정시간을 넘긴 실근로만 별도 가산됩니다.
         </p>

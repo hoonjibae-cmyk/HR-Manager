@@ -23,6 +23,7 @@ export const CONTRACT_TERM_FIELDS = [
   "fixedBaseHours",
   "fixedOtHours",
   "fixedNightHours",
+  "nonCompetePay",
 ] as const;
 
 /** 직원 카드에서 수정할 수 있는 항목 — 인적사항·소속·근태 설정만 */
@@ -122,6 +123,8 @@ export interface ContractLike {
   fixedBaseHours?: number | null;
   fixedOtHours?: number | null;
   fixedNightHours?: number | null;
+  /** 경업금지 보상금(월) — 월 지급 총액 안의 몫(lib/non-compete.ts) */
+  nonCompetePay?: number | null;
 }
 
 const DAY = 86400000;
@@ -267,6 +270,7 @@ export function mirrorFromContract(c: ContractLike): Record<string, any> {
     fixedBaseHours: c.fixedBaseHours ?? null,
     fixedOtHours: c.fixedOtHours ?? null,
     fixedNightHours: c.fixedNightHours ?? null,
+    nonCompetePay: c.nonCompetePay ?? null,
   };
 }
 
