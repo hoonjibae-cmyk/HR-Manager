@@ -13,9 +13,14 @@ import {
   nonCompetePayApplies,
   nonCompeteRequired,
   nonCompetePayError,
+  nonCompeteRatioApplies,
+  nonCompeteRatioRequired,
+  nonCompeteRatioError,
   NON_COMPETE_REQUIRED_MESSAGE,
+  NON_COMPETE_RATIO_REQUIRED_MESSAGE,
 } from "@/lib/non-compete";
 import NonCompeteField from "./NonCompeteField";
+import NonCompeteRatioField from "./NonCompeteRatioField";
 
 const DAYS: ScheduleDay["day"][] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -76,6 +81,7 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     ratioPercent: initial?.ratioPercent != null ? initial.ratioPercent * 100 : "",
     // 초기 계약의 경업금지 보상금 — 등록 때만 쓴다(이후 변경은 계약 이력에서)
     nonCompetePay: "",
+    nonCompeteRatio: "", // 위탁(완전비율제) — % 로 받는다
     skipNonCompete: false,
   });
   const [schedule, setSchedule] = useState<ScheduleDay[]>(
@@ -112,6 +118,13 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     carAllow: Number(f.carAllow) || 0,
     schedule,
   };
+  // 위탁(완전비율제) 초기 계약 — 매출에 곱하는 보상금 비율. 필수
+  const ncrApplies = !editing && nonCompeteRatioApplies({ payScheme: f.payScheme });
+  const ncrRequired = !editing && nonCompeteRatioRequired({ payScheme: f.payScheme });
+  const ratioFrac = f.ratioPercent === "" ? 0 : Number(f.ratioPercent) / 100;
+  const ncrFrac = f.nonCompeteRatio === "" ? null : Number(f.nonCompeteRatio) / 100;
+  const ncMissing =
+    (ncRequired && !(Number(f.nonCompetePay) > 0)) || (ncrRequired && !(ncrFrac && ncrFrac > 0));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -119,15 +132,19 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     if (ncApplies) {
       const ncErr = nonCompetePayError(ncTerms, f.nonCompetePay === "" ? null : f.nonCompetePay);
       if (ncErr) return setErr(ncErr);
-      if (ncRequired && !(Number(f.nonCompetePay) > 0) && !f.skipNonCompete)
-        return setErr(NON_COMPETE_REQUIRED_MESSAGE);
     }
+    if (ncrApplies) {
+      const ncrErr = nonCompeteRatioError(ncrFrac, ratioFrac);
+      if (ncrErr) return setErr(ncrErr);
+    }
+    if (ncMissing && !f.skipNonCompete)
+      return setErr(ncrRequired ? NON_COMPETE_RATIO_REQUIRED_MESSAGE : NON_COMPETE_REQUIRED_MESSAGE);
     setSaving(true);
     // 보수조건은 계약이 정한다 — 수정 모드에서는 인적사항만 보낸다
     const {
       baseWage, positionAllow, mealAllow, carAllow,
       incThreshold, incPerStudent, ratioPercent, payScheme, incomeType, contractEnd,
-      nonCompetePay, skipNonCompete,
+      nonCompetePay, nonCompeteRatio, skipNonCompete,
       ...personal
     } = f;
     // "" = 자동 판정(null), "1"/"0" = 강제
@@ -140,7 +157,8 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           leaveEligible,
           ratioPercent: f.ratioPercent !== "" ? Number(f.ratioPercent) / 100 : null,
           nonCompetePay: ncApplies && f.nonCompetePay !== "" ? Number(f.nonCompetePay) : null,
-          skipNonCompete: ncRequired && !(Number(f.nonCompetePay) > 0) ? !!f.skipNonCompete : false,
+          nonCompeteRatio: ncrApplies && ncrFrac != null ? ncrFrac : null,
+          skipNonCompete: ncMissing ? !!f.skipNonCompete : false,
           schedule: JSON.stringify(schedule),
           createContract: true,
         };
@@ -388,6 +406,18 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
               onChange={(v) => set("nonCompetePay", v)}
               required={ncRequired}
               terms={ncTerms}
+              skip={f.skipNonCompete}
+              onSkip={(v) => set("skipNonCompete", v)}
+            />
+          </div>
+        )}
+        {ncrApplies && (
+          <div className="mt-4">
+            <NonCompeteRatioField
+              value={f.nonCompeteRatio}
+              onChange={(v) => set("nonCompeteRatio", v)}
+              required={ncrRequired}
+              ratioPercent={ratioFrac}
               skip={f.skipNonCompete}
               onSkip={(v) => set("skipNonCompete", v)}
             />

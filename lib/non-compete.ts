@@ -14,6 +14,9 @@
 //
 // 범위(퇴직 후 6개월 · 반경 2km)는 보안서약서의 경업금지 항목과 **같은 값**을 쓴다 —
 // 한 사람이 서명한 두 문서의 범위가 갈리면 어느 쪽이 맞는지 다툼이 된다.
+//
+// **강의위탁계약(완전비율제)은 갈래가 다르다** — 아래 '위탁' 절. 금액이 아니라 매출에 곱하는 비율이고,
+// 수수료와 별도로 더해 준다(총액에서 떼지 않는다). 경업금지 범위는 위탁계약서 제7조 원문 그대로다.
 
 import { isContractorContract, type ScheduleDay } from "./constants";
 import { computeWeeklyHours, inclusiveWageBreakdown, WEEKS_PER_MONTH } from "./payroll";
@@ -170,6 +173,79 @@ export function resolveNonCompetePay(args: {
   if (error) return { value: null, error };
   return { value: normalizeNonCompetePay(candidate, true), error: null };
 }
+
+/* ───────────── 위탁(강의위탁계약서) — 매출 × 보상금 비율 ───────────── */
+//
+// 위탁계약은 월 지급 총액이 없고 **매출(수강료 입금액) × 비율**이 보수의 전부다. 그래서 보상금도
+// 금액이 아니라 **비율**로 정하고, 용역수수료(ratioPercent)와 같은 매출에 곱해 **수수료와 별도로**
+// 지급한다(예: 수수료 40% + 보상금 3% → 매출의 43%). 근로계약처럼 총액 안에서 떼는 구조가 아니다
+// (2026-11 결정 — 비율은 계약마다 정한다). 사업소득 3.3% 원천징수는 보상금에도 함께 걸린다.
+
+/** 보상금 비율을 둘 수 있는 계약인가 — 강의위탁계약서(완전비율제)만 */
+export function nonCompeteRatioApplies(c: { payScheme?: string | null }): boolean {
+  return c.payScheme === "RATIO";
+}
+
+/** 위탁계약은 **새 계약마다** 보상금 비율이 필수다(부서와 무관 — 강의위탁계약서 전부) */
+export function nonCompeteRatioRequired(c: { payScheme?: string | null }): boolean {
+  return nonCompeteRatioApplies(c);
+}
+
+/** 0.03 → "3%", 0.025 → "2.5%" — 계약서·명세서·화면이 같은 표기를 쓴다 */
+export function ratioPctLabel(r: number): string {
+  return `${(r * 100).toFixed(2).replace(/\.?0+$/, "")}%`;
+}
+
+/**
+ * 입력 검사 — 0% 이상 100% 미만, 그리고 **위탁 비율과 합쳐 100% 이하**(매출보다 많이 줄 수는 없다).
+ * 값은 비율(0.03)로 받는다 — 화면은 %로 받아 100 으로 나눠 보낸다(위탁 비율과 같다).
+ */
+export function nonCompeteRatioError(ratio: unknown, ratioPercent?: number | null): string | null {
+  if (ratio === "" || ratio == null) return null;
+  const r = Number(ratio);
+  if (!Number.isFinite(r) || r < 0 || r >= 1)
+    return "경업금지 보상금 비율은 0% 이상 100% 미만으로 넣어 주세요.";
+  if (r === 0) return null;
+  const fee = Number(ratioPercent) || 0;
+  if (fee + r > 1 + 1e-9)
+    return `위탁 비율(${ratioPctLabel(fee)})과 경업금지 보상금 비율(${ratioPctLabel(r)})을 합치면 매출의 100%를 넘습니다.`;
+  return null;
+}
+
+/** 저장값으로 다듬기 — 대상이 아닌 계약이면 null, 빈칸·0 도 null(보상금 없음). 0.01% 단위로 자른다 */
+export function normalizeNonCompeteRatio(v: unknown, applies: boolean): number | null {
+  if (!applies || v === "" || v == null) return null;
+  const r = Number(v);
+  if (!Number.isFinite(r) || r <= 0) return null;
+  return Math.round(r * 10000) / 10000;
+}
+
+/** 계약 저장(API) 때 보상금 비율을 정하고 검사한다 — 신규 계약·조건 수정·직원 등록이 같은 규칙 */
+export function resolveNonCompeteRatio(args: {
+  raw: unknown;
+  fallback: number | null | undefined;
+  payScheme: string;
+  ratioPercent: number | null | undefined;
+}): { value: number | null; error: string | null } {
+  const applies = nonCompeteRatioApplies({ payScheme: args.payScheme });
+  if (!applies) return { value: null, error: null };
+  const candidate = args.raw === undefined ? args.fallback : args.raw;
+  const error = nonCompeteRatioError(candidate, args.ratioPercent);
+  if (error) return { value: null, error };
+  return { value: normalizeNonCompeteRatio(candidate, true), error: null };
+}
+
+/** 화면 미리보기 — 매출 예시에 수수료·보상금·합계를 붙여 '얼마가 나가는지' 를 보여 준다 */
+export function nonCompeteRatioPreview(ratioPercent: number, ncr: number, revenue = 10_000_000) {
+  const fee = Math.round(revenue * (ratioPercent || 0));
+  const comp = Math.round(revenue * (ncr || 0));
+  return { revenue, fee, comp, total: fee + comp, totalRatio: (ratioPercent || 0) + (ncr || 0) };
+}
+
+/** 위탁계약인데 보상금 비율이 없을 때의 안내 — API 400 과 화면이 같은 문구를 쓴다 */
+export const NON_COMPETE_RATIO_REQUIRED_MESSAGE =
+  `강의위탁계약서에는 「경업금지 보상금」 비율을 적어야 합니다 — 수강료 입금액(매출) 중 보상금으로 지급할 비율(%)을 넣어 주세요. ` +
+  `(이미 서명한 옛 계약을 옮겨 적는 경우처럼 보상금을 두지 않을 때는 「이번 계약에는 경업금지 보상금을 두지 않음」을 체크하세요.)`;
 
 /** 교수부인데 보상금이 없을 때의 안내 — API 400 과 화면이 같은 문구를 쓴다 */
 export const NON_COMPETE_REQUIRED_MESSAGE =

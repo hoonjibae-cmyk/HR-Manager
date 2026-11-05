@@ -147,6 +147,7 @@ export async function wageSegmentsFor(
         mealAllow: c.mealAllow,
         carAllow: c.carAllow,
         nonCompetePay: c.nonCompetePay ?? null,
+        nonCompeteRatio: c.nonCompeteRatio ?? null,
         ratioPercent: c.ratioPercent,
         ratioMinGuarantee: c.ratioMinGuarantee,
       });
@@ -214,6 +215,8 @@ export function applyMidMonthBlend(
     payInput.carAllow = s.carAllow;
     // 경업금지 보상금은 총액(baseWage) 안의 몫이라 총액과 늘 함께 옮긴다
     payInput.nonCompetePay = s.nonCompetePay ?? null;
+    // 위탁의 보상금 비율도 그 계약의 값으로 — 없는 계약이면 지운다(옛 계약엔 보상금이 없다)
+    payInput.nonCompeteRatio = s.nonCompeteRatio ?? null;
     if (s.ratioPercent != null) payInput.ratioPercent = s.ratioPercent;
     if (s.ratioMinGuarantee != null) payInput.ratioMinGuarantee = s.ratioMinGuarantee;
   };
@@ -226,6 +229,7 @@ export function applyMidMonthBlend(
         s.mealAllow !== segs[0].mealAllow ||
         s.carAllow !== segs[0].carAllow ||
         (s.nonCompetePay ?? 0) !== (segs[0].nonCompetePay ?? 0) ||
+        (s.nonCompeteRatio ?? 0) !== (segs[0].nonCompeteRatio ?? 0) ||
         (s.ratioPercent ?? null) !== (segs[0].ratioPercent ?? null)
     );
     if (!differs) return null;
@@ -237,6 +241,7 @@ export function applyMidMonthBlend(
     payInput.mealAllow = b.mealAllow;
     payInput.carAllow = b.carAllow;
     payInput.nonCompetePay = b.nonCompetePay || null;
+    payInput.nonCompeteRatio = b.nonCompeteRatio;
     if (b.ratioPercent != null) payInput.ratioPercent = b.ratioPercent;
     const segDesc = segs
       .map((s) => `${s.days}일×${s.baseWage.toLocaleString()}원`)
@@ -260,6 +265,7 @@ export function applyMidMonthBlend(
       s.mealAllow !== payInput.mealAllow ||
       s.carAllow !== payInput.carAllow ||
       (s.nonCompetePay ?? 0) !== (payInput.nonCompetePay ?? 0) ||
+      (s.nonCompeteRatio ?? 0) !== (payInput.nonCompeteRatio ?? 0) ||
       (s.ratioPercent != null && s.ratioPercent !== (payInput.ratioPercent ?? null));
     if (!changed) return null;
     const cardBase = payInput.baseWage;
@@ -629,6 +635,11 @@ export async function runPayrollMonth(
                 otHours: payInput.fixedOtHours ?? null,
                 nightHours: payInput.fixedNightHours ?? null,
               }
+            : null,
+        // 위탁 경업금지 보상금 근거 — 명세서 각주가 '매출 × 비율 = 보상금' 을 그대로 적는다
+        nonCompete:
+          payInput.payScheme === "RATIO" && (payInput.nonCompeteRatio ?? 0) > 0 && r.nonCompeteP
+            ? { ratio: payInput.nonCompeteRatio, revenue: mInput.classRevenue ?? 0 }
             : null,
         // 시간기록표 근거 — 명세서의 체류/휴게/순 근로/연차 구분 표기용
         timesheet: mInput.timesheet ?? null,

@@ -7,7 +7,11 @@ import { parseSchedule } from "@/lib/constants";
 import {
   resolveNonCompetePay,
   nonCompeteRequired,
+  resolveNonCompeteRatio,
+  nonCompeteRatioRequired,
+  ratioPctLabel,
   NON_COMPETE_REQUIRED_MESSAGE,
+  NON_COMPETE_RATIO_REQUIRED_MESSAGE,
 } from "@/lib/non-compete";
 
 export const dynamic = "force-dynamic";
@@ -86,13 +90,29 @@ export async function POST(req: Request) {
     : { value: null, error: null };
   if (nc.error) return NextResponse.json({ error: nc.error }, { status: 400 });
   const ncRequired = !!body.createContract && nonCompeteRequired(data.department, ncShape);
-  const skipNonCompete = ncRequired && !nc.value && body.skipNonCompete === true;
-  if (ncRequired && !nc.value && !skipNonCompete)
+  // 위탁(강의위탁계약서) 초기 계약 — 매출에 곱하는 보상금 비율이 필수(신규 계약 작성과 같은 규칙)
+  const ncr = body.createContract
+    ? resolveNonCompeteRatio({
+        raw: body.nonCompeteRatio,
+        fallback: null,
+        payScheme: data.payScheme,
+        ratioPercent: data.ratioPercent,
+      })
+    : { value: null, error: null };
+  if (ncr.error) return NextResponse.json({ error: ncr.error }, { status: 400 });
+  const ncrRequired = !!body.createContract && nonCompeteRatioRequired({ payScheme: data.payScheme });
+  const missing = (ncRequired && !nc.value) || (ncrRequired && !ncr.value);
+  const skipNonCompete = missing && body.skipNonCompete === true;
+  if (missing && !skipNonCompete)
     return NextResponse.json(
-      { error: NON_COMPETE_REQUIRED_MESSAGE, code: "NON_COMPETE_REQUIRED" },
+      {
+        error: ncrRequired ? NON_COMPETE_RATIO_REQUIRED_MESSAGE : NON_COMPETE_REQUIRED_MESSAGE,
+        code: "NON_COMPETE_REQUIRED",
+      },
       { status: 400 }
     );
   data.nonCompetePay = nc.value;
+  data.nonCompeteRatio = ncr.value;
 
   try {
     const emp = await prisma.employee.create({ data });
@@ -117,6 +137,7 @@ export async function POST(req: Request) {
           incPerStudent: emp.incPerStudent,
           incRevenuePercent: emp.incRevenuePercent,
           ratioPercent: emp.ratioPercent,
+          nonCompeteRatio: ncr.value,
           status: "ACTIVE",
         },
       });
@@ -128,11 +149,17 @@ export async function POST(req: Request) {
       summary:
         `직원 ${emp.name}(${emp.empNo})을 등록했습니다.` +
         (nc.value ? ` 초기 계약 경업금지 보상금 월 ${nc.value.toLocaleString()}원.` : "") +
-        (skipNonCompete ? ` 교수부 초기 계약이지만 경업금지 조항 없이 작성했습니다(관리자 선택).` : ""),
+        (ncr.value ? ` 초기 계약 경업금지 보상금 매출의 ${ratioPctLabel(ncr.value)}.` : "") +
+        (skipNonCompete
+          ? ncrRequired
+            ? ` 위탁 초기 계약이지만 경업금지 보상금 없이 작성했습니다(관리자 선택).`
+            : ` 교수부 초기 계약이지만 경업금지 조항 없이 작성했습니다(관리자 선택).`
+          : ""),
       meta: {
         department: emp.department,
         hireDate: emp.hireDate,
         nonCompetePay: nc.value,
+        nonCompeteRatio: ncr.value,
         ...(skipNonCompete ? { skipNonCompete: true } : {}),
       },
     });

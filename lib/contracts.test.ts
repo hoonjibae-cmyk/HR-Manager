@@ -139,7 +139,13 @@ describe("mirrorFromContract — 카드에 비출 값", () => {
       fixedOtHours: null,
       fixedNightHours: null,
       nonCompetePay: null,
+      nonCompeteRatio: null,
     });
+  });
+
+  it("위탁계약의 경업금지 보상금 비율도 카드로 옮겨진다", () => {
+    const c = ct(1, "2026-01-01", null, { templateKey: "RATIO", ratioPercent: 0.4, nonCompeteRatio: 0.03 });
+    expect(mirrorFromContract(c).nonCompeteRatio).toBe(0.03);
   });
 
   it("경업금지 보상금도 계약에서 카드로 옮겨진다 — 발효일에 카드가 따라잡을 때도 같다", () => {

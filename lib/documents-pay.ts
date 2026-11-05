@@ -4,6 +4,7 @@ import { won, wonUnit, ymd, ymdKo } from "./format";
 import { INCOME_TYPE_LABEL } from "./constants";
 import { logoImg, stampImg, type DocCompany, type DocEmployee } from "./documents";
 import { carryoverNotice, type CarryoverInfo } from "./leave-payout";
+import { ratioPctLabel } from "./non-compete";
 import {
   summarizeIncentive,
   summarizeRevenueShare,
@@ -467,11 +468,20 @@ export function payslipHtml(args: {
       // 수당 대신 이월한 달 — 수당 항목이 비어 있는 이유와 그 일수가 어디로 갔는지를 문서에 남긴다
       p.leaveCarryover ? `<div class="small">· ${esc(carryoverNotice(p.leaveCarryover))}</div>` : ""
     }
-    ${
-      p.nonCompeteP
-        ? `<div class="small">· 경업금지 보상금: 근로계약서 제8조의 경업금지 의무에 대한 대가로, 월 급여 총액 중 기본급과 구분해 지급하는 금액입니다(과세). 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 조).</div>`
-        : ""
-    }
+    ${(() => {
+      if (!p.nonCompeteP) return "";
+      // 위탁(완전비율제)은 매출 × 비율로 수수료와 **별도로** 주는 돈이고 근거 조항도 다르다(강의위탁계약서
+      // 제5조·제7조). 근로계약은 월 급여 총액 안에서 기본급과 구분한 몫이다(근로계약서 제8조).
+      if (p.payScheme === "RATIO") {
+        const nc = bd?.nonCompete;
+        const formula =
+          nc && typeof nc.ratio === "number" && typeof nc.revenue === "number"
+            ? ` — 수강료 입금액 ${won(nc.revenue)}원 × ${ratioPctLabel(nc.ratio)} = <b>${won(p.nonCompeteP)}원</b>`
+            : "";
+        return `<div class="small">· 경업금지 보상금: 강의위탁계약서 제5조·제7조에 따라 경업금지 의무의 대가로 용역수수료와 별도로 지급하는 금액입니다${formula}. 수수료와 함께 사업소득세(3.3%)를 원천징수하며, 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 계약서 제7조).</div>`;
+      }
+      return `<div class="small">· 경업금지 보상금: 근로계약서 제8조의 경업금지 의무에 대한 대가로, 월 급여 총액 중 기본급과 구분해 지급하는 금액입니다(과세). 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 조).</div>`;
+    })()}
     ${p.retentionD ? `<div class="small">· 퇴직유보금: 인센티브 원천액의 8.3%(1/12)로, 확인서에 따라 별도 통장으로 송금·적립됩니다.</div>` : ""}
     ${
       p.parkingD > 0

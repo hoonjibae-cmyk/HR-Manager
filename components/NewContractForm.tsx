@@ -7,11 +7,16 @@ import {
   nonCompetePayApplies,
   nonCompeteRequired,
   nonCompetePayError,
+  nonCompeteRatioApplies,
+  nonCompeteRatioRequired,
+  nonCompeteRatioError,
   NON_COMPETE_REQUIRED_MESSAGE,
+  NON_COMPETE_RATIO_REQUIRED_MESSAGE,
 } from "@/lib/non-compete";
 import FixedHoursFields from "./FixedHoursFields";
 import ContractorField from "./ContractorField";
 import NonCompeteField from "./NonCompeteField";
+import NonCompeteRatioField from "./NonCompeteRatioField";
 
 /** 계약 단계별 수습 기본값 — 신규(단기/파트)만 수습 포함, 갱신·정규는 제외 */
 function defaultProbation(stage: string): boolean {
@@ -36,6 +41,8 @@ interface EmpSnapshot {
   fixedNightHours?: number | null;
   /** 경업금지 보상금(월) — 카드(지금 계약)의 값. 갱신 계약에 그대로 이어 적는다 */
   nonCompetePay?: number | null;
+  /** 경업금지 보상금 비율(위탁, 0.03 = 3%) — 카드(지금 계약)의 값 */
+  nonCompeteRatio?: number | null;
   isContractor?: boolean;
   /** 교수부면 보상금이 필수다 */
   department?: string | null;
@@ -76,6 +83,9 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
     fixedOtHours: emp.fixedOtHours ?? "",
     fixedNightHours: emp.fixedNightHours ?? "",
     nonCompetePay: emp.nonCompetePay ?? ("" as number | ""),
+    // 위탁 보상금 비율은 %로 다룬다(위탁 비율과 같다). 부동소수 잔차(0.07×100=7.000…1)를 털어 낸다
+    nonCompeteRatio:
+      emp.nonCompeteRatio != null ? Math.round(emp.nonCompeteRatio * 10000) / 100 : ("" as number | ""),
     skipNonCompete: false,
     position: emp.position ?? "",
     duty: emp.duty ?? "",
@@ -97,6 +107,15 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
     fixedNightHours: f.fixedNightHours === "" ? null : Number(f.fixedNightHours),
     schedule: parseSchedule(emp.schedule ?? "[]"),
   };
+  // 위탁(강의위탁계약서) — 매출에 곱하는 보상금 비율. 새 위탁계약은 필수
+  const ncrApplies = nonCompeteRatioApplies({ payScheme: f.payScheme });
+  const ncrRequired = nonCompeteRatioRequired({ payScheme: f.payScheme });
+  const ratioFrac = f.ratioPercent === "" ? 0 : Number(f.ratioPercent) / 100;
+  const ncrFrac = f.nonCompeteRatio === "" ? null : Number(f.nonCompeteRatio) / 100;
+  // 필수 항목이 비었는가 — 근로(교수부 보상금)와 위탁(보상금 비율) 중 이 계약에 해당하는 쪽
+  const ncMissing =
+    (ncApplies && ncRequired && !(Number(f.nonCompetePay) > 0)) ||
+    (ncrApplies && ncrRequired && !(ncrFrac && ncrFrac > 0));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -104,9 +123,13 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
     if (ncApplies) {
       const ncErr = nonCompetePayError(ncTerms, f.nonCompetePay === "" ? null : f.nonCompetePay);
       if (ncErr) return setErr(ncErr);
-      if (ncRequired && !(Number(f.nonCompetePay) > 0) && !f.skipNonCompete)
-        return setErr(NON_COMPETE_REQUIRED_MESSAGE);
     }
+    if (ncrApplies) {
+      const ncrErr = nonCompeteRatioError(ncrFrac, ratioFrac);
+      if (ncrErr) return setErr(ncrErr);
+    }
+    if (ncMissing && !f.skipNonCompete)
+      return setErr(ncrApplies ? NON_COMPETE_RATIO_REQUIRED_MESSAGE : NON_COMPETE_REQUIRED_MESSAGE);
     setSaving(true);
     const res = await fetch("/api/contracts", {
       method: "POST",
@@ -136,7 +159,8 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
         fixedNightHours: f.fixedNightHours === "" ? null : Number(f.fixedNightHours),
         // 대상이 아닌 계약(시급제·위탁)이면 보내지 않는다 — 서버도 지운다
         nonCompetePay: ncApplies && f.nonCompetePay !== "" ? Number(f.nonCompetePay) : null,
-        skipNonCompete: ncRequired && !(Number(f.nonCompetePay) > 0) ? !!f.skipNonCompete : false,
+        nonCompeteRatio: ncrApplies && ncrFrac != null ? ncrFrac : null,
+        skipNonCompete: ncMissing ? !!f.skipNonCompete : false,
         position: f.position,
         duty: f.duty,
         note: f.note || null,
@@ -282,6 +306,16 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
           onChange={(v) => set("nonCompetePay", v)}
           required={ncRequired}
           terms={ncTerms}
+          skip={f.skipNonCompete}
+          onSkip={(v) => set("skipNonCompete", v)}
+        />
+      )}
+      {ncrApplies && (
+        <NonCompeteRatioField
+          value={f.nonCompeteRatio}
+          onChange={(v) => set("nonCompeteRatio", v)}
+          required={ncrRequired}
+          ratioPercent={ratioFrac}
           skip={f.skipNonCompete}
           onSkip={(v) => set("skipNonCompete", v)}
         />

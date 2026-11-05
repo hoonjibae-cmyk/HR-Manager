@@ -25,7 +25,7 @@ import {
 import ContractIssueNotice from "@/components/ContractIssueNotice";
 import AttachmentBox from "@/components/AttachmentBox";
 import EmployeeDeleteButton from "@/components/EmployeeDeleteButton";
-import { nonCompeteRequired } from "@/lib/non-compete";
+import { nonCompeteRequired, nonCompeteRatioRequired, ratioPctLabel } from "@/lib/non-compete";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +78,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         ratioPercent: gov.ratioPercent,
         incomeType: gov.incomeType ?? emp.incomeType,
         nonCompetePay: gov.nonCompetePay ?? null,
+        nonCompeteRatio: gov.nonCompeteRatio ?? null,
       }
     : {
         payScheme: emp.payScheme,
@@ -91,6 +92,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         ratioPercent: emp.ratioPercent,
         incomeType: emp.incomeType,
         nonCompetePay: emp.nonCompetePay ?? null,
+        nonCompeteRatio: emp.nonCompeteRatio ?? null,
       };
   const isMonthlyScheme = terms.payScheme === "MONTHLY" || terms.payScheme === "INCENTIVE";
   const upcoming = emp.contracts
@@ -99,16 +101,13 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
   // 교수부 근로계약(월급제·인센티브)인데 경업금지 보상금이 없는 계약 — 지금 적용 중이거나 발효 예정이고
   // **서명본 스캔이 아직 없는 것만** 짚는다. 서명이 끝난 계약에 보상금을 넣어 다시 뽑으면 서명본과 다른
   // 계약서가 되므로, 그런 계약은 그대로 두고 다음 갱신 때 넣는다(막지는 않는다).
-  const ncMissing = emp.contracts.filter(
-    (c) =>
-      (gov?.id === c.id || c.startDate > now) &&
-      !c.nonCompetePay &&
-      c.files.length === 0 &&
-      nonCompeteRequired(emp.department, {
-        payScheme: paySchemeOf(c.templateKey),
-        isContractor: c.isContractor,
-      })
-  );
+  // 위탁계약(강의위탁계약서)은 보상금 비율이 없는 계약을 같은 규칙으로 짚는다(부서 무관).
+  const ncMissing = emp.contracts.filter((c) => {
+    if (!(gov?.id === c.id || c.startDate > now) || c.files.length > 0) return false;
+    const shape = { payScheme: paySchemeOf(c.templateKey), isContractor: c.isContractor };
+    if (nonCompeteRatioRequired(shape)) return !c.nonCompeteRatio;
+    return !c.nonCompetePay && nonCompeteRequired(emp.department, shape);
+  });
 
   return (
     <div>
@@ -177,6 +176,14 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
               {terms.payScheme === "RATIO" ? (
                 <>
                   <Row k="위탁비율">{((terms.ratioPercent ?? 0) * 100).toFixed(1)}%</Row>
+                  {(terms.nonCompeteRatio ?? 0) > 0 && (
+                    <Row k="경업금지 보상금">
+                      매출의 {ratioPctLabel(terms.nonCompeteRatio ?? 0)}
+                      <span className="block text-[11px] text-slate-400 mt-0.5">
+                        용역수수료와 별도 지급 (위탁계약서 제5조·제7조)
+                      </span>
+                    </Row>
+                  )}
                   {gov?.ratioMinGuarantee ? (
                     <Row k="최저보장(월)">{wonUnit(gov.ratioMinGuarantee)}</Row>
                   ) : null}
@@ -322,8 +329,8 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
             </p>
             {ncMissing.length > 0 && (
               <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 break-keep">
-                교수부 근로계약인데 <b>경업금지 보상금</b>이 없어 계약서에 경업금지 조항이 들어가지
-                않습니다 ({ncMissing.map((c) => `${ymd(c.startDate)} 시작`).join(", ")}). 아직 서명
+                <b>경업금지 보상금</b>이 정해지지 않아 계약서에 보상금 조항이 들어가지 않는 계약이
+                있습니다 ({ncMissing.map((c) => `${ymd(c.startDate)} 시작`).join(", ")}). 아직 서명
                 전이면 <b>조건 수정</b>에서 보상금을 넣고 다시 발급하세요. 이미 서명한 계약이면 그대로
                 두고 다음 갱신 계약에 넣으면 됩니다.
               </p>
@@ -347,6 +354,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                   fixedOtHours: emp.fixedOtHours,
                   fixedNightHours: emp.fixedNightHours,
                   nonCompetePay: emp.nonCompetePay,
+                  nonCompeteRatio: emp.nonCompeteRatio,
                   isContractor: emp.isContractor,
                   department: emp.department,
                   schedule: emp.schedule,
@@ -402,6 +410,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                       </span>
                     )}
                     {(c.nonCompetePay ?? 0) > 0 && ` · 경업금지 보상금 ${wonUnit(c.nonCompetePay ?? 0)}`}
+                    {(c.nonCompeteRatio ?? 0) > 0 && ` · 경업금지 보상금 매출의 ${ratioPctLabel(c.nonCompeteRatio ?? 0)}`}
                   </div>
                   <div className="mt-2 flex items-center gap-3">
                     <DocButton endpoint="/api/documents/contract" body={{ contractId: c.id }} label="계약서 발급" className="text-xs text-brand-600 font-semibold" />
@@ -430,6 +439,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                         fixedOtHours: c.fixedOtHours,
                         fixedNightHours: c.fixedNightHours,
                         nonCompetePay: c.nonCompetePay ?? null,
+                        nonCompeteRatio: c.nonCompeteRatio ?? null,
                         note: c.note ?? "",
                       }}
                       deletable={emp.contracts.length > 1}

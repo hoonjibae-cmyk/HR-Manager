@@ -7,7 +7,11 @@ import { parseSchedule } from "@/lib/constants";
 import {
   resolveNonCompetePay,
   nonCompeteRequired,
+  resolveNonCompeteRatio,
+  nonCompeteRatioRequired,
+  ratioPctLabel,
   NON_COMPETE_REQUIRED_MESSAGE,
+  NON_COMPETE_RATIO_REQUIRED_MESSAGE,
 } from "@/lib/non-compete";
 
 export const dynamic = "force-dynamic";
@@ -85,10 +89,25 @@ export async function POST(req: Request) {
   });
   if (nc.error) return NextResponse.json({ error: nc.error }, { status: 400 });
   const ncRequired = nonCompeteRequired(emp.department, { payScheme, isContractor });
-  const skipNonCompete = ncRequired && !nc.value && body.skipNonCompete === true;
-  if (ncRequired && !nc.value && !skipNonCompete)
+  // 위탁(강의위탁계약서)은 금액이 아니라 **매출에 곱하는 비율**로 정하고, 새 계약마다 필수다(부서 무관).
+  // 위탁 비율과 합쳐 매출의 100% 를 넘으면 거른다.
+  const ratioPercent = numOrNull(body.ratioPercent, emp.ratioPercent);
+  const ncr = resolveNonCompeteRatio({
+    raw: body.nonCompeteRatio,
+    fallback: (emp as any).nonCompeteRatio ?? null,
+    payScheme,
+    ratioPercent,
+  });
+  if (ncr.error) return NextResponse.json({ error: ncr.error }, { status: 400 });
+  const ncrRequired = nonCompeteRatioRequired({ payScheme });
+  const missing = (ncRequired && !nc.value) || (ncrRequired && !ncr.value);
+  const skipNonCompete = missing && body.skipNonCompete === true;
+  if (missing && !skipNonCompete)
     return NextResponse.json(
-      { error: NON_COMPETE_REQUIRED_MESSAGE, code: "NON_COMPETE_REQUIRED" },
+      {
+        error: ncrRequired ? NON_COMPETE_RATIO_REQUIRED_MESSAGE : NON_COMPETE_REQUIRED_MESSAGE,
+        code: "NON_COMPETE_REQUIRED",
+      },
       { status: 400 }
     );
 
@@ -117,8 +136,9 @@ export async function POST(req: Request) {
         incScope: body.incScope === "ACADEMY" ? "ACADEMY" : null,
         incCountMethod:
           body.incScope === "ACADEMY" ? body.incCountMethod || "SNAPSHOT15" : null,
-        ratioPercent: numOrNull(body.ratioPercent, emp.ratioPercent),
+        ratioPercent,
         ratioMinGuarantee: numOrNull(body.ratioMinGuarantee, emp.ratioMinGuarantee),
+        nonCompeteRatio: ncr.value,
         isContractor,
         fixedBaseHours: wage.fixedBaseHours,
         fixedOtHours: wage.fixedOtHours,
@@ -150,13 +170,19 @@ export async function POST(req: Request) {
       summary:
         `${emp.name}의 신규 계약을 작성했습니다 (${body.startDate} 시작).` +
         (nc.value ? ` 경업금지 보상금 월 ${nc.value.toLocaleString()}원.` : "") +
-        (skipNonCompete ? ` 교수부 계약이지만 경업금지 조항 없이 작성했습니다(관리자 선택).` : "") +
+        (ncr.value ? ` 경업금지 보상금 매출의 ${ratioPctLabel(ncr.value)}.` : "") +
+        (skipNonCompete
+          ? ncrRequired
+            ? ` 위탁계약이지만 경업금지 보상금 없이 작성했습니다(관리자 선택).`
+            : ` 교수부 계약이지만 경업금지 조항 없이 작성했습니다(관리자 선택).`
+          : "") +
         (closed.length ? ` 직전 계약 ${closed.length}건을 자동 종료했습니다.` : ""),
       meta: {
         contractId: contract.id,
         startDate: body.startDate,
         endDate: body.endDate ?? null,
         nonCompetePay: nc.value,
+        nonCompeteRatio: ncr.value,
         ...(skipNonCompete ? { skipNonCompete: true } : {}),
       },
     });

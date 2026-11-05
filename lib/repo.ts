@@ -109,6 +109,7 @@ export function empToPayInput(e: any): EmployeePayInput {
     fixedOtHours: e.fixedOtHours,
     fixedNightHours: e.fixedNightHours,
     nonCompetePay: e.nonCompetePay ?? null,
+    nonCompeteRatio: e.nonCompeteRatio ?? null,
   };
 }
 
@@ -161,6 +162,7 @@ export function contractToDoc(ct: any): DocContract {
     fixedOtHours: ct.fixedOtHours,
     fixedNightHours: ct.fixedNightHours,
     nonCompetePay: ct.nonCompetePay ?? null,
+    nonCompeteRatio: ct.nonCompeteRatio ?? null,
   };
 }
 

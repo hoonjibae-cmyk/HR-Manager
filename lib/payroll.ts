@@ -68,6 +68,11 @@ export interface EmployeePayInput {
    * 기본급이 그만큼 줄어든다(지급계는 그대로). 통상시급은 총액 기준 그대로 둔다(lib/non-compete.ts).
    */
   nonCompetePay?: number | null;
+  /**
+   * 경업금지 보상금 비율(0.03 = 3%) — **완전비율제(위탁)만**. 용역수수료와 같은 매출에 곱해
+   * 수수료와 **별도로** 더해 지급한다(사업소득 3.3% 원천징수도 함께 걸린다). lib/non-compete.ts
+   */
+  nonCompeteRatio?: number | null;
   // 비율제
   ratioPercent?: number | null;
   /** 위탁 최저보장액(월) — 만근 시 수수료가 이에 못 미쳐도 보장 (계약서 제5조) */
@@ -88,6 +93,8 @@ export interface WageSegment {
   carAllow: number;
   /** 경업금지 보상금(월) — 총액 안에서 떼는 몫이라 총액과 같이 역일수로 가중한다 */
   nonCompetePay?: number | null;
+  /** 경업금지 보상금 비율(위탁) — 위탁 비율과 같이 역일수로 가중한다 */
+  nonCompeteRatio?: number | null;
   ratioPercent?: number | null;
   ratioMinGuarantee?: number | null;
 }
@@ -98,6 +105,8 @@ export interface BlendedWage {
   mealAllow: number;
   carAllow: number;
   nonCompetePay: number;
+  /** 어느 구간에도 없으면 null (위탁 비율과 같은 규칙) */
+  nonCompeteRatio: number | null;
   ratioPercent: number | null;
 }
 
@@ -114,12 +123,16 @@ export function blendWageTerms(segments: WageSegment[]): BlendedWage | null {
   const avg = (pick: (s: WageSegment) => number) =>
     Math.round(segs.reduce((a, s) => a + pick(s) * s.days, 0) / total);
   const hasRatio = segs.some((s) => s.ratioPercent != null);
+  const hasNcRatio = segs.some((s) => s.nonCompeteRatio != null && s.nonCompeteRatio > 0);
   return {
     baseWage: avg((s) => s.baseWage),
     positionAllow: avg((s) => s.positionAllow),
     mealAllow: avg((s) => s.mealAllow),
     carAllow: avg((s) => s.carAllow),
     nonCompetePay: avg((s) => s.nonCompetePay ?? 0),
+    nonCompeteRatio: hasNcRatio
+      ? segs.reduce((a, s) => a + (s.nonCompeteRatio ?? 0) * s.days, 0) / total
+      : null,
     ratioPercent: hasRatio
       ? segs.reduce((a, s) => a + (s.ratioPercent ?? 0) * s.days, 0) / total
       : null,
@@ -545,7 +558,8 @@ export function computePayroll(
     nonCompetePay: isMonthlyScheme ? emp.nonCompetePay : 0,
     prorate,
   });
-  const nonCompeteP = isMonthlyScheme ? inclusive.nonCompetePay : 0;
+  // 경업금지 보상금 — 근로계약은 총액 안에서 뗀 몫(여기), 위탁(완전비율제)은 매출 × 비율(아래 RATIO 분기)
+  let nonCompeteP = isMonthlyScheme ? inclusive.nonCompetePay : 0;
 
   // --- 통상시급 ---
   let hourlyWage = 0;
@@ -615,6 +629,16 @@ export function computePayroll(
         baseP > fee
           ? `최저보장 적용: 산출 수수료 ${fee.toLocaleString()}원 → 보장액 ${floor.toLocaleString()}원 (만근 조건 충족 시)`
           : `최저보장 ${floor.toLocaleString()}원 — 산출 수수료가 이를 넘어 그대로 지급`
+      );
+    }
+    // 경업금지 보상금 — 같은 매출에 보상금 비율을 곱해 수수료와 **별도로** 더한다(강의위탁계약서 제5조).
+    // 최저보장은 수수료에만 걸린다 — 보상금은 언제나 매출 × 비율이다.
+    const ncr = emp.nonCompeteRatio ?? 0;
+    if (ncr > 0) {
+      nonCompeteP = round0(rev * ncr);
+      notes.push(
+        `경업금지 보상금: 매출 ${rev.toLocaleString()}원 × ${(ncr * 100).toFixed(1)}% = ${nonCompeteP.toLocaleString()}원 ` +
+          `(용역수수료와 별도 · 강의위탁계약서 제5조·제7조)`
       );
     }
   } else {

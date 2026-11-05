@@ -235,6 +235,8 @@ model Employee {
 
   /// 경업금지 보상금(월) — 계약(Contract.nonCompetePay)을 비추는 거울. lib/non-compete.ts
   nonCompetePay Int?
+  /// 경업금지 보상금 비율(위탁) — 계약(Contract.nonCompeteRatio)을 비추는 거울. lib/non-compete.ts
+  nonCompeteRatio Float?
 
   // 비율제(RATIO) 설정
   ratioPercent      Float? // 담당 반 매출액의 % (예: 0.5 = 50%)
@@ -309,6 +311,10 @@ model Contract {
   /// 근로의 대가(임금)와 갈라 경업금지 의무의 대가로 적는다. 값이 있으면 근로계약서에
   /// 「경업금지 및 경업금지 보상금」 조항이 들어간다. 교수부는 필수(lib/non-compete.ts).
   nonCompetePay     Int?
+  /// 경업금지 보상금 비율(0.03 = 3%) — **강의위탁계약(완전비율제) 전용**. 용역수수료(ratioPercent)와
+  /// 같은 매출(수강료 입금액)에 곱해 **수수료와 별도로** 지급한다(총액 안에서 떼는 근로계약과 다르다).
+  /// 값이 있으면 위탁계약서 제5조·제7조에 보상금 조항이 들어간다. lib/non-compete.ts
+  nonCompeteRatio   Float?
 
   status  String  @default("ACTIVE") // ACTIVE | EXPIRED | TERMINATED | DRAFT
   pdfPath String?
@@ -510,8 +516,8 @@ model PayrollRecord {
   positionP      Int @default(0) // 직책수당
   mealP          Int @default(0) // 식대
   carP           Int @default(0) // 차량유지비
-  /// 경업금지 보상금 — 계약의 월 지급 총액 안에서 떼어 낸 몫(그만큼 기본급이 줄어 지급계는 그대로).
-  /// 과세 대상. lib/non-compete.ts
+  /// 경업금지 보상금 — 근로계약(월급제·인센티브)은 월 지급 총액 안에서 떼어 낸 몫(그만큼 기본급이 줄어
+  /// 지급계는 그대로), 위탁계약(완전비율제)은 매출 × 보상금 비율로 수수료와 별도 지급. 과세. lib/non-compete.ts
   nonCompeteP    Int @default(0)
   incentiveP     Int @default(0) // 인센티브
   bonusP         Int @default(0) // 상여

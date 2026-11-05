@@ -79,6 +79,25 @@ describe("applyMidMonthBlend — 월 적용 임금 조건 결정", () => {
     expect(payInput.nonCompetePay).toBeNull();
   });
 
+  it("위탁 — 월중 갱신으로 보상금 비율이 생기면 비율이 같아도 가중한다 (16일 발효, 31일 월)", () => {
+    const payInput: EmployeePayInput = {
+      ...cardInput(0),
+      payScheme: "RATIO",
+      ratioPercent: 0.4,
+      nonCompeteRatio: 0.03,
+    };
+    const ratioSeg = (days: number, ncr: number | null) => ({
+      ...seg(days, 0),
+      mealAllow: 0,
+      ratioPercent: 0.4,
+      nonCompeteRatio: ncr,
+    });
+    const entry: MonthContractTerms = { segs: [ratioSeg(15, null), ratioSeg(16, 0.03)], futureStart: null };
+    expect(applyMidMonthBlend(payInput, entry)).not.toBeNull();
+    expect(payInput.ratioPercent).toBeCloseTo(0.4, 10);
+    expect(payInput.nonCompeteRatio).toBeCloseTo((0.03 * 16) / 31, 10);
+  });
+
   it("발효 후 달(단일 구간 = 새 계약, 카드와 동일)이면 개입하지 않음", () => {
     const payInput = cardInput(5_000_000);
     const entry: MonthContractTerms = {

@@ -3,10 +3,18 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CONTRACT_STAGE_LABEL, PAY_SCHEME_LABEL, INCOME_TYPE_LABEL, parseSchedule } from "@/lib/constants";
-import { nonCompetePayApplies, nonCompeteRequired, nonCompetePayError } from "@/lib/non-compete";
+import {
+  nonCompetePayApplies,
+  nonCompeteRequired,
+  nonCompetePayError,
+  nonCompeteRatioApplies,
+  nonCompeteRatioRequired,
+  nonCompeteRatioError,
+} from "@/lib/non-compete";
 import FixedHoursFields from "./FixedHoursFields";
 import ContractorField from "./ContractorField";
 import NonCompeteField from "./NonCompeteField";
+import NonCompeteRatioField from "./NonCompeteRatioField";
 
 export interface ContractSnapshot {
   id: number;
@@ -35,6 +43,8 @@ export interface ContractSnapshot {
   fixedNightHours: number | null;
   /** 경업금지 보상금(월) — 있으면 근로계약서에 제8조가 들어간다 */
   nonCompetePay: number | null;
+  /** 경업금지 보상금 비율(위탁, 0.03 = 3%) — 있으면 위탁계약서 제5조·제7조에 보상금 조항이 들어간다 */
+  nonCompeteRatio: number | null;
   note: string;
 }
 
@@ -72,8 +82,13 @@ export default function ContractEditForm({
     fixedOtHours: contract.fixedOtHours ?? "",
     fixedNightHours: contract.fixedNightHours ?? "",
     nonCompetePay: contract.nonCompetePay ?? "",
+    nonCompeteRatio:
+      contract.nonCompeteRatio != null ? Math.round(contract.nonCompeteRatio * 10000) / 100 : "",
   });
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
+  const ncrApplies = nonCompeteRatioApplies({ payScheme: f.payScheme });
+  const ratioFrac = f.ratioPercent === "" ? 0 : Number(f.ratioPercent) / 100;
+  const ncrFrac = f.nonCompeteRatio === "" ? null : Number(f.nonCompeteRatio) / 100;
 
   const ncShape = { payScheme: f.payScheme, isContractor: f.payScheme === "RATIO" || !!f.isContractor };
   const ncApplies = nonCompetePayApplies(ncShape);
@@ -94,6 +109,10 @@ export default function ContractEditForm({
     if (ncApplies) {
       const ncErr = nonCompetePayError(ncTerms, f.nonCompetePay === "" ? null : f.nonCompetePay);
       if (ncErr) return setErr(ncErr);
+    }
+    if (ncrApplies) {
+      const ncrErr = nonCompeteRatioError(ncrFrac, ratioFrac);
+      if (ncrErr) return setErr(ncrErr);
     }
     setSaving(true);
     const res = await fetch(`/api/contracts/${contract.id}`, {
@@ -122,6 +141,7 @@ export default function ContractEditForm({
         fixedOtHours: f.fixedOtHours === "" ? null : Number(f.fixedOtHours),
         fixedNightHours: f.fixedNightHours === "" ? null : Number(f.fixedNightHours),
         nonCompetePay: ncApplies && f.nonCompetePay !== "" ? Number(f.nonCompetePay) : null,
+        nonCompeteRatio: ncrApplies && ncrFrac != null ? ncrFrac : null,
         note: f.note || null,
       }),
     });
@@ -263,6 +283,14 @@ export default function ContractEditForm({
           onChange={(v) => set("nonCompetePay", v)}
           required={nonCompeteRequired(department, ncShape)}
           terms={ncTerms}
+        />
+      )}
+      {ncrApplies && (
+        <NonCompeteRatioField
+          value={f.nonCompeteRatio}
+          onChange={(v) => set("nonCompeteRatio", v)}
+          required={nonCompeteRatioRequired({ payScheme: f.payScheme })}
+          ratioPercent={ratioFrac}
         />
       )}
       {err && <p className="text-xs text-red-600">{err}</p>}

@@ -10,7 +10,7 @@ import {
   paySchemeOfTemplate,
 } from "@/lib/contracts";
 import { parseSchedule } from "@/lib/constants";
-import { resolveNonCompetePay } from "@/lib/non-compete";
+import { resolveNonCompetePay, resolveNonCompeteRatio } from "@/lib/non-compete";
 
 export const dynamic = "force-dynamic";
 
@@ -81,15 +81,25 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       where: { id: cur.employeeId },
       select: { schedule: true, payScheme: true },
     });
+    const scheme = paySchemeOfTemplate(merged.templateKey) ?? owner?.payScheme ?? "MONTHLY";
     const nc = resolveNonCompetePay({
       raw: "nonCompetePay" in body ? body.nonCompetePay : undefined,
       fallback: cur.nonCompetePay,
-      payScheme: paySchemeOfTemplate(merged.templateKey) ?? owner?.payScheme ?? "MONTHLY",
+      payScheme: scheme,
       isContractor: !!merged.isContractor,
       terms: { ...merged, schedule: parseSchedule(owner?.schedule ?? "[]") },
     });
     if (nc.error) return NextResponse.json({ error: nc.error }, { status: 400 });
     if (nc.value !== (cur.nonCompetePay ?? null)) data.nonCompetePay = nc.value;
+    // 위탁 보상금 비율 — 위탁 비율을 올려 합이 100% 를 넘으면 거르고, 위탁이 아니게 바꾸면 지운다
+    const ncr = resolveNonCompeteRatio({
+      raw: "nonCompeteRatio" in body ? body.nonCompeteRatio : undefined,
+      fallback: cur.nonCompeteRatio,
+      payScheme: scheme,
+      ratioPercent: merged.ratioPercent,
+    });
+    if (ncr.error) return NextResponse.json({ error: ncr.error }, { status: 400 });
+    if (ncr.value !== (cur.nonCompeteRatio ?? null)) data.nonCompeteRatio = ncr.value;
   }
 
   try {
