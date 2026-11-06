@@ -352,3 +352,15 @@ describe("임금공제 동의서 — 3.3% 대상자에게는 4대보험을 적�
     expect(html({ incomeType: "EMPLOYEE" })).toContain("매월 임금에서 공제");
   });
 });
+
+describe("기타사항 ⑦ — 급여명세서 이메일 교부 동의", () => {
+  // 주소를 괄호로 덧붙이던 때는 발송용 이메일이 비면 「이메일()」 로 찍혔다.
+  // 주소는 계약서가 아니라 직원 정보가 정한다(발송 주소는 payslipEmailOf — 비면 업무용 메일).
+  it("주소를 괄호로 덧붙이지 않는다 — 메일이 있든 없든 같은 문구", () => {
+    for (const email of ["", "worker@example.test", null]) {
+      const t = text(contractHtml({ employee: emp({ email }), contract: ct(), company }));
+      expect(t).toContain("급여명세서를 이메일로 교부 받는 것에 동의한다.");
+      expect(t).not.toContain("이메일(");
+    }
+  });
+});
