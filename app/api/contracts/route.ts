@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
 import { templateKeyOf, normalizeContractTimeline, refreshEmployeeCard } from "@/lib/contracts";
 import { parseSchedule } from "@/lib/constants";
+import { parseProbationMonths, PROBATION_MONTHS } from "@/lib/probation";
 import {
   resolveNonCompetePay,
   nonCompeteRequired,
@@ -99,6 +100,9 @@ export async function POST(req: Request) {
     ratioPercent,
   });
   if (ncr.error) return NextResponse.json({ error: ncr.error }, { status: 400 });
+  // 수습 개월 — 화면은 보내지 않아 현행 기본값(3개월)이 들어간다. API 를 직접 부른 값만 거른다
+  const probation = parseProbationMonths(body.probationMonths, PROBATION_MONTHS);
+  if (probation.error) return NextResponse.json({ error: probation.error }, { status: 400 });
   const ncrRequired = nonCompeteRatioRequired({ payScheme });
   const missing = (ncRequired && !nc.value) || (ncrRequired && !ncr.value);
   const skipNonCompete = missing && body.skipNonCompete === true;
@@ -122,7 +126,7 @@ export async function POST(req: Request) {
         startDate,
         endDate,
         isProbation: !!body.isProbation,
-        probationMonths: num(body.probationMonths, 2),
+        probationMonths: probation.value,
         baseWage: wage.baseWage,
         positionAllow: wage.positionAllow,
         mealAllow: wage.mealAllow,

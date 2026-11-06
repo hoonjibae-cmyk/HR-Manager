@@ -15,7 +15,8 @@ import {
   DAY_KO,
   isContractorContract,
 } from "@/lib/constants";
-import { won, wonUnit, ymd } from "@/lib/format";
+import { won, wonUnit, ymd, kstTodayYmd } from "@/lib/format";
+import { probationTimeline } from "@/lib/probation";
 import {
   governingContract,
   contractIssues,
@@ -63,6 +64,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
 
   // 보수조건은 계약이 정한다 — 카드는 '오늘 시점 지배 계약' 을 비추는 읽기 전용 뷰
   const now = new Date();
+  const todayYmd = kstTodayYmd(now); // 수습 중 판정 — 계약 날짜와 같은 YYYY-MM-DD 로 비교한다
   const gov = governingContract(emp.contracts, now);
   const issues = contractIssues(emp, emp.contracts, now);
   const terms = gov
@@ -389,7 +391,33 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                   </div>
                   <div className="text-xs text-slate-400 mt-1">
                     {ymd(c.startDate)} ~ {c.endDate ? ymd(c.endDate) : "기한 없음"}
-                    {c.isProbation && " · 수습 2개월"}
+                    {c.isProbation &&
+                      (() => {
+                        // 개월은 계약에 저장된 값 — 2026-11 이전 계약은 2개월, 이후 3개월
+                        const pt = probationTimeline(c.startDate.toISOString().slice(0, 10), c.probationMonths);
+                        const ongoing = pt && pt.endYmd >= todayYmd && c.startDate.toISOString().slice(0, 10) <= todayYmd;
+                        return (
+                          <>
+                            {/* 날짜가 '(~2027-02-' / '01)' 로 갈리지 않게 한 덩어리로 묶는다 */}
+                            <span className="whitespace-nowrap">
+                              {` · 수습 ${c.probationMonths}개월`}
+                              {pt && ` (~${pt.endYmd})`}
+                            </span>
+                            {/* 수습 중이면 본채용 거부를 알릴 마지막 날을 띄운다 — 3개월 수습은 끝나는 날
+                                근속이 3개월이라 30일 해고예고 대상이다(§26). 지난 기한은 빨갛게 */}
+                            {ongoing && pt.noticeByYmd && (
+                              <span
+                                className={`ml-1 pill ${
+                                  pt.noticeByYmd >= todayYmd ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"
+                                }`}
+                                title="본채용을 하지 않으려면 이날까지 사유를 적어 서면으로 알려야 해고예고수당(30일분 통상임금)이 생기지 않는다 (근로기준법 §26·§27)"
+                              >
+                                본채용 판단 {pt.noticeByYmd}까지
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
                     {c.note ? ` · ${c.note}` : ""}
                   </div>
                   <div className="text-xs text-slate-500 mt-1 tnum">
@@ -421,6 +449,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                         startDate: c.startDate.toISOString().slice(0, 10),
                         endDate: c.endDate ? c.endDate.toISOString().slice(0, 10) : "",
                         isProbation: c.isProbation,
+                        probationMonths: c.probationMonths,
                         isContractor: (c as any).isContractor ?? false,
                         payScheme: paySchemeOf(c.templateKey),
                         incomeType: c.incomeType ?? emp.incomeType,

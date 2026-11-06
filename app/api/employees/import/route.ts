@@ -9,6 +9,7 @@ import {
   FILL_FIELDS,
 } from "@/lib/employee-import";
 import { templateKeyOf, normalizeContractTimeline } from "@/lib/contracts";
+import { PROBATION_MONTHS } from "@/lib/probation";
 import { logActivity } from "@/lib/activity";
 
 /** 학원 표준 근로시간표 (월~금 15:00~22:00, 휴게 30분).
@@ -234,7 +235,7 @@ export async function POST(req: Request) {
         startDate: new Date(r.contractStart || r.hireDate),
         endDate: r.contractEnd ? new Date(r.contractEnd) : null,
         isProbation: false,
-        probationMonths: 2,
+        probationMonths: PROBATION_MONTHS, // 수습 조항은 안 넣지만(isProbation=false) 나중에 켤 때의 기본값
         baseWage: r.baseWage,
         positionAllow: r.positionAllow,
         mealAllow: r.mealAllow,

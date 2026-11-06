@@ -12,6 +12,7 @@ import {
 } from "./documents-pay";
 import { getCompany, empToDoc, contractToDoc } from "./repo";
 import { docPolicyFor, documentBlockReason } from "./departments";
+import { PROBATION_MONTHS } from "./probation";
 import { MAKEUP_CATEGORY_LABEL, isContractorContract } from "./constants";
 import { incentiveRosterFor, rosterToStudents } from "./payroll-service";
 import { employeesWithMonthTerms } from "./contracts";
@@ -94,7 +95,7 @@ export async function genNewHirePackage(employeeId: number, contractId?: number)
         startDate: emp.hireDate,
         endDate: null,
         isProbation: true,
-        probationMonths: 2,
+        probationMonths: PROBATION_MONTHS, // 계약이 아직 없는 신규 입사자 — 현행 기본값
         baseWage: emp.baseWage,
         positionAllow: emp.positionAllow,
         mealAllow: emp.mealAllow,

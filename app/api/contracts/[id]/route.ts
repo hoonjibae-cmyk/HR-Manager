@@ -11,6 +11,7 @@ import {
 } from "@/lib/contracts";
 import { parseSchedule } from "@/lib/constants";
 import { resolveNonCompetePay, resolveNonCompeteRatio } from "@/lib/non-compete";
+import { parseProbationMonths } from "@/lib/probation";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if ("incomeType" in body) data.incomeType = body.incomeType || null;
   if ("stage" in body) data.stage = body.stage;
   if ("isProbation" in body) data.isProbation = !!body.isProbation;
+  // 수습 개월 — 안 보내면 저장값 그대로. 옛 계약(2개월)을 현행 기본값으로 바꿔 버리면
+  // 다시 뽑는 계약서가 서명본과 달라지므로 기본값으로 메우지 않는다.
+  if ("probationMonths" in body) {
+    const pm = parseProbationMonths(body.probationMonths, cur.probationMonths);
+    if (pm.error) return NextResponse.json({ error: pm.error }, { status: 400 });
+    data.probationMonths = pm.value;
+  }
   if ("isContractor" in body) data.isContractor = !!body.isContractor;
   if ("note" in body) data.note = body.note || null;
   if ("startDate" in body && body.startDate) data.startDate = new Date(body.startDate);

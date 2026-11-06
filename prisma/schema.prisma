@@ -280,7 +280,7 @@ model Contract {
   startDate        DateTime
   endDate          DateTime? // 정규직은 null 가능
   isProbation      Boolean   @default(true)
-  probationMonths  Int       @default(2) // 수습 2개월
+  probationMonths  Int       @default(3) // 수습기간(개월) — 2026-11 부터 신규 3개월(옛 계약 2개월은 저장값 그대로). 앱 기본값은 lib/probation.ts PROBATION_MONTHS
   probationEndDate DateTime?
 
   // 계약 시점 보수 스냅샷 (직원 카드는 이 값을 비추는 거울일 뿐 — lib/contracts.ts)

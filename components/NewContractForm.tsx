@@ -17,6 +17,7 @@ import FixedHoursFields from "./FixedHoursFields";
 import ContractorField from "./ContractorField";
 import NonCompeteField from "./NonCompeteField";
 import NonCompeteRatioField from "./NonCompeteRatioField";
+import { PROBATION_MONTHS, probationTimeline } from "@/lib/probation";
 
 /** 계약 단계별 수습 기본값 — 신규(단기/파트)만 수습 포함, 갱신·정규는 제외 */
 function defaultProbation(stage: string): boolean {
@@ -92,6 +93,9 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
     note: "",
   });
   const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v }));
+
+  // 수습 종료일·본채용 거부 예고 기한 — 개월은 보내지 않아 서버도 같은 현행 기본값을 쓴다
+  const probation = f.isProbation ? probationTimeline(f.startDate, PROBATION_MONTHS) : null;
 
   // 경업금지 보상금 — 월급제·인센티브 근로계약만. 교수부는 필수(서버도 같은 함수로 다시 막는다)
   const ncShape = { payScheme: f.payScheme, isContractor: f.payScheme === "RATIO" || !!f.isContractor };
@@ -244,8 +248,31 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
 
       <label className="flex items-center gap-2">
         <input type="checkbox" className="w-4 h-4" checked={f.isProbation} onChange={(e) => set("isProbation", e.target.checked)} />
-        <span>수습기간 2개월 조항 포함 <span className="text-slate-400">(신규 계약만 — 갱신·정규 계약서에는 제외)</span></span>
+        <span>수습기간 {PROBATION_MONTHS}개월 조항 포함 <span className="text-slate-400">(신규 계약만 — 갱신·정규 계약서에는 제외)</span></span>
       </label>
+      {f.isProbation && probation && (
+        <div className="text-xs text-slate-500 -mt-1 ml-6 break-keep space-y-0.5">
+          <p>
+            수습 종료 <b className="tnum whitespace-nowrap">{probation.endYmd}</b>
+            {probation.noticeByYmd && (
+              <>
+                {" · "}본채용을 하지 않으려면{" "}
+                <b className="tnum whitespace-nowrap text-amber-700">{probation.noticeByYmd}</b> 까지 사유를 적어
+                서면 통지{" "}
+                <span className="text-slate-400">
+                  (근속 3개월부터는 수습 중이어도 30일 해고예고 대상 — 늦으면 해고예고수당. 근로기준법 §26·§27)
+                </span>
+              </>
+            )}
+          </p>
+          {f.endDate && f.endDate <= probation.endYmd && (
+            <p className="text-amber-700">
+              계약 종료일({f.endDate})이 수습 종료일보다 빠르거나 같아 수습이 계약 전체를 덮습니다 — 수습 조항이
+              필요한지 확인하세요.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         {f.payScheme !== "RATIO" && (

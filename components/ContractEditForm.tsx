@@ -15,6 +15,7 @@ import FixedHoursFields from "./FixedHoursFields";
 import ContractorField from "./ContractorField";
 import NonCompeteField from "./NonCompeteField";
 import NonCompeteRatioField from "./NonCompeteRatioField";
+import { probationMonthOptions, probationOptionLabel } from "@/lib/probation";
 
 export interface ContractSnapshot {
   id: number;
@@ -22,6 +23,8 @@ export interface ContractSnapshot {
   startDate: string;
   endDate: string;
   isProbation: boolean;
+  /** 수습 개월 — 계약에 저장된 값(2026-11 이전 계약은 2, 이후 3) */
+  probationMonths: number;
   payScheme: string;
   incomeType: string;
   baseWage: number;
@@ -123,6 +126,8 @@ export default function ContractEditForm({
         startDate: f.startDate,
         endDate: f.endDate || null,
         isProbation: f.isProbation,
+        // 고른 때만 보낸다 — 손대지 않은 옛 계약의 저장값이 범위 검사에 걸려 수정이 막히지 않게
+        ...(f.probationMonths !== contract.probationMonths ? { probationMonths: f.probationMonths } : {}),
         payScheme: f.payScheme,
         incomeType: f.incomeType,
         baseWage: f.baseWage,
@@ -194,13 +199,22 @@ export default function ContractEditForm({
           </select>
         </L>
         <L label="수습">
+          {/* 개월은 그 계약에 저장된 값을 보여 준다 — 2개월로 서명한 옛 계약을 현행(3개월)으로 바꾸면
+              다시 뽑는 계약서가 서명본과 달라진다. 서명 전 계약만 현행으로 바꾼다. */}
           <select
             className="input"
-            value={f.isProbation ? "1" : "0"}
-            onChange={(e) => set("isProbation", e.target.value === "1")}
+            value={f.isProbation ? String(f.probationMonths) : "0"}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setF((p: any) => (v === 0 ? { ...p, isProbation: false } : { ...p, isProbation: true, probationMonths: v }));
+            }}
           >
             <option value="0">해당 없음</option>
-            <option value="1">수습 2개월</option>
+            {probationMonthOptions(contract.probationMonths).map((m) => (
+              <option key={m} value={String(m)}>
+                {probationOptionLabel(m)}
+              </option>
+            ))}
           </select>
         </L>
         <L label="시작일">

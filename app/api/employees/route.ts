@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
 import { templateKeyOf } from "@/lib/contracts";
 import { parseSchedule } from "@/lib/constants";
+import { PROBATION_MONTHS } from "@/lib/probation";
 import {
   resolveNonCompetePay,
   nonCompeteRequired,
@@ -127,7 +128,7 @@ export async function POST(req: Request) {
           startDate: emp.hireDate,
           endDate: body.contractEnd ? new Date(body.contractEnd) : null,
           isProbation: body.isProbation ?? true,
-          probationMonths: 2,
+          probationMonths: PROBATION_MONTHS,
           baseWage: emp.baseWage,
           positionAllow: emp.positionAllow,
           mealAllow: emp.mealAllow,
