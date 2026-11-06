@@ -18,10 +18,17 @@ export interface NotifySettingRow {
   dailyChannel: string | null;
   dailyHour: number;
   dailyMinute: number;
+  probationEnabled: boolean;
+  probationChannel: string | null;
+  probationLeadDays: number;
+  probationHour: number;
+  probationMinute: number;
 }
 
 export interface NotifyPreview {
   contract: { count?: number; alerts?: any[] };
+  /** `workday` 가 false 면 오늘은 쉬는 날이라 예정 시각에도 안 나간다(다음 평일에 나간다) */
+  probation?: { count?: number; alerts?: any[]; workday?: boolean; channel?: string | null };
   /** `window` = 오늘 함께 챙기는 날들. 비어 있으면 오늘이 주말·공휴일이라 아무것도 안 나간다 */
   birthday: { count?: number; alerts?: any[]; window?: string[] };
   recipients: { total: number; userIds: string[]; warning: string | null };
@@ -73,7 +80,7 @@ export default function HrNotifyPanel({
   async function sendNow() {
     if (
       !confirm(
-        "지금 바로 보냅니다.\n\n계약 종료 예고는 한 계약에 한 번만 나가므로, 여기서 보낸 건은 예정 시각에 다시 나가지 않습니다."
+        "지금 바로 보냅니다.\n\n계약 종료 예고·수습 종료 알림은 한 계약에 한 번만 나가므로, 여기서 보낸 건은 예정 시각에 다시 나가지 않습니다."
       )
     )
       return;
@@ -85,8 +92,34 @@ export default function HrNotifyPanel({
     setBusy(false);
     if (!res.ok) return setErr(j.error || "보내지 못했습니다.");
     const n = (k: any) => (k?.ran ? `${k.count ?? 0}건` : k?.reason || k?.error || "건너뜀");
-    setMsg(`계약 종료 예고 ${n(j.contract)} · 생일 ${n(j.birthday)}`);
+    setMsg(`계약 종료 예고 ${n(j.contract)} · 생일 ${n(j.birthday)} · 수습 종료 ${n(j.probation)}`);
     router.refresh();
+  }
+
+  /** 수습 종료만 지금 보내기 — 채널 확인용. 슬랙 오류는 할 일로 바꿔 보여 준다(slackErrorHint) */
+  async function sendProbationNow() {
+    if (
+      !confirm(
+        "수습 종료 알림을 지금 보냅니다.\n\n한 계약에 한 번만 나가므로, 여기서 보낸 건은 예정 시각에 다시 나가지 않습니다."
+      )
+    )
+      return;
+    setBusy(true);
+    setErr("");
+    setMsg("");
+    try {
+      const res = await fetch("/api/settings/notify?which=probation", { method: "POST" });
+      const j = await res.json().catch(() => ({}) as any);
+      if (!res.ok) throw new Error(j.error || "보내지 못했습니다.");
+      if (j.hint || (j.failed > 0 && !j.sent)) setErr(`수습 종료: 보내지 못했습니다 — ${j.hint || j.error || "슬랙 오류"}`);
+      else if (j.skipped) setErr(`수습 종료: ${j.skipped}`);
+      else setMsg(`수습 종료: ${j.ran ? (j.count ? `${j.count}건 보냄` : (j.reason ?? "보낼 것 없음")) : (j.reason ?? "건너뜀")}`);
+      router.refresh();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   const timeField = (
@@ -299,6 +332,93 @@ export default function HrNotifyPanel({
               {p.birthdayLeadDays === 0 ? "오늘" : `${p.birthdayLeadDays}일 뒤`} 생일인 직원이 없습니다.
             </span>
           )}
+        </div>
+      </div>
+
+      {/* 수습 종료 — 본채용 판단. 받는 곳을 따로 둔다(지정 채널, 비면 위의 받는 곳) */}
+      <div className="border-t border-slate-100 mt-3 pt-3">
+        <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+          <input
+            type="checkbox"
+            checked={p.probationEnabled}
+            onChange={(e) => set("probationEnabled", e.target.checked)}
+          />
+          수습 종료 알림 — 본채용 판단
+        </label>
+        {/* 2열 — 3열이면 이 패널 폭에서 시각 칸(시·분 두 칸)이 잘린다 */}
+        <div className="grid sm:grid-cols-2 gap-3 mt-2">
+          <label className="text-xs">
+            <span className="text-slate-500">채널 ID</span>
+            <input
+              className="input py-1 text-sm mt-0.5"
+              placeholder="비워 두면 위의 받는 곳으로"
+              value={p.probationChannel ?? ""}
+              onChange={(e) => set("probationChannel", e.target.value)}
+            />
+          </label>
+          <label className="text-xs">
+            <span className="text-slate-500">통지 기한 며칠 전부터</span>
+            <div className="flex items-center gap-1 mt-0.5">
+              <input
+                type="number"
+                min={0}
+                max={60}
+                className="input py-1 text-sm w-20"
+                value={String(p.probationLeadDays)}
+                onChange={(e) => set("probationLeadDays", Number(e.target.value))}
+              />
+              <span className="text-slate-400">일 전</span>
+            </div>
+          </label>
+          {timeField("보낼 시각", "probationHour", "probationMinute")}
+        </div>
+        <p className="text-[11px] text-slate-400 leading-relaxed mt-2 break-keep">
+          기준일은 수습 종료일이 아니라 <b>본채용 거부 통지 기한(수습 종료 30일 전)</b>입니다 — 3개월 수습은
+          끝나는 날 근속이 3개월이라 수습 중이어도 30일 해고예고 대상이고(근로기준법 §26), 늦으면
+          30일분 통상임금(해고예고수당)이 생깁니다. 그 기한 <b>{p.probationLeadDays}일 전부터 수습 마지막 날까지</b>{" "}
+          아직 안 알린 계약을 <b>한 번만</b> 알립니다 — 기한이 지났어도 수습 중이면 「통지 기한 지남」으로 알립니다.
+          2개월 수습(2026-11 이전 계약)은 예고 예외라 수습 종료일이 기준입니다.
+          <span className="block mt-1">
+            <b>토·일·공휴일에는 보내지 않고</b> 다음 평일에 보냅니다. 위탁계약, 수습 종료 전에 퇴사하거나
+            계약이 끝나는 경우는 뺍니다(계약 종료는 위의 계약 종료 예고가 맡습니다).
+          </span>
+          {!p.probationChannel?.trim() && (
+            <span className="block text-amber-600 mt-1">
+              채널이 비어 있어 위의 받는 곳({p.channel ? `채널 ${p.channel}` : `${p.targetDepartment} 부서원 DM`})으로 갑니다.
+            </span>
+          )}
+        </p>
+        <div className="mt-2 text-xs">
+          {(pv.probation?.count ?? 0) > 0 ? (
+            <div className="rounded-lg bg-slate-50 border border-slate-200 p-2.5">
+              <b className="text-slate-700">지금 보내면 {pv.probation?.count}건</b>
+              {pv.probation?.workday === false && (
+                <span className="text-slate-400"> · 오늘은 쉬는 날이라 예정 시각에는 다음 평일에 나갑니다</span>
+              )}
+              <div className="text-[11px] text-slate-500 mt-1 space-y-0.5">
+                {(pv.probation?.alerts ?? []).slice(0, 5).map((a: any) => (
+                  <div key={a.id}>
+                    {a.name} · 수습 {a.probationMonths}개월 ~{a.probationEnd} ·{" "}
+                    {a.noticeBy ? (
+                      <span className={a.overdue ? "text-rose-600" : ""}>
+                        통지 기한 {a.noticeBy} {a.overdue ? "(지남)" : `(D-${a.dDay})`}
+                      </span>
+                    ) : (
+                      <span>수습 종료 D-{a.dDay}</span>
+                    )}
+                  </div>
+                ))}
+                {(pv.probation?.alerts ?? []).length > 5 && <div>…</div>}
+              </div>
+            </div>
+          ) : (
+            <span className="text-slate-400">지금 알릴 수습 종료가 없습니다.</span>
+          )}
+        </div>
+        <div className="mt-2">
+          <button className="btn btn-outline text-xs" disabled={busy} onClick={sendProbationNow}>
+            지금 보내기 (수습 종료)
+          </button>
         </div>
       </div>
 

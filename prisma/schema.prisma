@@ -325,6 +325,9 @@ model Contract {
   /// 예고 조건을 '오늘이 딱 N일 전인가' 가 아니라 '창 안에 들었는데 아직 안 알렸는가' 로
   /// 두었기에 필요한 자리다(lib/hr-notify.ts).
   expiryNotifiedAt DateTime?
+  /// 수습 종료(본채용 판단) 알림을 보낸 시각 — 계약 종료 예고와 같은 이유로 한 계약에 한 번만.
+  /// 시작일·수습 개월·수습 여부를 고치면 기한이 달라지므로 비운다(PATCH /api/contracts/[id]).
+  probationNotifiedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -475,6 +478,17 @@ model HrNotifySetting {
   /// 휴가·보강을 **따로 새긴다** — 한쪽 발송이 실패해도 다른 쪽이 막히지 않게
   dailyLeaveLastRunAt  DateTime?
   dailyMakeupLastRunAt DateTime?
+
+  // 수습 종료 — 본채용 판단 (lib/hr-notify.ts probationsToAnnounce)
+  // 기준일은 수습 종료일이 아니라 **본채용 거부 통지 기한**(종료 30일 전, 근로기준법 §26).
+  probationEnabled   Boolean   @default(true)
+  /// 올릴 채널 ID. **비면 위의 받는 곳(channel 또는 부서 DM)으로 간다** — 아무 데도 안 가지 않게
+  probationChannel   String?   @default("C057NN63VFT")
+  /// 통지 기한 며칠 전부터 알릴지
+  probationLeadDays  Int       @default(7)
+  probationHour      Int       @default(12)
+  probationMinute    Int       @default(0)
+  probationLastRunAt DateTime?
 
   updatedAt DateTime @updatedAt
 }

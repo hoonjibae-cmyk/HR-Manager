@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
 import { logActivity } from "@/lib/activity";
-import { getNotifySetting, previewHrNotices, runHrNotices } from "@/lib/hr-notify-service";
+import {
+  getNotifySetting,
+  previewHrNotices,
+  runHrNotices,
+  runProbationNotice,
+} from "@/lib/hr-notify-service";
 import { runDailyBriefs } from "@/lib/daily-brief-service";
 
 export const dynamic = "force-dynamic";
@@ -12,8 +17,9 @@ const NUM = [
   "contractLeadDays", "contractHour", "contractMinute",
   "birthdayLeadDays", "birthdayHour", "birthdayMinute",
   "dailyHour", "dailyMinute",
+  "probationLeadDays", "probationHour", "probationMinute",
 ] as const;
-const BOOL = ["contractEnabled", "birthdayEnabled", "dailyEnabled"] as const;
+const BOOL = ["contractEnabled", "birthdayEnabled", "dailyEnabled", "probationEnabled"] as const;
 
 /** 설정 + **지금 조건이면 무엇이 나갈지** 미리보기를 함께 돌려준다 */
 export async function GET() {
@@ -35,6 +41,8 @@ export async function PATCH(req: Request) {
   if (typeof b.channel === "string") data.channel = b.channel.trim() || null;
   // 운영진 채널 — 비면 일일 안내를 보내지 않는다(DM 으로 흩뿌릴 성격이 아니다)
   if (typeof b.dailyChannel === "string") data.dailyChannel = b.dailyChannel.trim() || null;
+  // 수습 종료 채널 — 비면 위의 받는 곳(channel 또는 부서 DM)으로 간다(아무 데도 안 가지 않는다)
+  if (typeof b.probationChannel === "string") data.probationChannel = b.probationChannel.trim() || null;
 
   // 시각·일수는 있을 수 없는 값을 막는다 — 24시로 저장되면 그날 알림이 통째로 안 나간다
   const clamp = (k: string, lo: number, hi: number) => {
@@ -48,6 +56,9 @@ export async function PATCH(req: Request) {
   clamp("birthdayMinute", 0, 59);
   clamp("contractLeadDays", 0, 365);
   clamp("birthdayLeadDays", 0, 30);
+  clamp("probationHour", 0, 23);
+  clamp("probationMinute", 0, 59);
+  clamp("probationLeadDays", 0, 60);
 
   const row = await prisma.hrNotifySetting.update({ where: { id: 1 }, data });
   await logActivity({ action: "SETTINGS_UPDATE", summary: "경영지원 알림 설정을 변경했습니다." }).catch(() => {});
@@ -66,6 +77,9 @@ export async function POST(req: Request) {
   // 일일 안내는 **낼 것이 없으면 안 보내는 것이 정상 동작**이라, 확인용으로 눌렀을 때도
   // 억지로 보내지 않고 '없어서 안 보냈다' 를 그대로 돌려준다.
   if (which === "daily") return NextResponse.json(await runDailyBriefs(new Date(), { force: true }));
+  // 수습 종료만 따로 — 채널 확인용으로 누를 때 계약 예고·생일까지 함께 나가지 않게.
+  // 보내면 그 계약에 새기므로(한 번만) 예정 시각에 같은 알림이 다시 가지 않는다.
+  if (which === "probation") return NextResponse.json(await runProbationNotice(new Date(), { force: true }));
   const out = await runHrNotices(new Date(), { force: true });
   return NextResponse.json(out);
 }

@@ -13,6 +13,7 @@
 // 시각 판단은 모두 한국시간(KST) 기준 — `lib/scheduler.ts` 의 `kstParts` 를 쓴다.
 
 import { kstParts, sameKstDay, type KstParts } from "./scheduler";
+import { probationTimeline } from "./probation";
 // 근무일 판정은 **급여명세서 예약 발송과 같은 함수**를 쓴다 — 각자 두면 언젠가 갈라진다
 import { isWorkday } from "./holidays";
 
@@ -165,6 +166,115 @@ export function contractsToAnnounce(
     .filter((c) => c.endDate! >= today && c.endDate! <= until)
     .map((c) => ({ ...c, endDate: c.endDate!, dDay: daysUntil(c.endDate!, today) }))
     .sort((a, b) => a.dDay - b.dDay || a.name.localeCompare(b.name, "ko"));
+}
+
+/* ───────────── 수습 종료 — 본채용 판단 ───────────── */
+//
+// 계약 만료 예고와 같은 성질이다 — **놓치면 돈이 드는 기한**이라 '딱 그날' 이 아니라
+// **'창 안에 들었는데 아직 안 알렸는가'** 로 보고, 한 계약에 한 번만 알린다(`notifiedAt`).
+//
+// 기준일이 수습 종료일이 아니라 **본채용 거부 통지 기한**(종료 30일 전)인 이유: 3개월 수습은
+// 끝나는 날 근속이 3개월이라 근로기준법 §26 의 예고 예외(계속근로 3개월 미만)에 들지 않는다.
+// 종료일에 맞춰 알리면 이미 30일 예고를 채울 수 없어 해고예고수당(30일분 통상임금)이 생긴다
+// (lib/probation.ts 머리말). 3개월 미만 수습(2026-11 이전의 2개월)은 예외라 종료일이 기준이다.
+
+export const DEFAULT_PROBATION_TIMING: NotifyTiming = {
+  enabled: true,
+  leadDays: 7,
+  hour: 12,
+  minute: 0,
+};
+/** 수습 종료 알림을 올릴 채널(2026-11 지정). 비우면 위의 경영지원 받는 곳(채널 또는 부서 DM)으로 간다 */
+export const DEFAULT_PROBATION_CHANNEL = "C057NN63VFT";
+
+export interface ProbationRow {
+  /** 계약 id — 한 계약에 한 번만 알린다 */
+  id: number;
+  employeeId: number;
+  name: string;
+  department: string | null;
+  position: string | null;
+  /** 수습이 시작되는 날 = 계약 시작일 (YYYY-MM-DD). 화면·계약서와 같은 기준이다 */
+  startDate: string;
+  /** 계약 종료일 (YYYY-MM-DD, 기한 없음이면 null) */
+  endDate: string | null;
+  isProbation: boolean;
+  probationMonths: number;
+  /** 위탁계약 — 위탁계약서에는 수습 조항이 없다 */
+  contractor?: boolean;
+  active?: boolean;
+  /** 퇴사(예정)일 YYYY-MM-DD */
+  resignDate?: string | null;
+  status?: string | null;
+  /** 이미 알린 계약이면 그 시각 */
+  notifiedAt?: Date | null;
+}
+
+export interface ProbationAlert extends ProbationRow {
+  /** 수습 마지막 날 (민법 §160) */
+  probationEnd: string;
+  /** 본채용 거부 통지 기한(종료 30일 전) — 수습이 3개월 미만이면 null(§26 예고 예외) */
+  noticeBy: string | null;
+  /** 판단 기준일 = 통지 기한, 없으면 수습 마지막 날 */
+  decideBy: string;
+  /** 판단 기준일까지 남은 일수 — 음수면 지났다 */
+  dDay: number;
+  /** 통지 기한이 지났다 — 지금 거부하면 해고예고수당이 생긴다 */
+  overdue: boolean;
+}
+
+/**
+ * 알려야 할 수습 계약 — 창은 **판단 기준일 `leadDays` 전 ~ 수습 마지막 날**.
+ *
+ * 통지 기한이 지났어도 수습이 안 끝났으면 알린다(`overdue`) — 늦게 등록한 계약이나 크론이
+ * 빠진 날도 놓치지 않게. 수습이 끝난 뒤에는 판단할 것이 없으므로 내지 않는다(그때는 본채용이다).
+ *
+ * 빼는 것: 위탁계약(수습 조항이 없다), 퇴사자·수습 종료 전에 나가는 사람, 그리고 **계약이
+ * 수습 종료일 이전에 끝나는 경우** — 그때는 기간 만료로 끝나는 것이라 계약 종료 예고가 맡는다
+ * (본채용 거부 = 해고 틀로 적으면 해고예고가 필요한 것처럼 잘못 읽힌다).
+ */
+export function probationsToAnnounce(
+  rows: ProbationRow[],
+  now: Date,
+  leadDays: number
+): ProbationAlert[] {
+  const today = kstToday(now);
+  const lead = Math.max(0, leadDays);
+  const out: ProbationAlert[] = [];
+  for (const r of rows) {
+    if (!r.isProbation || r.notifiedAt || r.contractor) continue;
+    if (r.active === false || r.status === "TERMINATED") continue;
+    const t = probationTimeline(r.startDate, r.probationMonths);
+    if (!t) continue;
+    if (r.resignDate && r.resignDate <= t.endYmd) continue;
+    if (r.endDate && r.endDate <= t.endYmd) continue;
+    const decideBy = t.noticeByYmd ?? t.endYmd;
+    if (today < addDays(decideBy, -lead) || today > t.endYmd) continue;
+    const dDay = daysUntil(decideBy, today);
+    out.push({
+      ...r,
+      probationEnd: t.endYmd,
+      noticeBy: t.noticeByYmd,
+      decideBy,
+      dDay,
+      overdue: !!t.noticeByYmd && dDay < 0,
+    });
+  }
+  return out.sort((a, b) => a.decideBy.localeCompare(b.decideBy) || a.name.localeCompare(b.name, "ko"));
+}
+
+/**
+ * 슬랙이 돌려준 오류 코드 → 할 일. 코드만 띄우면(`not_in_channel`) 무엇을 고칠지 모른다.
+ * 앱은 `chat:write.public` 이 있어 공개 채널에는 초대 없이 올리지만, 비공개 채널은 초대가 필요하다.
+ */
+export function slackErrorHint(code: string | null | undefined): string | null {
+  if (!code) return null;
+  if (code === "not_in_channel" || code === "channel_not_found")
+    return "채널을 찾지 못했거나 앱이 그 채널에 없습니다 — 채널 ID(C…)를 확인하고, 비공개 채널이면 채널에서 앱을 먼저 초대해 주세요.";
+  if (code === "is_archived") return "보관된 채널입니다 — 다른 채널 ID 를 넣어 주세요.";
+  if (code === "invalid_auth" || code === "not_authed" || code === "token_revoked")
+    return "슬랙 앱 토큰이 맞지 않습니다(SLACK_BOT_TOKEN).";
+  return `슬랙 오류: ${code}`;
 }
 
 /* ───────────── 생일 ───────────── */
@@ -356,6 +466,62 @@ export function contractAlertText(
         : {}),
     })),
     { type: "context", elements: [{ type: "mrkdwn", text: tail.trim() }] },
+  ];
+  return { text, blocks };
+}
+
+/**
+ * 수습 종료 알림 문구 — **할 일과 기한**을 앞에 세운다.
+ *
+ * 줄마다 판단 기준일까지 남은 날을 먼저 적고(급한 순), 3개월 수습은 통지 기한을 요일까지
+ * 적는다(토·일이면 그 전 평일에 건네야 한다). 기한이 지난 건은 무엇이 생기는지까지 적는다 —
+ * '지났다' 만 적으면 그래서 어떻게 되는지를 다시 찾아봐야 한다.
+ */
+export function probationAlertText(
+  alerts: ProbationAlert[],
+  opts: { appUrl?: string | null } = {}
+): { text: string; blocks: any[] } {
+  const head = `⏳ *수습 종료 예정 — 본채용 여부 확인* — ${alerts.length}명`;
+  const tag = (a: ProbationAlert) =>
+    a.overdue
+      ? "⚠️ *통지 기한 지남*"
+      : a.noticeBy
+        ? a.dDay === 0
+          ? "*통지 기한 오늘*"
+          : `*통지 기한 D-${a.dDay}*`
+        : a.dDay === 0
+          ? "*수습 종료 오늘*"
+          : `*수습 종료 D-${a.dDay}*`;
+  const detail = (a: ProbationAlert) => {
+    const base = `수습 ${a.probationMonths}개월 · ${a.startDate} ~ ${a.probationEnd}`;
+    if (a.overdue)
+      return `${base}\n통지 기한(${dateLabel(a.noticeBy!)})이 지났습니다 — 지금 본채용을 거부하면 30일분 통상임금(해고예고수당)이 생깁니다.`;
+    if (a.noticeBy)
+      return `${base}\n본채용을 하지 않으려면 *${dateLabel(a.noticeBy)}* 까지 사유·종료일을 적어 서면 통지`;
+    return `${base}\n근속 3개월 전에 끝나 해고예고 예외 — 본채용을 하지 않으면 종료일 전에 서면 통지`;
+  };
+  const tail =
+    "본채용이면 따로 할 일은 없습니다. 본채용을 하지 않을 때는 사유와 종료일을 적어 *서면*으로 알려야 " +
+    "효력이 있고(근로기준법 §27), 근속 3개월부터는 수습 중이어도 30일 전에 예고해야 합니다(§26).";
+  const lines = alerts.map((a) => `• ${tag(a)} · ${who(a)}\n   ${detail(a).replace(/\n/g, "\n   ")}`);
+  const text = [head, "", ...lines, "", tail].join("\n");
+
+  const blocks: any[] = [
+    { type: "section", text: { type: "mrkdwn", text: head } },
+    ...alerts.map((a) => ({
+      type: "section",
+      text: { type: "mrkdwn", text: `${tag(a)} · ${who(a)}\n${detail(a)}` },
+      ...(opts.appUrl
+        ? {
+            accessory: {
+              type: "button",
+              text: { type: "plain_text", text: "직원 카드", emoji: true },
+              url: `${opts.appUrl.replace(/\/$/, "")}/employees/${a.employeeId}`,
+            },
+          }
+        : {}),
+    })),
+    { type: "context", elements: [{ type: "mrkdwn", text: tail }] },
   ];
   return { text, blocks };
 }

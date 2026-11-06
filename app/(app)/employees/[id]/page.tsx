@@ -410,7 +410,10 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                                 className={`ml-1 pill ${
                                   pt.noticeByYmd >= todayYmd ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"
                                 }`}
-                                title="본채용을 하지 않으려면 이날까지 사유를 적어 서면으로 알려야 해고예고수당(30일분 통상임금)이 생기지 않는다 (근로기준법 §26·§27)"
+                                title={
+                                  "본채용을 하지 않으려면 이날까지 사유를 적어 서면으로 알려야 해고예고수당(30일분 통상임금)이 생기지 않는다 (근로기준법 §26·§27)" +
+                                  (c.probationNotifiedAt ? ` · 슬랙 알림 ${ymd(c.probationNotifiedAt)} 보냄` : "")
+                                }
                               >
                                 본채용 판단 {pt.noticeByYmd}까지
                               </span>

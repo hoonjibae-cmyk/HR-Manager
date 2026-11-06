@@ -6,20 +6,28 @@
 import { prisma } from "./db";
 import { postMessage, slackConfigured } from "./slack";
 import { logActivity } from "./activity";
-import { CONTRACT_STAGE_LABEL } from "./constants";
+import { CONTRACT_STAGE_LABEL, isContractorContract } from "./constants";
+import { paySchemeOf } from "./contracts";
 import { listHolidays } from "./holiday-service";
+import { PROBATION_MONTHS_MAX } from "./probation";
 import {
   notifyDue,
   contractsToAnnounce,
   birthdaysOn,
   announceWindow,
+  probationsToAnnounce,
   contractAlertText,
   birthdayAlertText,
+  probationAlertText,
   recipientWarning,
+  slackErrorHint,
+  isWorkday,
   kstToday,
   addDays,
   DEFAULT_CONTRACT_TIMING,
   DEFAULT_BIRTHDAY_TIMING,
+  DEFAULT_PROBATION_TIMING,
+  DEFAULT_PROBATION_CHANNEL,
   DEFAULT_NOTIFY_DEPARTMENT,
   type NotifyTiming,
 } from "./hr-notify";
@@ -38,6 +46,13 @@ export type NotifySetting = {
   birthdayHour: number;
   birthdayMinute: number;
   birthdayLastRunAt: Date | null;
+  probationEnabled: boolean;
+  /** 비면 공통 받는 곳(channel 또는 부서 DM)으로 */
+  probationChannel: string | null;
+  probationLeadDays: number;
+  probationHour: number;
+  probationMinute: number;
+  probationLastRunAt: Date | null;
 };
 
 /**
@@ -75,6 +90,13 @@ const birthdayTiming = (s: NotifySetting): NotifyTiming => ({
   minute: s.birthdayMinute,
   lastRunAt: s.birthdayLastRunAt,
 });
+const probationTiming = (s: NotifySetting): NotifyTiming => ({
+  enabled: s.probationEnabled,
+  leadDays: s.probationLeadDays,
+  hour: s.probationHour,
+  minute: s.probationMinute,
+  lastRunAt: s.probationLastRunAt,
+});
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -105,17 +127,37 @@ export async function notifyRecipients(department: string, channel?: string | nu
  * DM 을 기본으로 둔 이유: 계약 종료·생일은 그 부서가 처리할 일이지 전사가 볼 것이 아니다.
  * 한 사람에게 실패해도 나머지는 계속 보낸다 — 슬랙 하나 때문에 알림이 통째로 죽으면 안 된다.
  */
-async function deliver(s: NotifySetting, msg: { text: string; blocks: any[] }) {
+async function deliver(
+  s: NotifySetting,
+  msg: { text: string; blocks: any[] },
+  /** 이 알림만의 채널(수습 종료). 비면 공통 받는 곳(channel 또는 부서 DM)으로 */
+  channelOverride?: string | null
+) {
   if (!slackConfigured()) return { sent: 0, failed: 0, skipped: "슬랙 미설정" };
-  const targets = s.channel ? [s.channel] : (await notifyRecipients(s.targetDepartment, s.channel)).userIds;
+  const ch = channelOverride?.trim() || s.channel;
+  const targets = ch ? [ch] : (await notifyRecipients(s.targetDepartment, s.channel)).userIds;
   let sent = 0;
   let failed = 0;
+  // 슬랙이 돌려준 오류 코드를 모은다 — '실패 1' 만 띄우면 채널 초대가 빠졌는지 ID 가 틀렸는지 모른다
+  const errors = new Set<string>();
   for (const to of targets) {
-    const r: any = await postMessage(to, msg.text, msg.blocks).catch(() => ({ ok: false }));
+    const r: any = await postMessage(to, msg.text, msg.blocks).catch((e) => ({
+      ok: false,
+      error: String(e?.message ?? e),
+    }));
     if (r?.ok) sent++;
-    else failed++;
+    else {
+      failed++;
+      if (r?.error) errors.add(String(r.error));
+    }
   }
-  return { sent, failed, targets: targets.length };
+  const first = Array.from(errors)[0] ?? null;
+  return {
+    sent,
+    failed,
+    targets: targets.length,
+    ...(first ? { error: Array.from(errors).join(", "), hint: slackErrorHint(first) } : {}),
+  };
 }
 
 /* ───────────── 계약 종료 예고 ───────────── */
@@ -244,24 +286,145 @@ export async function runBirthdayNotice(
   return { ran: true, count: alerts.length, alerts, ...out };
 }
 
+/* ───────────── 수습 종료 — 본채용 판단 ───────────── */
+
+/**
+ * 수습 종료 알림 — 판정은 `probationsToAnnounce`(창 = 통지 기한 N일 전 ~ 수습 마지막 날, 한 번만).
+ *
+ * **토·일·공휴일에는 보내지 않는다**(지금 보내기는 예외). 창이 통지 기한보다 앞서 열리므로
+ * 다음 평일에 나가도 늦지 않고, 쉬는 날 올린 알림은 읽히지 않는다. 공휴일 표를 못 읽으면
+ * 빈 표로 간다 — 주말은 그대로 거르고 공휴일에 한 번 나가는 정도에서 그친다.
+ */
+export async function runProbationNotice(
+  now: Date = new Date(),
+  opts: { force?: boolean; dryRun?: boolean } = {}
+) {
+  const s = await getNotifySetting();
+  const { due, reason } = notifyDue(probationTiming(s), now, opts);
+  if (!due) return { ran: false, reason };
+
+  const today = kstToday(now);
+  // 수습은 길어도 6개월이라 그보다 오래전에 시작한 계약은 볼 필요가 없다
+  const since = addDays(today, -(PROBATION_MONTHS_MAX * 31 + 7));
+  const [rows, holidays] = await Promise.all([
+    prisma.contract.findMany({
+      where: {
+        isProbation: true,
+        probationNotifiedAt: null,
+        startDate: { gte: new Date(`${since}T00:00:00Z`) },
+      },
+      select: {
+        id: true,
+        employeeId: true,
+        startDate: true,
+        endDate: true,
+        isProbation: true,
+        probationMonths: true,
+        isContractor: true,
+        templateKey: true,
+        status: true,
+        probationNotifiedAt: true,
+        employee: {
+          select: { name: true, department: true, position: true, active: true, resignDate: true },
+        },
+      },
+    }),
+    listHolidays().catch(() => [] as Array<{ date: string }>),
+  ]);
+
+  const alerts = probationsToAnnounce(
+    rows.map((c) => ({
+      id: c.id,
+      employeeId: c.employeeId,
+      name: c.employee?.name ?? "(이름 없음)",
+      department: c.employee?.department ?? null,
+      position: c.employee?.position ?? null,
+      startDate: ymd(c.startDate),
+      endDate: c.endDate ? ymd(c.endDate) : null,
+      isProbation: c.isProbation,
+      probationMonths: c.probationMonths,
+      // 판정은 계약 쪽 값으로 — 위탁계약서에는 수습 조항이 없다
+      contractor: isContractorContract({ isContractor: c.isContractor, payScheme: paySchemeOf(c.templateKey) }),
+      active: c.employee?.active !== false,
+      resignDate: c.employee?.resignDate ? ymd(c.employee.resignDate) : null,
+      status: c.status,
+      notifiedAt: c.probationNotifiedAt,
+    })),
+    now,
+    s.probationLeadDays
+  );
+  const workday = isWorkday(today, holidays.map((h: any) => h.date));
+  const to = s.probationChannel?.trim() || null;
+
+  if (opts.dryRun)
+    return { ran: false, dryRun: true, reason, count: alerts.length, alerts, workday, channel: to };
+  if (!workday && !opts.force) {
+    await prisma.hrNotifySetting.update({ where: { id: 1 }, data: { probationLastRunAt: now } });
+    return { ran: true, count: 0, reason: "주말·공휴일 — 다음 평일에 보냅니다" };
+  }
+  if (!alerts.length) {
+    await prisma.hrNotifySetting.update({ where: { id: 1 }, data: { probationLastRunAt: now } });
+    return { ran: true, count: 0, reason: "알릴 수습 종료 없음" };
+  }
+
+  const msg = probationAlertText(alerts, { appUrl: process.env.APP_URL || null });
+  const out = await deliver(s, msg, to);
+
+  // 보낸 뒤에 새긴다 — 계약 종료 예고와 같은 이유(먼저 새기고 실패하면 영영 안 알려진다)
+  if (out.sent > 0)
+    await prisma.contract.updateMany({
+      where: { id: { in: alerts.map((a) => a.id) } },
+      data: { probationNotifiedAt: now },
+    });
+  await prisma.hrNotifySetting.update({ where: { id: 1 }, data: { probationLastRunAt: now } });
+
+  await logActivity({
+    action: "NOTIFY_PROBATION_END",
+    actor: opts.force ? "ADMIN" : "CRON",
+    summary:
+      `수습 종료(본채용 판단) 알림 ${alerts.length}건을 ` +
+      `${to ? `채널 ${to}` : (s.channel ?? `${s.targetDepartment} 부서`)}에 알렸습니다 (통지 기한 ${s.probationLeadDays}일 전 기준).`,
+    meta: {
+      alerts: alerts.map((a) => ({
+        name: a.name,
+        probationEnd: a.probationEnd,
+        noticeBy: a.noticeBy,
+        dDay: a.dDay,
+        overdue: a.overdue,
+      })),
+      ...out,
+    },
+  }).catch(() => {});
+
+  return { ran: true, count: alerts.length, alerts, ...out };
+}
+
 /** 크론에서 한 번에 — 한쪽이 실패해도 나머지는 돌린다 */
 export async function runHrNotices(now: Date = new Date(), opts: { force?: boolean } = {}) {
-  const [contract, birthday] = await Promise.all([
+  const [contract, birthday, probation] = await Promise.all([
     runContractExpiryNotice(now, opts).catch((e) => ({ error: String(e?.message ?? e) })),
     runBirthdayNotice(now, opts).catch((e) => ({ error: String(e?.message ?? e) })),
+    runProbationNotice(now, opts).catch((e) => ({ error: String(e?.message ?? e) })),
   ]);
-  return { contract, birthday };
+  return { contract, birthday, probation };
 }
 
 /** 설정 화면용 — 지금 조건이면 무엇이 나갈지 미리 보여 준다 */
 export async function previewHrNotices(now: Date = new Date()) {
   const s = await getNotifySetting();
-  const [contract, birthday, recipients] = await Promise.all([
+  const [contract, birthday, probation, recipients] = await Promise.all([
     runContractExpiryNotice(now, { force: true, dryRun: true }),
     runBirthdayNotice(now, { force: true, dryRun: true }),
+    runProbationNotice(now, { force: true, dryRun: true }),
     notifyRecipients(s.targetDepartment, s.channel),
   ]);
-  return { setting: s, contract, birthday, recipients, slack: slackConfigured() };
+  return { setting: s, contract, birthday, probation, recipients, slack: slackConfigured() };
 }
 
-export { DEFAULT_CONTRACT_TIMING, DEFAULT_BIRTHDAY_TIMING, DEFAULT_NOTIFY_DEPARTMENT };
+export {
+  DEFAULT_CONTRACT_TIMING,
+  DEFAULT_BIRTHDAY_TIMING,
+  DEFAULT_PROBATION_TIMING,
+  DEFAULT_PROBATION_CHANNEL,
+  DEFAULT_NOTIFY_DEPARTMENT,
+};

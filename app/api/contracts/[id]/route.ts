@@ -75,6 +75,15 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if ("startDate" in body && body.startDate) data.startDate = new Date(body.startDate);
   if ("endDate" in body) data.endDate = body.endDate ? new Date(body.endDate) : null;
 
+  // 수습 기한이 달라지면 수습 종료 알림을 다시 받게 한다 — 옛 기한으로 한 번 알린 것으로
+  // 끝나면 고친 기한을 아무도 짚어 주지 않는다(lib/hr-notify.ts probationsToAnnounce).
+  if (
+    (data.startDate && +data.startDate !== +cur.startDate) ||
+    (data.probationMonths != null && data.probationMonths !== cur.probationMonths) ||
+    (data.isProbation != null && data.isProbation !== cur.isProbation)
+  )
+    data.probationNotifiedAt = null;
+
   const start = data.startDate ?? cur.startDate;
   const end = data.endDate !== undefined ? data.endDate : cur.endDate;
   if (end && end < start)

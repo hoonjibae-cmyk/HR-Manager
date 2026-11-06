@@ -66,7 +66,7 @@ async function handle(req: Request) {
     })().catch((e) => ({ error: String(e?.message ?? e) }));
   }
 
-  // 경영지원 알림 — 계약 종료 예고 · 생일. 설정한 시각(기본 12:00 KST)을 지나야 나가고,
+  // 경영지원 알림 — 계약 종료 예고 · 생일 · 수습 종료(본채용 판단, 지정 채널). 설정한 시각(기본 12:00 KST)을 지나야 나가고,
   // 같은 날 두 번 나가지 않게 `*LastRunAt` 로 막는다. `loose` 와 무관하게 자체 시각을 본다 —
   // 급여 발송과 시각이 다르기 때문이다.
   let hrNotices: any = null;
