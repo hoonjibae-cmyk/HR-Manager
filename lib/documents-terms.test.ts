@@ -353,6 +353,45 @@ describe("임금공제 동의서 — 3.3% 대상자에게는 4대보험을 적�
   });
 });
 
+describe("임금공제 동의서 — 실비 공제 (주차비는 예시, 한정하지 않음)", () => {
+  const html = (over: Partial<DocEmployee>) =>
+    text(consentDeductionHtml({ employee: emp(over), company }));
+
+  it("주차비를 예로 들되 주차비에 한정하지 않는다고 본문에 따로 적는다 — '등' 만으로는 좁게 읽힐 수 있다", () => {
+    const t = html({ incomeType: "EMPLOYEE" });
+    expect(t).toContain("실비 공제");
+    expect(t).toContain("주차비 등");
+    expect(t).toContain("(실비, 주차비에 한정하지 않음)");
+  });
+
+  it("회사가 지출한 금액 전부 또는 미리 협의한 일부를 매월 임금에서", () => {
+    const t = html({ incomeType: "EMPLOYEE" });
+    expect(t).toContain("회사가 지출한 금액 전부 또는");
+    expect(t).toContain("미리 협의하여 정한 일부를 매월 임금에서 공제함에 동의");
+  });
+
+  it("아무 비용이나 떼는 조항으로 읽히지 않게 범위를 묶는다", () => {
+    const t = html({ incomeType: "EMPLOYEE" });
+    expect(t).toContain('"을"의 요청이나 동의에 따라 회사가 "을"을 위하여 대신 지출한 비용');
+    expect(t).toContain("업무 수행에 필요한 비용은 공제하지 않으며");
+    expect(t).toContain("공제 항목과 금액은 매월 명세서에 적습니다");
+  });
+
+  it("3.3%·위탁계약에도 들어가고 '지급액' 으로 적는다 — 주차비 공제는 계약 형태와 무관하다", () => {
+    const cases = [
+      { incomeType: "FREELANCE" },
+      { incomeType: "EMPLOYEE", isContractor: true },
+      { incomeType: "FREELANCE", payScheme: "RATIO" },
+    ] as Partial<DocEmployee>[];
+    for (const over of cases) {
+      const t = html(over);
+      expect(t).toContain("실비 공제");
+      expect(t).toContain("미리 협의하여 정한 일부를 매월 지급액에서 공제함에 동의");
+      expect(t).toContain("본인이 동의한 정산·실비 공제");
+    }
+  });
+});
+
 describe("기타사항 ⑦ — 급여명세서 이메일 교부 동의", () => {
   // 주소를 괄호로 덧붙이던 때는 발송용 이메일이 비면 「이메일()」 로 찍혔다.
   // 주소는 계약서가 아니라 직원 정보가 정한다(발송 주소는 payslipEmailOf — 비면 업무용 메일).
