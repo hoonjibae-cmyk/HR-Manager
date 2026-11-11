@@ -9,6 +9,7 @@ import {
   certEmploymentHtml,
   certCareerHtml,
   certReleaseHtml,
+  wageCapOf,
   type DocPayroll,
 } from "./documents-pay";
 import { getCompany, empToDoc, contractToDoc } from "./repo";
@@ -200,7 +201,10 @@ export async function genPayslip(payrollId: number) {
         students: rosterToStudents(roster),
         // 위탁 비율제는 사업소득, 비율제 근로계약은 비율급(임금) 산정 내역이다
         kind: isRatio ? (ratioWorker ? "WAGE" : "BUSINESS") : "INCENTIVE",
-        wageCap: ratioWorker ? (monthEmp as any).ratioWageCap ?? null : null,
+        // 그 달 실제로 가른 기준(급여 기록)을 우선한다 — 보상금까지 합쳐 상한을 잰 달은 명단만으로 다시 못 짓는다
+        wageCap: ratioWorker ? wageCapOf(pr)?.cap ?? (monthEmp as any).ratioWageCap ?? null : null,
+        bizIncome: ratioWorker ? pr.bizIncomeP ?? 0 : null,
+        wageCapWithNonCompete: ratioWorker ? wageCapOf(pr)?.withNonCompete ?? false : false,
         // 배분율은 계약이 진실이다 — 명단에 적힌 율은 대조용으로만 넘긴다
         percent: isRatio ? monthEmp.ratioPercent : monthEmp.incRevenuePercent,
         sheetPercent: roster.find((r) => r.sharePercent != null)?.sharePercent ?? null,

@@ -659,6 +659,12 @@ export async function runPayrollMonth(
           payInput.payScheme === "RATIO" && (payInput.nonCompeteRatio ?? 0) > 0 && r.nonCompeteP
             ? { ratio: payInput.nonCompeteRatio, revenue: mInput.classRevenue ?? 0 }
             : null,
+        // 근로소득 상한(비율제 근로계약) — 그 달 실제로 가른 기준. 명세서·사업소득 지급명세서·산정 내역서가
+        // '상한 X원(보상금 포함 여부)' 을 다시 짓지 않고 이 값을 적는다 — 나중에 계약이 바뀌어도 그 달 기준이 남는다
+        wageCap:
+          r.bizIncomeP > 0
+            ? { cap: payInput.ratioWageCap ?? null, withNonCompete: (r.nonCompeteP ?? 0) > 0 }
+            : null,
         // 시간기록표 근거 — 명세서의 체류/휴게/순 근로/연차 구분 표기용
         timesheet: mInput.timesheet ?? null,
         // 시급제 휴일근로 근거(날짜별) — 명세서가 어느 날 몇 시간에 가산이 붙었는지 적는다

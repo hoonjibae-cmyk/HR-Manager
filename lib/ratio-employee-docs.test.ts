@@ -19,7 +19,7 @@ import {
   type DocContract,
   type DocEmployee,
 } from "./documents";
-import { payslipHtml, bizIncomeSlipHtml, revenueDetailHtml, type DocPayroll } from "./documents-pay";
+import { payslipHtml, bizIncomeSlipHtml, revenueDetailHtml, wageCapOf, type DocPayroll } from "./documents-pay";
 import { computePayroll, DEFAULT_RATES_2025, type EmployeePayInput } from "./payroll";
 import { buildExportRow, buildBizExportRow, reconcileRow, buildPayrollExportWorkbook, type ExportPayrollRecord } from "./payroll-export";
 import { buildTransferRows, type TransferPayrollRecord } from "./bank-transfer";
@@ -168,15 +168,29 @@ describe("근로계약서(비율급) — 경업금지 보상금 비율(v1.58)", 
   const html = (c: Partial<DocContract> = {}, e: Partial<DocEmployee> = {}) =>
     text(contractHtml({ employee: emp(e), contract: ct(c), company }));
 
-  it("제4조에 비율급과 별도 지급을 적고, 상한과 관계없이 갑이 준다고 적는다", () => {
+  it("제4조에 비율급과 별도 지급을 적고, 상한은 비율급과 보상금의 합에 건다(v1.58.1)", () => {
     const h = html({ nonCompeteRatio: 0.03 });
     expect(h).toContain(
-      "제①항의 임금과 별도로, 제8조에 따른 경업금지 의무의 대가로 매월 제①항의 수강료 입금액에 3%를 곱한 금액을 경업금지 보상금으로 지급한다."
+      "④ \"갑\"은 제①항의 임금과 별도로, 제8조에 따른 경업금지 의무의 대가로 매월 제①항의 수강료 입금액에 3%를 곱한 금액을 경업금지 보상금으로 지급한다."
     );
-    // 상한 조항이 ④(정액 수당 없음) — 그 번호를 가리킨다
-    expect(h).toContain("경업금지 보상금은 제④항의 상한과 관계없이 \"갑\"이 지급하며, 4대보험료와 근로소득세 공제 대상에 포함한다.");
-    // 정액 수당이 끼면 상한 조항이 ⑤ 로 밀리고, 가리키는 번호도 함께 밀린다
-    expect(html({ nonCompeteRatio: 0.03, mealAllow: 200_000 })).toContain("제⑤항의 상한과 관계없이");
+    // 보상금 항(④) 바로 뒤의 상한 조항(⑤)이 그 번호를 가리켜 '합한 금액' 에 상한을 건다
+    expect(h).toContain(
+      "⑤ 제①항에 따라 산정한 금액과 제④항의 경업금지 보상금을 합한 금액이 월 5,000,000원을 넘는 경우 그 넘는 부분은 제①항의 금액에서 빼어 이 계약에 따른 임금에 포함하지 아니하며, \"을\"과 별도 사업자(가상아카데미) 사이의 계약에 따라 그 사업자가 지급한다."
+    );
+    expect(h).toContain("4대보험료와 근로소득세는 이 계약에 따른 임금과 경업금지 보상금에 대하여만 공제한다.");
+    expect(h).not.toContain("상한과 관계없이");
+    // 정액 수당이 끼면 보상금 항이 ⑤ 로 밀리고, 상한 조항이 가리키는 번호도 함께 밀린다
+    const m = html({ nonCompeteRatio: 0.03, mealAllow: 200_000 });
+    expect(m).toContain("⑤ \"갑\"은 제①항의 임금과 별도로, 제8조에 따른");
+    expect(m).toContain("⑥ 제①항에 따라 산정한 금액과 제⑤항의 경업금지 보상금을 합한 금액이");
+  });
+
+  it("보상금이 없으면 상한 조항은 예전 문구 그대로(비율급에만)", () => {
+    const h = html();
+    expect(h).toContain(
+      "제①항에 따라 산정한 금액 중 월 5,000,000원을 넘는 부분은 이 계약에 따른 임금에 포함하지 아니하며"
+    );
+    expect(h).not.toContain("합한 금액이");
   });
 
   it("제8조 「경업금지 및 경업금지 보상금」이 들어가고 기타사항이 제9조로 밀린다", () => {
@@ -194,10 +208,11 @@ describe("근로계약서(비율급) — 경업금지 보상금 비율(v1.58)", 
     expect(h).not.toContain("일할 계산"); // 매출 비례라 일할 문구가 없다(월급제와 다른 점)
   });
 
-  it("상한이 없으면 '상한과 관계없이' 문구가 없다", () => {
+  it("상한이 없으면 상한 조항 자체가 없다(보상금 항만)", () => {
     const h = html({ nonCompeteRatio: 0.025, ratioWageCap: null });
     expect(h).toContain("수강료 입금액에 2.5%를 곱한 금액을 경업금지 보상금으로 지급한다.");
-    expect(h).not.toContain("상한과 관계없이");
+    expect(h).not.toContain("합한 금액이");
+    expect(h).not.toContain("별도 사업자");
   });
 
   it("보상금 비율이 없으면 경업금지 조항이 없다 — 기타사항은 제8조", () => {
@@ -230,6 +245,16 @@ describe("별도 사업장 용역위탁계약서(v1.58)", () => {
     expect(text(contractHtml({ employee: emp(), contract: ct(), company }))).toContain(
       "월 5,000,000원을 넘는 부분은 이 계약에 따른 임금에 포함하지 아니하며"
     );
+  });
+
+  it("근로계약에 보상금 비율이 있으면 수수료 산식에 함께 넣는다 — 엔진과 같은 식(따로 곱해 합한 금액, 비율급 한도)", () => {
+    const h = doc({ nonCompeteRatio: 0.03 });
+    expect(h).toContain(
+      "수강료(가) 입금액에 40%를 곱한 금액과 3%를 곱한 금액을 합한 금액 중 월 5,000,000원을 초과하는 금액으로 하되, 수강료 입금액에 40%를 곱한 금액을 넘지 아니한다."
+    );
+    expect(h).toContain("그 합한 금액이 월 5,000,000원 이하인 달에는 용역수수료가 발생하지 아니한다");
+    expect(h).not.toContain("경업금지"); // 이 계약은 경업금지와 무관하다 — 숫자로만 적는다
+    expect(h).not.toContain("43%"); // 한 번에 곱한다고 적지 않는다(엔진은 따로 반올림해 더한다)
   });
 
   it("서명란의 갑은 '위탁자' — 사용자(근로관계)로 적지 않는다", () => {
@@ -384,28 +409,69 @@ describe("명세서 — 지급처별로 가른다", () => {
     expect(h).toContain("용역위탁계약에 따른 용역수수료");
   });
 
-  it("경업금지 보상금(비율) 각주 — 근로계약서 제8조 · 근로소득 · 상한과 무관", () => {
+  it("경업금지 보상금(비율) — 상한은 비율급과 합쳐 잰다: 임금명세서 지급액 계가 상한 500만 그대로", () => {
     const rr = computePayroll({ ...payInput, nonCompeteRatio: 0.03 }, { classRevenue: 15_000_000 }, DEFAULT_RATES_2025, []);
-    const h = text(
-      payslipHtml({
-        employee: emp(),
-        payroll: {
-          ...payroll,
-          ...rr,
-          breakdown: JSON.stringify({ nonCompete: { ratio: 0.03, revenue: 15_000_000 } }),
-        },
-        company,
-        bizPayer: payer,
-      })
-    );
+    expect(rr.bizIncomeP).toBe(1_450_000); // 600만 + 45만 − 500만
+    const pr: DocPayroll = {
+      ...payroll,
+      ...rr,
+      // 급여 산정이 남기는 근거 — 각주의 식과 '그 달 상한' 을 그대로 적는다
+      breakdown: JSON.stringify({
+        nonCompete: { ratio: 0.03, revenue: 15_000_000 },
+        wageCap: { cap: 5_000_000, withNonCompete: true },
+      }),
+    };
+    const html = payslipHtml({ employee: emp(), payroll: pr, company, bizPayer: payer });
+    const h = text(html);
     expect(h).toContain("근로계약서 제8조의 경업금지 의무에 대한 대가로 비율급과 별도로 지급");
     expect(h).toContain("수강료 입금액 15,000,000원 × 3% = 450,000원");
-    expect(h).toContain("근로소득 상한과 관계없이 이 회사가 지급");
-    expect(h).not.toContain("강의위탁계약서");
-    // 임금명세서의 지급액 계 = 근로분 비율급 500만 + 보상금 45만(별도 사업장 몫 100만은 빠진다)
-    expect(cells(payslipHtml({ employee: emp(), payroll: { ...payroll, ...rr }, company, bizPayer: payer }))).toContain(
-      "지급액 계 5,450,000"
+    expect(h).toContain("근로소득 상한은 비율급과 이 보상금을 합친 금액에 걸리고");
+    expect(h).toContain(
+      "이 달 비율급 6,000,000원과 경업금지 보상금 450,000원의 합계 중 근로소득 상한 5,000,000원을 넘는 1,450,000원은 비율급에서 빼어 이 명세서의 임금이 아니며"
     );
+    expect(h).not.toContain("강의위탁계약서");
+    expect(h).not.toContain("상한과 관계없이");
+    // 임금명세서: 비율급(근로소득분) 455만 + 보상금 45만 = 지급액 계 500만(= 상한)
+    const c = cells(html);
+    expect(c).toContain("비율급(근로소득분) 4,550,000");
+    expect(c).toContain("경업금지 보상금 450,000");
+    expect(c).toContain("지급액 계 5,000,000");
+  });
+
+  it("사업소득 지급명세서·산정 내역서도 '합계 기준' 으로 적는다", () => {
+    const rr = computePayroll({ ...payInput, nonCompeteRatio: 0.03 }, { classRevenue: 15_000_000 }, DEFAULT_RATES_2025, []);
+    const pr: DocPayroll = {
+      ...payroll,
+      ...rr,
+      breakdown: JSON.stringify({ wageCap: { cap: 5_000_000, withNonCompete: true } }),
+    };
+    const slip = cells(bizIncomeSlipHtml({ employee: emp(), payroll: pr, payer, company }));
+    expect(slip).toContain("사업소득 1,450,000");
+    expect(slip).toContain("비율급과 경업금지 보상금의 합계 중 월 5,000,000원을 넘는 부분(비율급에서 지급)");
+    expect(slip).toContain("근로소득 상한(월 5,000,000원 — 비율급과 경업금지 보상금의 합계 기준)을 넘는 비율급");
+    const detail = text(
+      revenueDetailHtml({
+        employee: emp(),
+        company,
+        year: 2026,
+        month: 10,
+        students: [{ seq: 1, status: "ENROLLED", name: "가상학생", revenue: 15_000_000 } as any],
+        percent: 0.4,
+        kind: "WAGE",
+        wageCap: 5_000_000,
+        bizIncome: rr.bizIncomeP,
+        wageCapWithNonCompete: true,
+      })
+    );
+    expect(detail).toContain("근로소득 상한(월 5,000,000원 — 경업금지 보상금과 합친 금액 기준)을 넘는 1,450,000원");
+  });
+
+  it("옛 기록(상한 근거가 없는 breakdown)은 비율급 − 별도 사업장 몫으로 상한을 되짚는다", () => {
+    expect(wageCapOf({ ...payroll, breakdown: "{}" })).toEqual({ cap: 5_000_000, withNonCompete: false });
+    expect(wageCapOf({ ...payroll, bizIncomeP: 0 })).toBeNull();
+    expect(
+      wageCapOf({ ...payroll, breakdown: JSON.stringify({ wageCap: { cap: 4_000_000, withNonCompete: true } }) })
+    ).toEqual({ cap: 4_000_000, withNonCompete: true });
   });
 
   it("상한을 넘지 않은 달은 예전 명세서와 같다(사업소득 안내가 없다)", () => {

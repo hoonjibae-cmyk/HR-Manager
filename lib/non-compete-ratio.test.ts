@@ -265,6 +265,12 @@ describe("강의위탁계약서 — 비율이 없으면 원문 그대로", () =>
     expect(t).toContain("④ \"을\"은 독립된 자격으로 강의용역을 제공하는 것이므로 본 계약에 따른 용역위탁수수료 외 수당, 퇴직금 등을");
   });
 
+  it("서명란의 갑은 '위탁자'(v1.58.1) — 위탁계약에 '사용자' 는 근로관계의 말이다", () => {
+    expect(plain).toContain('"갑" (위탁자)');
+    expect(plain).toContain('"을" (수탁자)');
+    expect(plain).not.toContain("(사용자)");
+  });
+
   it("null · 0 · 생략이 모두 같은 문서", () => {
     for (const v of [null, 0, undefined]) {
       expect(contractHtml({ employee: emp, contract: ct({ nonCompeteRatio: v }), company, printedAt })).toBe(plain);
@@ -279,6 +285,8 @@ describe("강의위탁계약서 — 비율이 없으면 원문 그대로", () =>
       printedAt,
     });
     expect(monthly).not.toContain("경업금지 보상금");
+    // 근로계약서의 갑은 그대로 '사용자'
+    expect(monthly).toContain('"갑" (사용자)');
   });
 });
 

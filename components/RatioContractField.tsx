@@ -6,8 +6,8 @@ import { DEFAULT_RATIO_WAGE_CAP, RATIO_SPLIT_RISK_NOTE } from "@/lib/ratio-emplo
  * 완전비율제의 **계약 형태** — 강의위탁계약(사업소득 3.3%) / 근로계약(4대보험).
  * 신규 계약 작성·조건 수정·직원 등록이 같은 것을 쓴다(위탁 체크칸 `ContractorField` 대신 나온다).
  *
- * 근로계약을 고르면 **근로소득 상한**을 둘 수 있다 — 비율급 중 상한까지만 이 회사의 임금(4대보험·근로소득세)이고
- * 넘는 부분은 별도 사업장이 사업소득(3.3%)으로 지급한다(lib/ratio-employee.ts). 상한은 법적 다툼의 소지가
+ * 근로계약을 고르면 **근로소득 상한**을 둘 수 있다 — 비율급(+경업금지 보상금) 중 상한까지만 이 회사의 임금
+ * (4대보험·근로소득세)이고 넘는 만큼 비율급을 별도 사업장이 사업소득(3.3%)으로 지급한다(lib/ratio-employee.ts). 상한은 법적 다툼의 소지가
  * 있는 구조라 켤 때 경고를 함께 띄운다.
  */
 export default function RatioContractField({
@@ -61,8 +61,9 @@ export default function RatioContractField({
             <span>
               <b className="text-slate-700">근로소득 상한 두기</b>
               <span className="block text-slate-500 leading-relaxed">
-                비율급 중 상한까지만 이 회사의 임금(4대보험·근로소득세)으로 두고, 넘는 부분은{" "}
-                <b>별도 사업장</b>이 사업소득(3.3%)으로 지급합니다. 비워 두면 비율급 전액이 근로소득입니다.
+                비율급(경업금지 보상금이 있으면 그것과 합친 금액) 중 상한까지만 이 회사의 임금(4대보험·근로소득세)으로
+                두고, 넘는 만큼은 비율급에서 빼{" "}<b>별도 사업장</b>이 사업소득(3.3%)으로 지급합니다. 비워 두면 비율급
+                전액이 근로소득입니다.
               </span>
             </span>
           </label>
@@ -80,8 +81,8 @@ export default function RatioContractField({
               </div>
               <p className="text-amber-700 leading-relaxed break-keep">⚠ {RATIO_SPLIT_RISK_NOTE}</p>
               <p className="text-slate-500 leading-relaxed break-keep">
-                계약서를 발급하면 근로계약서와 함께 <b>별도 사업장 명의의 용역위탁계약서</b>(수수료 = 비율급 중 상한
-                초과분)가 나갑니다. 별도 사업장 정보(상호·사업자등록번호·대표자·주소)는 설정 → 회사 정보에 넣어야
+                계약서를 발급하면 근로계약서와 함께 <b>별도 사업장 명의의 용역위탁계약서</b>(수수료 = 비율급 + 보상금 중
+                상한 초과분)가 나갑니다. 별도 사업장 정보(상호·사업자등록번호·대표자·주소)는 설정 → 회사 정보에 넣어야
                 이 계약서와 사업소득 지급명세서·이체 파일이 만들어집니다.
               </p>
             </>

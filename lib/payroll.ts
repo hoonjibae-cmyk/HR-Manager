@@ -71,7 +71,7 @@ export interface EmployeePayInput {
   /**
    * 경업금지 보상금 비율(0.03 = 3%) — **완전비율제**(위탁·비율제 근로계약). 수수료·비율급과 같은 매출에
    * 곱해 그것과 **별도로** 더해 지급한다. 위탁이면 사업소득 3.3% 가 함께 걸리고, 비율제 근로자면
-   * 근로소득(4대보험·근로소득세)이며 근로소득 상한과 무관하다. lib/non-compete.ts
+   * 근로소득(4대보험·근로소득세)이며 근로소득 상한 안에 비율급과 함께 센다. lib/non-compete.ts
    */
   nonCompeteRatio?: number | null;
   // 비율제
@@ -84,8 +84,9 @@ export interface EmployeePayInput {
    */
   ratioEmployee?: boolean | null;
   /**
-   * 근로소득 상한(월) — 비율제 근로자만. 비율급 중 이 금액까지만 근로소득(4대보험·근로소득세)이고
-   * 넘는 부분은 **별도 사업장**이 지급하는 사업소득(3.3%)으로 가른다(`splitRatioPay`). 없으면 전액 근로소득.
+   * 근로소득 상한(월) — 비율제 근로자만. 비율급(① 산식 금액)과 경업금지 보상금의 합 중 이 금액까지만
+   * 근로소득(4대보험·근로소득세)이고, 넘는 만큼 비율급에서 빼 **별도 사업장**이 지급하는 사업소득(3.3%)으로
+   * 가른다(`splitRatioPay`). §47 보장급으로 올린 몫은 언제나 근로소득. 없으면 전액 근로소득.
    */
   ratioWageCap?: number | null;
 }
@@ -236,25 +237,40 @@ export interface PayrollResult {
   notes: string[];
 }
 
-/** 10원 미만 절사 (Excel ROUNDDOWN(x,-1)) */
+/**
+ * 10원 미만 절사 (Excel ROUNDDOWN(x,-1)).
+ *
+ * ⚠ **곱셈의 부동소수점 오차를 먼저 걷어내고 내린다.** 요율(0.009 · 0.03545 …)은 2진수로 정확히 담기지
+ * 않아 `3,000,000 × 0.009` 가 26,999.999999999996 으로 계산된다 — 그대로 내리면 26,990원(정답 27,000원)이
+ * 되어 **고용보험이 10원 덜 떼였다**(100만~800만원 급여의 절반가량. 2026-11 발견 — 테스트 주석은 27,000 을
+ * 기대하고 있었는데 양쪽이 같은 함수를 써서 지나갔다). 원 단위 금액 × 소수 6자리 이내 요율의 참값은 소수
+ * 6자리 안에서 끝나므로 그 자리에서 반올림해도 참값은 바뀌지 않고 오차만 사라진다.
+ */
 export function floor10(x: number): number {
-  return Math.floor(x / 10) * 10;
+  const exact = Math.round(x * 1e6) / 1e6;
+  return Math.floor(exact / 10) * 10;
 }
 
 /**
  * **비율급을 근로소득(상한까지)과 사업소득(넘는 부분)으로 가른다** — 비율제 근로자 전용.
  *
- * 상한이 없거나(null·0 이하) 비율급이 상한 이하면 전부 근로소득이다. 상한은 **비율급에만** 걸린다 —
- * 연차수당·연장수당·상여처럼 근로자라서 받는 돈은 언제나 근로소득이라 여기 넣지 않는다.
+ * 상한이 없거나(null·0 이하) 비율급이 상한 이하면 전부 근로소득이다.
+ * `sharedWithin` 은 **상한 안에 함께 세는 다른 근로소득** — 경업금지 보상금이다(2026-11 결정: 보상금까지
+ * 합쳐 상한으로 묶는다). 상한은 비율급 + 보상금의 합에 걸리고, 넘는 만큼 **비율급에서** 빼 별도 사업장으로
+ * 보낸다 — 보상금은 경업금지 약정의 당사자인 이 회사가 주는 돈이라 옮길 수 없다. 그래서 별도 사업장 몫은
+ * 비율급을 넘지 않는다(보상금만으로 상한을 넘는 극단에서도 보상금은 그대로 이 회사 몫).
+ * 연차수당·연장수당·상여·정액 수당처럼 근로자라서 받는 돈은 상한과 무관하게 근로소득이라 여기 넣지 않는다.
  */
 export function splitRatioPay(
   ratioPay: number,
-  cap: number | null | undefined
+  cap: number | null | undefined,
+  sharedWithin = 0
 ): { wage: number; biz: number } {
   const total = Math.round(ratioPay || 0);
-  if (cap == null || !(cap > 0) || total <= cap) return { wage: total, biz: 0 };
-  const wage = Math.round(cap);
-  return { wage, biz: total - wage };
+  if (cap == null || !(cap > 0)) return { wage: total, biz: 0 };
+  const room = Math.max(Math.round(cap) - Math.max(Math.round(sharedWithin || 0), 0), 0);
+  if (total <= room) return { wage: total, biz: 0 };
+  return { wage: room, biz: total - room };
 }
 
 /**
@@ -692,28 +708,33 @@ export function computePayroll(
     // 경업금지 보상금 — 같은 매출에 보상금 비율을 곱해 수수료·비율급과 **별도로** 더한다.
     // 최저보장은 수수료·비율급에만 걸린다 — 보상금은 언제나 매출 × 비율이다.
     //  · 위탁: 강의위탁계약서 제5조·제7조(사업소득 3.3% 가 함께 걸린다).
-    //  · 비율제 근로계약: 근로계약서 제4조·제8조. 근로소득이고 **근로소득 상한과 무관**하다 — 상한은
-    //    비율급에만 걸린다(아래 splitRatioPay 에 넘기지 않는다). 경업금지 약정의 당사자가 이 회사다.
+    //  · 비율제 근로계약: 근로계약서 제4조·제8조. 근로소득이고 **근로소득 상한 안에 함께 센다**(아래).
+    //    경업금지 약정의 당사자가 이 회사라 보상금 자체는 언제나 이 회사가 준다.
     const ncr = emp.nonCompeteRatio ?? 0;
     if (ncr > 0) {
       nonCompeteP = round0(rev * ncr);
       notes.push(
         `경업금지 보상금: 매출 ${rev.toLocaleString()}원 × ${(ncr * 100).toFixed(1)}% = ${nonCompeteP.toLocaleString()}원 ` +
           (ratioWorker
-            ? `(비율급과 별도 · 근로계약서 제8조 · 근로소득 — 근로소득 상한과 무관하게 이 회사가 지급)`
+            ? `(비율급과 별도 · 근로계약서 제8조 · 근로소득 — 근로소득 상한은 비율급과 합쳐 잰다)`
             : `(용역수수료와 별도 · 강의위탁계약서 제5조·제7조)`)
       );
     }
     if (ratioWorker) {
       // ── 비율제 근로계약 ──
       // 근로소득 상한: 4대보험에 드는 경우에만 가른다(세무구분이 사업소득이면 어차피 전액 3.3%).
-      const split = insured ? splitRatioPay(baseP, emp.ratioWageCap) : { wage: baseP, biz: 0 };
+      //  · **① 산식 금액(매출 × 비율)과 경업금지 보상금의 합**에 건다(2026-11 결정 — 보상금까지 합쳐 상한).
+      //    넘는 만큼 ① 금액에서 빼 별도 사업장이 지급한다 — 근로계약서 제4조·용역위탁계약서 제3조와 같은 식.
+      //  · §47 보장급으로 올려 준 몫(baseP − fee)은 언제나 이 회사의 임금이다(근로자에게 보장한 임금이라
+      //    다른 사업자에게 넘길 수 없다). 그래서 baseP 가 아니라 fee 를 가른다.
+      const split = insured ? splitRatioPay(fee, emp.ratioWageCap, nonCompeteP) : { wage: fee, biz: 0 };
       bizIncomeP = split.biz;
       if (split.biz > 0)
         notes.push(
-          `근로소득 상한 ${Math.round(emp.ratioWageCap ?? 0).toLocaleString()}원 — 비율급 ${baseP.toLocaleString()}원 중 ` +
-            `${split.wage.toLocaleString()}원은 근로소득(4대보험·근로소득세), ` +
-            `${split.biz.toLocaleString()}원은 별도 사업장이 지급하는 사업소득(3.3%)으로 나눴습니다.`
+          `근로소득 상한 ${Math.round(emp.ratioWageCap ?? 0).toLocaleString()}원 — 비율급 ${baseP.toLocaleString()}원` +
+            (nonCompeteP > 0 ? `과 경업금지 보상금 ${nonCompeteP.toLocaleString()}원의 합계` : "") +
+            ` 중 ${(baseP - split.biz + nonCompeteP).toLocaleString()}원은 근로소득(4대보험·근로소득세), ` +
+            `넘는 ${split.biz.toLocaleString()}원은 비율급에서 빼 별도 사업장이 지급하는 사업소득(3.3%)으로 나눴습니다.`
         );
       // 통상시급 — 도급(비율)제 임금은 '그 달 임금 총액 ÷ 총 근로시간'(근로기준법 시행령 §6②6).
       // 비율급에 주휴일 임금이 포함된 것으로 약정하므로(근로계약서 제4조) 월급제와 같은 월 환산시간
@@ -729,7 +750,7 @@ export function computePayroll(
             "직원 정보에 근로시간표를 채우면 계약 소정근로시간 기준으로 다시 계산됩니다."
         );
       }
-      const wageBase = split.wage + nonCompeteP + (emp.mealAllow || 0) + (emp.carAllow || 0);
+      const wageBase = baseP - split.biz + nonCompeteP + (emp.mealAllow || 0) + (emp.carAllow || 0);
       hourlyWage = wageBase > 0 ? round0(wageBase / hours) : 0;
       notes.push(
         `통상시급: 그 달 임금 ${wageBase.toLocaleString()}원${nonCompeteP > 0 ? "(경업금지 보상금 포함)" : ""} ÷ ` +

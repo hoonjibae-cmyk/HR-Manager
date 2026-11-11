@@ -93,6 +93,26 @@ function head(c: DocCompany, extra = ""): string {
   </div>`;
 }
 
+/**
+ * 그 달 근로소득 상한의 기준 — 급여 산정이 남긴 값(`breakdown.wageCap`)을 쓴다(나중에 계약이 바뀌어도 그 달
+ * 기준이 남는다). 그 값이 없는 옛 기록(v1.58.0 이전 — 상한이 비율급에만 걸렸다)은 비율급 − 별도 사업장 몫으로 되짚는다.
+ * 별도 사업장 몫이 없는 달은 null.
+ */
+export function wageCapOf(
+  p: Pick<DocPayroll, "bizIncomeP" | "baseP" | "breakdown">
+): { cap: number; withNonCompete: boolean } | null {
+  const biz = Math.max(Math.round(p.bizIncomeP ?? 0), 0);
+  if (!biz) return null;
+  let wc: any = null;
+  try {
+    wc = p.breakdown ? JSON.parse(p.breakdown)?.wageCap ?? null : null;
+  } catch {
+    wc = null;
+  }
+  if (wc && typeof wc.cap === "number" && wc.cap > 0) return { cap: wc.cap, withNonCompete: wc.withNonCompete === true };
+  return { cap: p.baseP - biz, withNonCompete: false };
+}
+
 /** 시급제 휴일근로 날짜별 근거 — 산정 때 저장한 breakdown.holidayWork 를 그대로 편다 */
 function holidayWorkNote(bd: any): string {
   const days: Array<{ date: string; kind: string; hours: number; overHours: number }> = bd?.holidayWork?.days ?? [];
@@ -460,15 +480,20 @@ export function payslipHtml(args: {
           )}원은 그 달 임금 ÷ 월 소정근로시간 환산이며(근로기준법 시행령 §6②6), 연장·휴일·야간수당과 연차수당의 기준입니다.</div>`
         : ""
     }
-    ${
-      bizPart
-        ? `<div class="small">· 이 달 비율급 ${won(p.baseP)}원 중 근로소득 상한 <b>${won(
-            p.baseP - bizPart
-          )}원</b>을 넘는 <b>${won(bizPart)}원</b>은 이 명세서의 임금이 아니며, 별도 사업장${
-            args.bizPayer ? `(${esc(args.bizPayer.name)})` : ""
-          }이 사업소득으로 지급합니다 — 함께 첨부한 「사업소득 지급명세서」를 보세요.</div>`
-        : ""
-    }
+    ${(() => {
+      if (!bizPart) return "";
+      // 상한은 비율급(과, 보상금이 있으면 보상금을 합친 금액)에 걸리고 넘는 만큼 비율급에서 빠진다 — 그 달 기준을 그대로 적는다
+      const wc = wageCapOf(p) ?? { cap: p.baseP - bizPart, withNonCompete: false };
+      const ncp = p.nonCompeteP ?? 0;
+      const payerTxt = args.bizPayer ? `(${esc(args.bizPayer.name)})` : "";
+      const basis =
+        wc.withNonCompete && ncp > 0
+          ? `이 달 비율급 ${won(p.baseP)}원과 경업금지 보상금 ${won(ncp)}원의 합계 중`
+          : `이 달 비율급 ${won(p.baseP)}원 중`;
+      return `<div class="small">· ${basis} 근로소득 상한 <b>${won(wc.cap)}원</b>을 넘는 <b>${won(bizPart)}원</b>은${
+        wc.withNonCompete && ncp > 0 ? " 비율급에서 빼어" : ""
+      } 이 명세서의 임금이 아니며, 별도 사업장${payerTxt}이 사업소득으로 지급합니다 — 함께 첨부한 「사업소득 지급명세서」를 보세요.</div>`;
+    })()}
     <div class="small">· 추가근로수당(연장) = 연장근로시간 × 통상시급 <span class="muted">(주 40시간 이내 — 가산 없음)</span> &nbsp; · 연장근로수당(법정초과) = 1일 8시간·주 40시간 초과시간 × 통상시급 × 1.5</div>
     ${
       isHourly
@@ -505,7 +530,7 @@ export function payslipHtml(args: {
     ${(() => {
       if (!p.nonCompeteP) return "";
       // 완전비율제는 매출 × 비율로 수수료·비율급과 **별도로** 주는 돈이다 — 위탁은 강의위탁계약서 제5조·제7조
-      // (사업소득 3.3%), 비율제 근로자는 근로계약서 제8조(근로소득, 근로소득 상한과 무관). 월급제는 월 급여 총액
+      // (사업소득 3.3%), 비율제 근로자는 근로계약서 제8조(근로소득 — 상한은 비율급과 합쳐 잰다). 월급제는 월 급여 총액
       // 안에서 기본급과 구분한 몫이다(근로계약서 제8조).
       if (p.payScheme === "RATIO") {
         const nc = bd?.nonCompete;
@@ -515,7 +540,9 @@ export function payslipHtml(args: {
             : "";
         if (p.ratioEmployee)
           return `<div class="small">· 경업금지 보상금: 근로계약서 제8조의 경업금지 의무에 대한 대가로 비율급과 별도로 지급하는 금액입니다${formula}. 근로소득으로 과세되고 4대보험 산정에 포함됩니다${
-            (p.bizIncomeP ?? 0) > 0 ? "(근로소득 상한과 관계없이 이 회사가 지급)" : ""
+            (p.bizIncomeP ?? 0) > 0
+              ? " — 근로소득 상한은 비율급과 이 보상금을 합친 금액에 걸리고, 넘는 만큼은 비율급에서 빠져 별도 사업장이 지급합니다(보상금은 이 회사가 지급)"
+              : ""
           }. 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 조).</div>`;
         return `<div class="small">· 경업금지 보상금: 강의위탁계약서 제5조·제7조에 따라 경업금지 의무의 대가로 용역수수료와 별도로 지급하는 금액입니다${formula}. 수수료와 함께 사업소득세(3.3%)를 원천징수하며, 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 계약서 제7조).</div>`;
       }
@@ -558,14 +585,20 @@ export function bizIncomeSlipHtml(args: {
   const split = recordSplit(p);
   const biz = split.biz ?? { gross: 0, tax: 0, local: 0, totalDeduct: 0, net: 0 };
   const payDate = args.payDate ?? new Date();
-  const cap = p.baseP - biz.gross;
+  // 그 달 실제로 가른 상한 — 보상금이 있으면 비율급과 보상금의 합에 걸렸다(근로계약서 제4조)
+  const wc = wageCapOf(p);
+  const cap = wc?.cap ?? p.baseP - biz.gross;
+  const withNc = !!wc?.withNonCompete && (p.nonCompeteP ?? 0) > 0;
+  const basisTxt = withNc ? "비율급과 경업금지 보상금의 합계" : "비율급";
   const head2 = head({ name: payer.name, ceo: payer.ceo, bizNo: payer.bizNo, address: payer.address, phone: payer.phone }, `<div class="small">지급일: ${ymdKo(payDate)}</div><div class="badge">사업소득(3.3%)</div>`);
   return `${head2}
   <div class="doc-title" style="letter-spacing:0.2em">사업소득 지급명세서</div>
   <p style="text-align:center" class="muted">${p.year}년 ${p.month}월분</p>
   <table class="kv">
     <tr><th>성명</th><td>${esc(e.name)}</td><th>지급자</th><td>${esc(payer.name)}</td></tr>
-    <tr><th>지급 내용</th><td colspan="3">용역위탁계약에 따른 용역수수료 — 비율급 중 월 ${won(cap)}원을 넘는 부분</td></tr>
+    <tr><th>지급 내용</th><td colspan="3">용역위탁계약에 따른 용역수수료 — ${basisTxt} 중 월 ${won(cap)}원을 넘는 부분${
+      withNc ? "(비율급에서 지급)" : ""
+    }</td></tr>
   </table>
   <table class="pay">
     <thead><tr><th colspan="2">지 급</th><th colspan="2">공 제</th></tr>
@@ -578,7 +611,9 @@ export function bizIncomeSlipHtml(args: {
     </tbody>
   </table>
   <div class="clause" style="margin-top:10px">
-    <div class="small">· 이 금액은 ${esc(josa(args.company.name, "과", "와"))}의 근로계약(제4조)에서 근로소득 상한(월 ${won(cap)}원)을 넘는 비율급으로, ${esc(e.name)}님과 ${esc(payer.name)} 사이의 용역위탁계약(제3조)에 따라 ${esc(josa(payer.name, "이", "가"))} 지급합니다. 근로소득이 아니므로 4대보험료·근로소득세를 공제하지 않습니다.</div>
+    <div class="small">· 이 금액은 ${esc(josa(args.company.name, "과", "와"))}의 근로계약(제4조)에서 근로소득 상한(월 ${won(cap)}원${
+      withNc ? " — 비율급과 경업금지 보상금의 합계 기준" : ""
+    })을 넘는 비율급으로, ${esc(e.name)}님과 ${esc(payer.name)} 사이의 용역위탁계약(제3조)에 따라 ${esc(josa(payer.name, "이", "가"))} 지급합니다. 근로소득이 아니므로 4대보험료·근로소득세를 공제하지 않습니다.</div>
     <div class="small">· 사업소득 원천징수: 지급액의 3.3%(소득세 3% + 지방소득세 0.3%) — 「소득세법」 제127조. 다른 소득과 합산하여 다음 해 5월 종합소득세 신고 대상이 될 수 있습니다.</div>
   </div>`;
 }
@@ -826,6 +861,10 @@ export function revenueDetailHtml(args: {
   kind: "BUSINESS" | "WAGE" | "INCENTIVE";
   /** 비율제 근로계약의 근로소득 상한 — 넘는 몫이 별도 사업장으로 간다는 것을 적는다 */
   wageCap?: number | null;
+  /** 그 달 실제로 별도 사업장 몫이 된 금액(급여 기록의 bizIncomeP) — 있으면 다시 계산하지 않고 이 값을 적는다 */
+  bizIncome?: number | null;
+  /** 상한이 비율급과 경업금지 보상금의 합에 걸렸는가 */
+  wageCapWithNonCompete?: boolean;
   monthlyPay?: number | null; // 월급여 (인센티브 계약자 교차확인용)
   retention?: number | null; // 퇴직유보금
   /** 명단에 적혀 있던 배분율 — 계약과 다르면 경고를 적는다 */
@@ -836,8 +875,15 @@ export function revenueDetailHtml(args: {
   const isBiz = args.kind === "BUSINESS";
   const isWage = args.kind === "WAGE";
   const label = isBiz ? "사업소득" : isWage ? "비율급" : "인센티브";
-  // 근로소득 상한을 넘은 몫 — 이 회사의 임금이 아니라 별도 사업장의 사업소득이다
-  const overCap = isWage && args.wageCap && s.amount > args.wageCap ? s.amount - args.wageCap : 0;
+  // 근로소득 상한을 넘은 몫 — 이 회사의 임금이 아니라 별도 사업장의 사업소득이다. 급여 기록에 실제로 가른
+  // 금액이 있으면 그대로 쓴다(보상금까지 합쳐 상한을 잰 달은 명단만으로는 다시 지을 수 없다)
+  const overCap = !isWage
+    ? 0
+    : args.bizIncome != null
+      ? Math.max(Math.round(args.bizIncome), 0)
+      : args.wageCap && s.amount > args.wageCap
+        ? s.amount - args.wageCap
+        : 0;
 
   const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/0+$/, ""));
   const md = (d?: Date | null) =>
@@ -904,7 +950,9 @@ export function revenueDetailHtml(args: {
         : isWage
         ? `<div class="small">· 본 내역서는 임금명세서의 <b>비율급</b>(근로계약서 제4조) 산출 근거로 첨부됩니다.${
             overCap
-              ? ` 이 중 근로소득 상한(월 ${won(args.wageCap!)}원)을 넘는 <b>${won(overCap)}원</b>은 별도 사업장의 「사업소득 지급명세서」에 실립니다.`
+              ? ` 이 중 근로소득 상한(월 ${won(args.wageCap ?? 0)}원${
+                  args.wageCapWithNonCompete ? " — 경업금지 보상금과 합친 금액 기준" : ""
+                })을 넘는 <b>${won(overCap)}원</b>은 별도 사업장의 「사업소득 지급명세서」에 실립니다.`
               : ""
           }</div>`
         : `<div class="small">· 본 내역서는 급여명세서의 <b>인센티브</b> 항목 산출 근거로 첨부됩니다.</div>`
@@ -932,6 +980,10 @@ export function rosterDetailHtml(args: {
   kind: "BUSINESS" | "WAGE" | "INCENTIVE";
   /** 비율제 근로계약의 근로소득 상한 (WAGE) */
   wageCap?: number | null;
+  /** 그 달 별도 사업장 몫(급여 기록의 bizIncomeP) — WAGE */
+  bizIncome?: number | null;
+  /** 상한이 비율급과 경업금지 보상금의 합에 걸렸는가 — WAGE */
+  wageCapWithNonCompete?: boolean;
   /** 매출 기준 — 계약상 배분율 */
   percent?: number | null;
   sheetPercent?: number | null;
@@ -953,6 +1005,8 @@ export function rosterDetailHtml(args: {
       percent: args.percent,
       kind: args.kind,
       wageCap: args.wageCap ?? null,
+      bizIncome: args.bizIncome ?? null,
+      wageCapWithNonCompete: args.wageCapWithNonCompete ?? false,
       sheetPercent: args.sheetPercent ?? null,
       monthlyPay: args.monthlyPay ?? null,
       retention: args.retention ?? null,

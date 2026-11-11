@@ -3,6 +3,7 @@ import {
   computePayroll,
   splitRatioPay,
   businessWithholding,
+  floor10,
   DEFAULT_RATES_2025,
   type EmployeePayInput,
   type TaxBracketRow,
@@ -132,6 +133,17 @@ describe("splitRatioPay / businessWithholding", () => {
   it("상한을 넘는 부분만 사업소득", () => {
     expect(splitRatioPay(6_543_210, 5_000_000)).toEqual({ wage: 5_000_000, biz: 1_543_210 });
   });
+  it("상한 안에 함께 세는 보상금이 있으면 그만큼 비율급의 자리가 줄어든다(v1.58.1)", () => {
+    // 비율급 600만 + 보상금 45만 → 근로소득 500만이 되도록 비율급 455만, 별도 사업장 145만
+    expect(splitRatioPay(6_000_000, 5_000_000, 450_000)).toEqual({ wage: 4_550_000, biz: 1_450_000 });
+    // 합이 상한 이하면 가르지 않는다
+    expect(splitRatioPay(4_500_000, 5_000_000, 450_000)).toEqual({ wage: 4_500_000, biz: 0 });
+    expect(splitRatioPay(4_550_000, 5_000_000, 450_000)).toEqual({ wage: 4_550_000, biz: 0 });
+    // 보상금만으로 상한을 넘는 극단 — 별도 사업장 몫은 비율급을 넘지 않는다(보상금은 이 회사 몫)
+    expect(splitRatioPay(3_000_000, 5_000_000, 6_000_000)).toEqual({ wage: 0, biz: 3_000_000 });
+    // 상한이 없으면 보상금과 무관하게 전액 근로소득
+    expect(splitRatioPay(6_000_000, null, 450_000)).toEqual({ wage: 6_000_000, biz: 0 });
+  });
   it("사업소득 원천징수 = 3% + 그 10%, 각각 10원 절사", () => {
     expect(businessWithholding(1_543_210, DEFAULT_RATES_2025)).toEqual({ tax: 46_290, local: 4_620 });
     expect(businessWithholding(0, DEFAULT_RATES_2025)).toEqual({ tax: 0, local: 0 });
@@ -186,8 +198,8 @@ describe("computePayroll — 비율제 근로자", () => {
     expect(r.gross).toBe(8_000_000);
     expect(r.bizIncomeP).toBe(0);
     expect(r.bizTaxD).toBe(0);
-    expect(r.pensionD).toBe(Math.floor((DEFAULT_RATES_2025.pensionBaseMax * 0.045) / 10) * 10);
-    expect(r.healthD).toBe(Math.floor((8_000_000 * DEFAULT_RATES_2025.health) / 10) * 10);
+    expect(r.pensionD).toBe(floor10(DEFAULT_RATES_2025.pensionBaseMax * 0.045));
+    expect(r.healthD).toBe(floor10(8_000_000 * DEFAULT_RATES_2025.health));
     expect(r.hourlyWage).toBe(Math.round(8_000_000 / MONTH_HOURS));
   });
 
@@ -223,7 +235,7 @@ describe("computePayroll — 비율제 근로자", () => {
     expect(r.hourlyWage).toBe(Math.round(6_000_000 / MONTH_HOURS));
   });
 
-  it("경업금지 보상금 비율 — 비율급과 별도로 매출 × 비율, 근로소득(상한과 무관), 통상시급 분자에 든다", () => {
+  it("경업금지 보상금 비율 — 비율급과 별도로 매출 × 비율, 근로소득이고 상한은 비율급과 합쳐 잰다(v1.58.1)", () => {
     const r = computePayroll(
       ratioEmp({ nonCompeteRatio: 0.03 }),
       { classRevenue: 15_000_000, extraHours: 10 },
@@ -232,23 +244,49 @@ describe("computePayroll — 비율제 근로자", () => {
     );
     expect(r.baseP).toBe(6_000_000); // 비율급 40% — 보상금이 끼어들지 않는다
     expect(r.nonCompeteP).toBe(450_000); // 1,500만 × 3%
-    // 상한은 비율급에만 걸린다 — 초과분은 그대로 100만이고 보상금은 이 회사의 근로소득으로 남는다
-    expect(r.bizIncomeP).toBe(1_000_000);
-    // 통상시급 = (근로분 500만 + 보상금 45만) ÷ 월 환산시간
-    const hw = Math.round(5_450_000 / MONTH_HOURS);
+    // 상한 500만은 비율급 + 보상금의 합에 걸린다 — 넘는 145만(600 + 45 − 500)이 비율급에서 빠져 별도 사업장으로
+    expect(r.bizIncomeP).toBe(1_450_000);
+    // 통상시급 = (근로분 비율급 455만 + 보상금 45만 = 상한 500만) ÷ 월 환산시간
+    const hw = Math.round(5_000_000 / MONTH_HOURS);
     expect(r.hourlyWage).toBe(hw);
     expect(r.extraP).toBe(10 * hw);
     expect(r.gross).toBe(6_000_000 + 450_000 + 10 * hw);
-    expect(r.wageTaxable).toBe(r.gross - 1_000_000);
-    // 4대보험·근로소득세는 보상금을 포함한 근로분 기준
-    expect(r.healthD).toBe(Math.floor((r.wageTaxable * DEFAULT_RATES_2025.health) / 10) * 10);
-    expect(r.employmentD).toBe(Math.floor((r.wageTaxable * DEFAULT_RATES_2025.employment) / 10) * 10);
-    // 별도 사업장 몫(3.3%)은 초과분 100만에만
-    expect(r.bizTaxD).toBe(30_000);
-    expect(r.bizLocalTaxD).toBe(3_000);
+    // 4대보험 기준 = 상한 500만 + 상한 밖 근로소득(연장수당)
+    expect(r.wageTaxable).toBe(5_000_000 + 10 * hw);
+    expect(r.healthD).toBe(floor10(r.wageTaxable * DEFAULT_RATES_2025.health));
+    expect(r.employmentD).toBe(floor10(r.wageTaxable * DEFAULT_RATES_2025.employment));
+    // 별도 사업장 몫(3.3%)은 145만에
+    expect(r.bizTaxD).toBe(43_500);
+    expect(r.bizLocalTaxD).toBe(4_350);
     expect(r.net).toBe(r.gross - r.totalDeduct);
-    expect(r.notes.some((n) => n.includes("근로계약서 제8조") && n.includes("상한과 무관"))).toBe(true);
+    expect(r.notes.some((n) => n.includes("근로계약서 제8조") && n.includes("비율급과 합쳐"))).toBe(true);
+    expect(r.notes.some((n) => n.includes("경업금지 보상금 450,000원의 합계 중 5,000,000원은 근로소득"))).toBe(true);
     expect(r.notes.some((n) => n.includes("경업금지 보상금 포함"))).toBe(true);
+  });
+
+  it("보장급(§47)으로 올려 준 몫은 상한과 무관하게 이 회사의 임금 — 상한은 ① 산식 금액에만 건다", () => {
+    // 매출 1,000만 × 40% = 400만 < 보장급 600만 → 비율급 600만. ① 산식 금액(400만)은 상한 안이라 가르지 않는다
+    const a = computePayroll(
+      ratioEmp({ ratioMinGuarantee: 6_000_000 }),
+      { classRevenue: 10_000_000 },
+      DEFAULT_RATES_2025,
+      taxTable
+    );
+    expect(a.baseP).toBe(6_000_000);
+    expect(a.bizIncomeP).toBe(0);
+    expect(a.wageTaxable).toBe(6_000_000);
+    // 매출 1,200만: ① 480만 + 보상금 36만 = 516만 → 16만만 별도 사업장(용역위탁계약서 제3조와 같은 식).
+    // 보장급 520만과의 차이 40만은 이 회사 임금으로 남는다
+    const b = computePayroll(
+      ratioEmp({ ratioMinGuarantee: 5_200_000, nonCompeteRatio: 0.03 }),
+      { classRevenue: 12_000_000 },
+      DEFAULT_RATES_2025,
+      taxTable
+    );
+    expect(b.baseP).toBe(5_200_000);
+    expect(b.nonCompeteP).toBe(360_000);
+    expect(b.bizIncomeP).toBe(160_000);
+    expect(b.wageTaxable).toBe(5_200_000 - 160_000 + 360_000);
   });
 
   it("보상금은 보장급(§47)과 무관하게 언제나 매출 × 비율", () => {
