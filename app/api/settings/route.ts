@@ -93,6 +93,15 @@ export async function PATCH(req: Request) {
         payday: Number(data.payday) || 7,
         // 비우면 회사명이 통장 적요로 나가 자리가 넘친다 — 기본 약칭으로 되돌린다
         transferAlias: String(data.transferAlias ?? "").trim() || "유쌤",
+        // 별도 사업장(사업소득 지급처) — 비율제 근로자의 근로소득 상한 초과분을 지급하는 사업자.
+        // 보낸 칸만 고치고, 빈칸은 비운다(null). lib/ratio-employee.ts
+        ...Object.fromEntries(
+          (
+            ["bizPayerName", "bizPayerBizNo", "bizPayerCeo", "bizPayerAddress", "bizPayerPhone", "bizPayerAlias"] as const
+          )
+            .filter((k) => k in data)
+            .map((k) => [k, String(data[k] ?? "").trim() || null])
+        ),
       },
       create: { id: 1, ...data, payday: Number(data.payday) || 7 },
     });

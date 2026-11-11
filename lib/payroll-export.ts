@@ -24,6 +24,7 @@
 // `xlsx` 를 쓴다** — 그쪽은 은행 양식이 "구조를 절대 바꾸지 말라" 는 표라 서식을 얹지 않는다.
 import * as XLSX from "xlsx-js-style";
 import { variableOvertimeOf } from "./payroll";
+import { recordSplit } from "./ratio-employee";
 
 export interface ExportPayrollRecord {
   incomeType: string;
@@ -49,6 +50,14 @@ export interface ExportPayrollRecord {
   bonusP: number;
   unusedLeaveP: number;
   gross: number;
+  /**
+   * 비율제 근로자의 근로소득 상한 초과분 — 별도 사업장이 지급하는 사업소득이라 **본표(이 회사 급여)에서
+   * 빼고** 별도 시트로 낸다. 한 사업장에서 근로·사업소득을 함께 신고하지 않는다(lib/ratio-employee.ts).
+   */
+  bizIncomeP?: number | null;
+  bizTaxD?: number | null;
+  bizLocalTaxD?: number | null;
+  totalDeduct?: number;
   pensionD: number;
   employmentD: number;
   healthD: number;
@@ -61,6 +70,17 @@ export interface ExportPayrollRecord {
   otherD: number;
   net: number;
   employee: { name: string; empNo: string; rrn?: string | null; resignDate?: Date | string | null };
+}
+
+/** 별도 사업장 시트 한 줄 — 비율제 근로자의 근로소득 상한 초과분(사업소득 3.3%) */
+export interface BizExportRow {
+  name: string;
+  payDate: string;
+  amount: number; // 지급액(사업소득)
+  tax: number; // 소득세 3%
+  local: number; // 지방소득세 0.3%
+  net: number; // 차인지급액
+  id: string; // 주민등록번호
 }
 
 export interface ExportRow {
@@ -141,10 +161,20 @@ export function buildExportRow(r: ExportPayrollRecord, payDate: string, status =
   const unusedLeavePay = r.unusedLeaveP || 0;
   const bonus = r.bonusP || 0;
   const incentive = r.incentiveP || 0;
+  // 비율제 근로자의 상한 초과분은 이 회사의 급여가 아니다 — 총계·입금액에서 빼고 별도 시트로 보낸다
+  const split = recordSplit({
+    gross: r.gross || 0,
+    net: r.net || 0,
+    totalDeduct: r.totalDeduct ?? 0,
+    bizIncomeP: r.bizIncomeP,
+    bizTaxD: r.bizTaxD,
+    bizLocalTaxD: r.bizLocalTaxD,
+  });
+  const gross = split.wage.gross;
   // 세전급여 = 총계에서 따로 열이 있는 항목들을 뺀 나머지
   // (기본급·주휴·직책수당·식대·차량유지비 + **포괄임금 약정분**이 여기 뭉쳐 들어간다.
   //  약정분은 계약된 월 급여의 일부이므로 오버타임이 아니라 급여 쪽에 있어야 맞다 — 원래 시트가 그렇다)
-  const basePay = (r.gross || 0) - incentive - overtimePay - unusedLeavePay - bonus;
+  const basePay = gross - incentive - overtimePay - unusedLeavePay - bonus;
   return {
     name: `${r.employee.name}선생님`,
     payDate,
@@ -153,14 +183,19 @@ export function buildExportRow(r: ExportPayrollRecord, payDate: string, status =
     overtimePay,
     unusedLeavePay,
     bonus,
-    grossTotal: r.gross || 0,
+    grossTotal: gross,
     deduction: statutoryDeductionOf(r),
-    netPay: r.net || 0,
+    netPay: split.wage.net,
     retention: r.retentionD || 0,
     parking: r.parkingD || 0,
     expense: r.expenseD || 0,
     otherDeduct: r.otherD || 0,
-    note: r.incomeType === "FREELANCE" ? "3.3% 적용" : "4대보험(근로소득)",
+    note:
+      r.incomeType === "FREELANCE"
+        ? "3.3% 적용"
+        : split.biz
+        ? "4대보험(근로소득) · 상한 초과분 별도 시트"
+        : "4대보험(근로소득)",
     id: r.employee.rrn || "",
     status,
   };
@@ -183,6 +218,28 @@ export function reconcileRow(row: ExportRow): number {
 
 const MONEY = "#,##0;-#,##0"; // 음수는 앞에 - (환급/상계)
 
+/** 별도 사업장 시트 한 줄 — 상한을 넘지 않은 기록이면 null */
+export function buildBizExportRow(r: ExportPayrollRecord, payDate: string): BizExportRow | null {
+  const split = recordSplit({
+    gross: r.gross || 0,
+    net: r.net || 0,
+    totalDeduct: r.totalDeduct ?? 0,
+    bizIncomeP: r.bizIncomeP,
+    bizTaxD: r.bizTaxD,
+    bizLocalTaxD: r.bizLocalTaxD,
+  });
+  if (!split.biz) return null;
+  return {
+    name: `${r.employee.name}선생님`,
+    payDate,
+    amount: split.biz.gross,
+    tax: split.biz.tax,
+    local: split.biz.local,
+    net: split.biz.net,
+    id: r.employee.rrn || "",
+  };
+}
+
 /** 급여 기록 목록 → 세무사무소 제출용 워크북 버퍼 */
 export function buildPayrollExportWorkbook(args: {
   year: number;
@@ -190,11 +247,16 @@ export function buildPayrollExportWorkbook(args: {
   payday: number;
   companyName: string;
   records: ExportPayrollRecord[];
-}): { buffer: Buffer; rows: ExportRow[]; mismatches: string[]; missingId: string[] } {
+  /** 별도 사업장(사업소득 지급처) 상호 — 상한 초과분 시트 제목에 적는다 */
+  bizPayerName?: string | null;
+}): { buffer: Buffer; rows: ExportRow[]; bizRows: BizExportRow[]; mismatches: string[]; missingId: string[] } {
   const payDate = payDateOf(args.year, args.month, args.payday);
   const rows = args.records.map((r) =>
     buildExportRow(r, payDate, exportStatusOf(r.employee.resignDate, args.year, args.month))
   );
+  const bizRows = args.records
+    .map((r) => buildBizExportRow(r, payDate))
+    .filter((x): x is BizExportRow => !!x);
 
   // 평소 0 인 열은 원래 시트에 없다 — 값이 있는 달에만 붙여 합계가 맞게 한다
   const hasExpense = rows.some((r) => r.expense !== 0);
@@ -366,6 +428,64 @@ export function buildPayrollExportWorkbook(args: {
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, `${args.year}년 ${args.month}월`);
+  // 비율제 근로자의 근로소득 상한 초과분 — 지급처가 다른 사업장이라 신고도 따로다. 시트를 갈라 낸다
+  if (bizRows.length) XLSX.utils.book_append_sheet(wb, bizSheet(args, payDate, bizRows), "별도 사업장 사업소득");
   const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
-  return { buffer, rows, mismatches, missingId };
+  return { buffer, rows, bizRows, mismatches, missingId };
+}
+
+/** 별도 사업장 시트 — 성명·지급액·소득세·지방소득세·차인지급액·ID */
+function bizSheet(
+  args: { year: number; month: number; bizPayerName?: string | null },
+  payDate: string,
+  rows: BizExportRow[]
+) {
+  const payer = (args.bizPayerName ?? "").trim() || "별도 사업장(설정에서 상호를 넣으세요)";
+  const header = ["", "지급일", "지급액(사업소득)", "소득세(3%)", "지방소득세(0.3%)", "차인지급액", "ID", "비고"];
+  const sum = (pick: (r: BizExportRow) => number) => rows.reduce((a, r) => a + pick(r), 0);
+  const aoa: any[][] = [
+    [`${payer} · ${args.year}년 ${args.month}월 사업소득 지급자료 (지급일 ${payDate})`],
+    header,
+    ...rows.map((r) => [r.name, r.payDate, r.amount, r.tax, r.local, r.net, r.id, "비율제 근로자 근로소득 상한 초과분"]),
+    [`합계 (${rows.length}명)`, "", sum((r) => r.amount), sum((r) => r.tax), sum((r) => r.local), sum((r) => r.net), "", ""],
+    [],
+    ["※ 이 시트는 위 사업장 명의의 사업소득(3.3%) 신고분입니다 — 첫 시트(근로소득)와 섞지 마세요."],
+  ];
+  const missing = rows.filter((r) => !r.id).map((r) => r.name);
+  if (missing.length) aoa.push([`⚠️ 주민등록번호(ID)가 비어 있는 사람: ${missing.join(", ")}`]);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const NAVY = "1F3864";
+  const thin = { style: "thin", color: { rgb: "BFBFBF" } };
+  const box = { top: thin, bottom: thin, left: thin, right: thin };
+  const lastCol = header.length - 1;
+  const totalRow = rows.length + 2;
+  const put = (r: number, c: number, s: any) => {
+    const addr = XLSX.utils.encode_cell({ r, c });
+    if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+    ws[addr].s = s;
+  };
+  put(0, 0, { font: { bold: true, sz: 13, color: { rgb: NAVY } } });
+  for (let c = 0; c <= lastCol; c++)
+    put(1, c, {
+      font: { bold: true, sz: 10, color: { rgb: "FFFFFF" } },
+      fill: { patternType: "solid", fgColor: { rgb: NAVY } },
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border: box,
+    });
+  for (let r = 2; r <= totalRow; r++)
+    for (let c = 0; c <= lastCol; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      const num = ws[addr] && typeof ws[addr].v === "number";
+      if (num) ws[addr].z = MONEY;
+      put(r, c, {
+        font: { sz: 10, bold: r === totalRow },
+        fill: r === totalRow ? { patternType: "solid", fgColor: { rgb: "DDEBF7" } } : undefined,
+        alignment: { horizontal: num ? "right" : c === 0 ? "left" : "center", vertical: "center" },
+        border: box,
+      });
+    }
+  for (let r = totalRow + 1; r < aoa.length; r++) put(r, 0, { font: { sz: 10, bold: true, color: { rgb: "C00000" } } });
+  ws["!cols"] = [{ wch: 14 }, { wch: 10 }, { wch: 15 }, { wch: 13 }, { wch: 15 }, { wch: 14 }, { wch: 17 }, { wch: 30 }];
+  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } }];
+  return ws;
 }

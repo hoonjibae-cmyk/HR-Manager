@@ -141,6 +141,7 @@ async function main() {
             mealAllow: c.mealAllow,
             carAllow: c.carAllow,
             isContractor: c.isContractor,
+            ratioEmployee: c.ratioEmployee,
           }
         : {
             // 계약 이력이 없는 달은 직원 카드로 대신한다 — 근거에 그렇게 적는다
@@ -150,6 +151,7 @@ async function main() {
             mealAllow: e.mealAllow,
             carAllow: e.carAllow,
             isContractor: e.isContractor,
+            ratioEmployee: e.ratioEmployee,
           };
 
       const est = estimateContractBase(terms, { weeklyContractual, weeklyHoliday, prorate });

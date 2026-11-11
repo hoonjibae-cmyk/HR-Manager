@@ -1,10 +1,11 @@
 // 급여명세서 / 사업소득명세서 / 각종 증명서 템플릿
 
-import { won, wonUnit, ymd, ymdKo } from "./format";
+import { won, wonUnit, ymd, ymdKo, josa } from "./format";
 import { INCOME_TYPE_LABEL } from "./constants";
 import { logoImg, stampImg, type DocCompany, type DocEmployee } from "./documents";
 import { carryoverNotice, type CarryoverInfo } from "./leave-payout";
 import { ratioPctLabel } from "./non-compete";
+import { recordSplit, type BizPayer } from "./ratio-employee";
 import {
   summarizeIncentive,
   summarizeRevenueShare,
@@ -66,6 +67,15 @@ export interface DocPayroll {
   firstSentAt?: Date | string | null;
   /** 그 달에 수당 대신 다음 기간으로 이월한 미사용 연차 — 있으면 명세서에 그 사실을 적는다 */
   leaveCarryover?: CarryoverInfo | null;
+  /** 비율제 근로계약으로 산정한 기록 — 기본급 자리를 '비율급' 으로 적는다 */
+  ratioEmployee?: boolean | null;
+  /**
+   * 비율제 근로자의 근로소득 상한 초과분 — `gross` 안의 일부지만 이 회사의 임금이 아니다.
+   * 임금명세서에서는 빼고, 별도 사업장의 「사업소득 지급명세서」(bizIncomeSlipHtml)에 싣는다.
+   */
+  bizIncomeP?: number | null;
+  bizTaxD?: number | null;
+  bizLocalTaxD?: number | null;
 }
 
 function esc(s: any): string {
@@ -77,7 +87,7 @@ function head(c: DocCompany, extra = ""): string {
   return `<div class="company-head">
     <div class="cbrand">${logoImg(c)}
       <div><div class="cname">${esc(c.name)}</div>
-        <div class="cmeta">대표 ${esc(c.ceo)} · 사업자등록번호 ${esc(c.bizNo)}<br/>${esc(c.address)} · ${esc(c.phone)}</div></div>
+        <div class="cmeta">대표 ${esc(c.ceo)} · 사업자등록번호 ${esc(c.bizNo)}<br/>${esc(c.address)}${c.phone ? ` · ${esc(c.phone)}` : ""}</div></div>
     </div>
     <div style="text-align:right">${extra}</div>
   </div>`;
@@ -102,15 +112,23 @@ export function payslipHtml(args: {
   payroll: DocPayroll;
   company: DocCompany;
   payDate?: Date;
+  /** 별도 사업장 — 근로소득 상한을 넘은 비율급을 사업소득으로 지급하는 곳(있을 때 상호를 적는다) */
+  bizPayer?: BizPayer | null;
 }): string {
   const { employee: e, payroll: p, company: c } = args;
   const isFree = p.incomeType === "FREELANCE";
   const title = isFree ? "사업소득 지급명세서" : "임금명세서";
   const payDate = args.payDate ?? new Date();
+  // 비율제 근로계약 — 기본급 자리가 비율급(성과급)이다. 근로소득 상한을 넘은 몫은 이 회사의 임금이
+  // 아니므로 이 명세서에서 빼고(합계도 근로분만) 별도 사업장의 사업소득 지급명세서로 넘긴다.
+  const ratioWorker = p.payScheme === "RATIO" && p.ratioEmployee === true;
+  const split = recordSplit(p);
+  const bizPart = split.biz?.gross ?? 0;
+  const baseLabel = ratioWorker ? (bizPart ? "비율급(근로소득분)" : "비율급") : "기본급";
 
   const payRows = (
     [
-      ["기본급", p.baseP],
+      [baseLabel, p.baseP - bizPart],
       ["추가근로수당", p.extraP],
       ["연장근로수당", p.overtimeP],
       ["야간근로수당", p.nightP],
@@ -428,13 +446,29 @@ export function payslipHtml(args: {
       p.nonCompeteP ? "지급 항목" : "임금 항목"
     }</th><th>지급 금액</th><th>공제 항목</th><th>공제 금액</th></tr></thead>
     <tbody>${bodyRows}
-      <tr class="total"><td>지급액 계</td><td class="num">${won(p.gross)}</td><td>공제액 계</td><td class="num">${won(p.totalDeduct)}</td></tr>
-      <tr class="total"><td colspan="3" style="text-align:right">실수령액</td><td class="num">${won(p.net)}</td></tr>
+      <tr class="total"><td>지급액 계</td><td class="num">${won(split.wage.gross)}</td><td>공제액 계</td><td class="num">${won(split.wage.totalDeduct)}</td></tr>
+      <tr class="total"><td colspan="3" style="text-align:right">실수령액</td><td class="num">${won(split.wage.net)}</td></tr>
     </tbody>
   </table>
   ${basisBlock}
   <div class="clause" style="margin-top:10px">
     ${isHourly ? `<div class="small">· 기본급 = 기본 근로시간 × 시급</div>` : ""}
+    ${
+      ratioWorker
+        ? `<div class="small">· 비율급 = 담당 원생 수강료 입금액 × 근로계약서 제4조의 비율(성과급)로, 소정근로와 주휴일 임금이 포함되어 있습니다. 통상시급 ${won(
+            p.hourlyWage
+          )}원은 그 달 임금 ÷ 월 소정근로시간 환산이며(근로기준법 시행령 §6②6), 연장·휴일·야간수당과 연차수당의 기준입니다.</div>`
+        : ""
+    }
+    ${
+      bizPart
+        ? `<div class="small">· 이 달 비율급 ${won(p.baseP)}원 중 근로소득 상한 <b>${won(
+            p.baseP - bizPart
+          )}원</b>을 넘는 <b>${won(bizPart)}원</b>은 이 명세서의 임금이 아니며, 별도 사업장${
+            args.bizPayer ? `(${esc(args.bizPayer.name)})` : ""
+          }이 사업소득으로 지급합니다 — 함께 첨부한 「사업소득 지급명세서」를 보세요.</div>`
+        : ""
+    }
     <div class="small">· 추가근로수당(연장) = 연장근로시간 × 통상시급 <span class="muted">(주 40시간 이내 — 가산 없음)</span> &nbsp; · 연장근로수당(법정초과) = 1일 8시간·주 40시간 초과시간 × 통상시급 × 1.5</div>
     ${
       isHourly
@@ -495,6 +529,52 @@ export function payslipHtml(args: {
         : ""
     }
     <div class="small">· 본 명세서는 근로기준법 제48조에 따라 교부됩니다.</div>
+  </div>`;
+}
+
+/* ============ 사업소득 지급명세서 — 별도 사업장 (비율제 근로자의 근로소득 상한 초과분) ============ */
+/**
+ * 비율제 근로자의 비율급 중 **근로소득 상한을 넘은 몫**을 별도 사업장이 사업소득(3.3%)으로 지급한 명세.
+ *
+ * 머리글·지급자는 **이 회사가 아니라 별도 사업장**이다 — 한 사업장에서 같은 사람에게 근로·사업소득을
+ * 함께 처리하지 않는다는 세무대리인 의견에 따라 지급처를 갈랐으므로, 문서도 지급처별로 낸다.
+ * 이 회사의 임금명세서와 같은 PDF 에 함께 묶어 보낸다(받는 사람은 한 사람이다).
+ */
+export function bizIncomeSlipHtml(args: {
+  employee: DocEmployee;
+  payroll: DocPayroll;
+  /** 지급하는 별도 사업장 */
+  payer: BizPayer;
+  /** 근로계약을 맺은 회사 — 무엇의 초과분인지 적는 데만 쓴다 */
+  company: DocCompany;
+  payDate?: Date;
+}): string {
+  const { employee: e, payroll: p, payer } = args;
+  const split = recordSplit(p);
+  const biz = split.biz ?? { gross: 0, tax: 0, local: 0, totalDeduct: 0, net: 0 };
+  const payDate = args.payDate ?? new Date();
+  const cap = p.baseP - biz.gross;
+  const head2 = head({ name: payer.name, ceo: payer.ceo, bizNo: payer.bizNo, address: payer.address, phone: payer.phone }, `<div class="small">지급일: ${ymdKo(payDate)}</div><div class="badge">사업소득(3.3%)</div>`);
+  return `${head2}
+  <div class="doc-title" style="letter-spacing:0.2em">사업소득 지급명세서</div>
+  <p style="text-align:center" class="muted">${p.year}년 ${p.month}월분</p>
+  <table class="kv">
+    <tr><th>성명</th><td>${esc(e.name)}</td><th>지급자</th><td>${esc(payer.name)}</td></tr>
+    <tr><th>지급 내용</th><td colspan="3">강의 용역 대가 — 비율급 중 월 ${won(cap)}원을 넘는 부분</td></tr>
+  </table>
+  <table class="pay">
+    <thead><tr><th colspan="2">지 급</th><th colspan="2">공 제</th></tr>
+    <tr><th>지급 항목</th><th>지급 금액</th><th>공제 항목</th><th>공제 금액</th></tr></thead>
+    <tbody>
+      <tr><td>사업소득</td><td class="num">${won(biz.gross)}</td><td>소득세(3%)</td><td class="num">${won(biz.tax)}</td></tr>
+      <tr><td></td><td class="num"></td><td>지방소득세(0.3%)</td><td class="num">${won(biz.local)}</td></tr>
+      <tr class="total"><td>지급액 계</td><td class="num">${won(biz.gross)}</td><td>공제액 계</td><td class="num">${won(biz.totalDeduct)}</td></tr>
+      <tr class="total"><td colspan="3" style="text-align:right">차인지급액</td><td class="num">${won(biz.net)}</td></tr>
+    </tbody>
+  </table>
+  <div class="clause" style="margin-top:10px">
+    <div class="small">· 이 금액은 ${esc(josa(args.company.name, "과", "와"))}의 근로계약(제4조)에서 근로소득 상한(월 ${won(cap)}원)을 넘는 비율급으로, ${esc(e.name)}님과 ${esc(payer.name)} 사이의 계약에 따라 ${esc(josa(payer.name, "이", "가"))} 지급합니다. 근로소득이 아니므로 4대보험료·근로소득세를 공제하지 않습니다.</div>
+    <div class="small">· 사업소득 원천징수: 지급액의 3.3%(소득세 3% + 지방소득세 0.3%) — 「소득세법」 제127조. 다른 소득과 합산하여 다음 해 5월 종합소득세 신고 대상이 될 수 있습니다.</div>
   </div>`;
 }
 
@@ -737,8 +817,10 @@ export function revenueDetailHtml(args: {
   students: RosterStudent[];
   /** 배분율 — **계약**의 값(완전비율제 ratioPercent / 인센티브 incRevenuePercent) */
   percent: number;
-  /** 사업소득(완전비율제) 인지 인센티브(월급+인센티브) 인지 */
-  kind: "BUSINESS" | "INCENTIVE";
+  /** 사업소득(위탁 완전비율제) · 비율급(비율제 근로계약) · 인센티브(월급+인센티브) */
+  kind: "BUSINESS" | "WAGE" | "INCENTIVE";
+  /** 비율제 근로계약의 근로소득 상한 — 넘는 몫이 별도 사업장으로 간다는 것을 적는다 */
+  wageCap?: number | null;
   monthlyPay?: number | null; // 월급여 (인센티브 계약자 교차확인용)
   retention?: number | null; // 퇴직유보금
   /** 명단에 적혀 있던 배분율 — 계약과 다르면 경고를 적는다 */
@@ -747,7 +829,10 @@ export function revenueDetailHtml(args: {
   const { employee: e, company: c } = args;
   const s = summarizeRevenueShare(args.students, { percent: args.percent });
   const isBiz = args.kind === "BUSINESS";
-  const label = isBiz ? "사업소득" : "인센티브";
+  const isWage = args.kind === "WAGE";
+  const label = isBiz ? "사업소득" : isWage ? "비율급" : "인센티브";
+  // 근로소득 상한을 넘은 몫 — 이 회사의 임금이 아니라 별도 사업장의 사업소득이다
+  const overCap = isWage && args.wageCap && s.amount > args.wageCap ? s.amount - args.wageCap : 0;
 
   const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/0+$/, ""));
   const md = (d?: Date | null) =>
@@ -811,6 +896,12 @@ export function revenueDetailHtml(args: {
     ${
       isBiz
         ? `<div class="small">· 본 내역서는 사업소득 지급명세서의 <b>지급총액</b> 산출 근거로 첨부됩니다. 위탁계약이므로 주휴·연차·퇴직금·4대보험은 적용되지 않습니다.</div>`
+        : isWage
+        ? `<div class="small">· 본 내역서는 임금명세서의 <b>비율급</b>(근로계약서 제4조) 산출 근거로 첨부됩니다.${
+            overCap
+              ? ` 이 중 근로소득 상한(월 ${won(args.wageCap!)}원)을 넘는 <b>${won(overCap)}원</b>은 별도 사업장의 「사업소득 지급명세서」에 실립니다.`
+              : ""
+          }</div>`
         : `<div class="small">· 본 내역서는 급여명세서의 <b>인센티브</b> 항목 산출 근거로 첨부됩니다.</div>`
     }
     ${
@@ -833,7 +924,9 @@ export function rosterDetailHtml(args: {
   year: number;
   month: number;
   students: RosterStudent[];
-  kind: "BUSINESS" | "INCENTIVE";
+  kind: "BUSINESS" | "WAGE" | "INCENTIVE";
+  /** 비율제 근로계약의 근로소득 상한 (WAGE) */
+  wageCap?: number | null;
   /** 매출 기준 — 계약상 배분율 */
   percent?: number | null;
   sheetPercent?: number | null;
@@ -854,6 +947,7 @@ export function rosterDetailHtml(args: {
       students: args.students,
       percent: args.percent,
       kind: args.kind,
+      wageCap: args.wageCap ?? null,
       sheetPercent: args.sheetPercent ?? null,
       monthlyPay: args.monthlyPay ?? null,
       retention: args.retention ?? null,

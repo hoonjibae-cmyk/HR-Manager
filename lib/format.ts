@@ -109,3 +109,15 @@ export function ageOf(birthIso: string | null, todayYmd: string): number | null 
   if (tm < bm || (tm === bm && td < bd)) age -= 1;
   return age >= 0 && age < 130 ? age : null;
 }
+
+
+/**
+ * 받침에 맞춘 조사 — `josa("유쌤에듀", "과", "와")` → "유쌤에듀와".
+ * 마지막 글자가 한글이 아니면(영문·숫자·괄호) 판단할 수 없어 `과(와)` 처럼 둘 다 적는다.
+ */
+export function josa(word: string, withFinal: string, withoutFinal: string): string {
+  const w = String(word ?? "");
+  const code = w.charCodeAt(w.length - 1);
+  if (code >= 0xac00 && code <= 0xd7a3) return w + ((code - 0xac00) % 28 ? withFinal : withoutFinal);
+  return `${w}${withFinal}(${withoutFinal})`;
+}

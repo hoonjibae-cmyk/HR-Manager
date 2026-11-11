@@ -32,6 +32,7 @@ export default async function EmployeesPage() {
       position: e.position,
       incomeType: gov?.incomeType ?? e.incomeType,
       payScheme: gov ? paySchemeOf(gov.templateKey) : e.payScheme,
+      ratioEmployee: gov ? gov.ratioEmployee : e.ratioEmployee,
       baseWage: gov?.baseWage ?? e.baseWage,
       ratioPercent: gov ? gov.ratioPercent : e.ratioPercent,
       hireDate: ymd(e.hireDate),

@@ -36,6 +36,11 @@ export interface DocCompany {
   logo?: string | null;
   /** 법인 인감/직인 (data URI). 없으면 `(인)`·`(직인)` 글자만 찍힌다 */
   stamp?: string | null;
+  /**
+   * 별도 사업장 상호 — 비율제 근로계약의 근로소득 상한 조항에 적는다(넘는 부분을 지급하는 사업자).
+   * 비어 있으면 '별도 사업자' 로만 적는다. lib/ratio-employee.ts
+   */
+  bizPayerName?: string | null;
 }
 export interface DocEmployee {
   name: string;
@@ -51,6 +56,10 @@ export interface DocEmployee {
   resignDate?: Date | null;
   incomeType: string;
   payScheme: string;
+  /** 위탁계약(프리랜서) — 카드의 거울. 문서가 4대보험·연차 문구를 가릴 때 쓴다(isContractorContract) */
+  isContractor?: boolean | null;
+  /** 비율제 근로계약 — RATIO 지만 근로자(lib/ratio-employee.ts) */
+  ratioEmployee?: boolean | null;
   baseWage: number;
   positionAllow: number;
   mealAllow: number;
@@ -73,6 +82,12 @@ export interface DocContract {
   mealAllow: number;
   carAllow: number;
   ratioPercent?: number | null;
+  /** 최저보장액(월) — 비율제 근로계약이면 근로기준법 §47 보장급으로 제4조에 적는다 */
+  ratioMinGuarantee?: number | null;
+  /** 비율제 근로계약 — 강의위탁계약서가 아니라 근로계약서(비율급)가 나간다 */
+  ratioEmployee?: boolean | null;
+  /** 근로소득 상한(월) — 넘는 부분은 별도 사업장의 위탁계약에 따른다고 제4조에 적는다 */
+  ratioWageCap?: number | null;
   incThreshold?: number | null;
   incPerStudent?: number | null;
   /** 매출 비율 인센티브 (0.15 = 15%) — 인원 기준과 다른 갈래 */
@@ -294,14 +309,18 @@ export function contractHtml(args: {
 }): string {
   const { employee: e, contract: ct, company: c } = args;
   const isRatio = ct.templateKey === "RATIO" || e.payScheme === "RATIO";
-  if (isRatio) return ratioContractHtml(args);
+  // 비율제 **근로계약**(4대보험)은 강의위탁계약서가 아니라 근로계약서(비율급)다 — 계약이 진실이고,
+  // 계약이 RATIO 가 아닌데 카드만 RATIO 인 옛 자료면 카드의 표시를 본다.
+  const ratioWorker =
+    isRatio && (ct.templateKey === "RATIO" ? ct.ratioEmployee === true : e.ratioEmployee === true);
+  if (isRatio && !ratioWorker) return ratioContractHtml(args);
   const signDate = contractSignDate(ct.startDate, args.printedAt ?? kstNow());
 
   const sched = parseSchedule(e.schedule);
   const workDays = sched.filter((s) => s.work).length;
-  const isHourly = ct.templateKey === "HOURLY" || e.payScheme === "HOURLY";
-  const isIncentive = ct.templateKey === "INCENTIVE" || e.payScheme === "INCENTIVE";
-  const title = `근로계약서 (${PAY_SCHEME_LABEL[e.payScheme] ?? "월급제"})`;
+  const isHourly = !ratioWorker && (ct.templateKey === "HOURLY" || e.payScheme === "HOURLY");
+  const isIncentive = !ratioWorker && (ct.templateKey === "INCENTIVE" || e.payScheme === "INCENTIVE");
+  const title = `근로계약서 (${ratioWorker ? "비율급" : PAY_SCHEME_LABEL[e.payScheme] ?? "월급제"})`;
   const payday = c.payday ?? 7;
   const resignDays = resignNoticeDays(e);
 
@@ -370,7 +389,53 @@ export function contractHtml(args: {
 
   // 제4조 — 임금
   let wageClause = "";
-  if (isHourly) {
+  if (ratioWorker) {
+    // ── 비율급(성과급) 근로계약 ──
+    //  · 산정식은 강의위탁계약서 제5조와 같은 매출 기준(수강료 입금액 × 비율)이고 각주 (가)도 같다.
+    //  · 보장급: 도급(성과급)제 근로자에게는 근로시간에 따른 일정액을 보장해야 한다(근로기준법 §47).
+    //    최저임금은 어느 경우에도 지킨다.
+    //  · 주휴일 임금은 비율급에 포함된 것으로 약정하고, 소정근로를 넘는 연장·야간·휴일근로는 통상시급
+    //    (그 달 임금 ÷ 월 소정근로시간 환산 — 시행령 §6②6)으로 따로 준다(급여 엔진과 같은 식).
+    //  · 근로소득 상한이 있으면 넘는 부분은 이 계약의 임금이 아니라 별도 사업자의 계약에 따른다고 적는다 —
+    //    갑이 실제로 주는 임금과 계약서가 어긋나지 않게(숨기면 갑이 전액을 임금으로 약속한 것이 된다).
+    const pctNum = (ct.ratioPercent ?? 0) * 100;
+    const pct = pctNum % 1 === 0 ? pctNum.toFixed(0) : pctNum.toFixed(1);
+    const guarantee = ct.ratioMinGuarantee && ct.ratioMinGuarantee > 0 ? ct.ratioMinGuarantee : 0;
+    const cap = ct.ratioWageCap && ct.ratioWageCap > 0 ? ct.ratioWageCap : 0;
+    const payer = (c.bizPayerName ?? "").trim();
+    const items: string[] = [
+      `"을"의 임금은 매월 초일부터 말일까지 "을"이 담당한 원생의 수강료(가) 입금액에 <b>${pct}%</b>를 곱하여 산정하는 비율급(성과급)으로 한다.`,
+      (guarantee
+        ? `"갑"은 근로기준법 제47조에 따라 "을"이 그 달의 소정근로일을 모두 근무한 경우 제①항의 금액이 <b>월 ${wonUnit(
+            guarantee
+          )}</b>에 미치지 못하더라도 이를 보장하여 지급한다. `
+        : "") +
+        `어느 경우에도 "을"의 임금은 「최저임금법」에 따른 최저임금 이상으로 하며, 미치지 못하는 경우 "갑"은 그 차액을 지급한다.`,
+      `제①항의 임금에는 소정근로와 주휴일(제5조)에 대한 임금이 포함되어 있다. 소정근로시간을 넘는 연장·야간·휴일근로에 대하여는 통상시급(그 달 이 계약에 따른 임금 ÷ 월 소정근로시간 환산)을 기준으로 근로기준법에 따른 수당을 별도 지급한다.`,
+    ];
+    // 정액 수당(직책수당·식대·차량유지비) — 비율급과 **별도로** 얹는다(급여 엔진과 같다). 근로소득 상한과 무관하다
+    const fixedParts = [
+      ct.positionAllow > 0 ? `직책수당 ${wonUnit(ct.positionAllow)}` : "",
+      ct.mealAllow > 0 ? `식대(비과세) ${wonUnit(ct.mealAllow)}` : "",
+      ct.carAllow > 0 ? `차량유지비(비과세) ${wonUnit(ct.carAllow)}` : "",
+    ].filter(Boolean);
+    if (fixedParts.length)
+      items.push(`"갑"은 제①항의 임금과 별도로 매월 <b>${fixedParts.join(" · ")}</b>을 지급한다.`);
+    if (cap)
+      items.push(
+        `제①항에 따라 산정한 금액 중 <b>월 ${wonUnit(cap)}</b>을 넘는 부분은 이 계약에 따른 임금에 포함하지 아니하며, "을"과 별도 사업자${
+          payer ? `(<b>${esc(payer)}</b>)` : ""
+        } 사이의 계약에 따라 그 사업자가 지급한다. 4대보험료와 근로소득세는 이 계약에 따른 임금에 대하여만 공제한다.`
+      );
+    items.push(
+      `위 급여는 제2, 3조에 따라 책정된 임금이며, 이에 관한 사항이 변경 시 변경된 업무, 직책, 근무장소 및 근로시간 등에 따라 급여가 변경됨에 동의한다.`,
+      `"을"의 임금은 매월 초일부터 말일까지 기산하여, 익월 ${payday}일에 "을"의 통장으로 법정 공제액을 공제한 후 지급하며, 산정 내역(담당 원생별 수강료 입금액)을 임금명세서에 첨부한다. (휴일 전일 당일 지급)`,
+      `"을"의 퇴직 시 근속기간 중 1주 평균 근로시간이 15시간 이상인 주가 1년 이상인 경우 퇴직급여보장법에 따른 법정 퇴직금을 지급한다.`
+    );
+    wageClause = `<div class="clause"><h3>제 4조 (임금)</h3>
+    ${items.map((t, i) => `<p class="sub">${CIRC[i]} ${t}</p>`).join("\n    ")}
+    <p class="footnote">(가) : 수강료는 D.C를 통해 공제된 금액 기준이며, D.C의 경우 쌍둥이 및 세자녀 5%, 직원 30% 할인을 기본 원칙으로 하며, 그 외 할인은 사전에 미리 협의한다. 카드수수료는 별도로 공제하지 아니한다.</p></div>`;
+  } else if (isHourly) {
     const breakLine = e.breakPaid
       ? "유급으로 하여 근로시간에 포함한다"
       : "무급으로 하여 근로시간에서 제외한다";
@@ -842,11 +907,14 @@ export function contractGroups(args: {
 
   // ② 확인서 — 을이 혼자 내는 서류라 갑의 서명이 없다. 이니셜란·쪽번호를 붙이지 않는다.
   const solo: string[] = [];
-  // 퇴직유보금 확인서 — 인센티브·비율제. 유보금을 떼는 근거가 이 확인서다.
-  if (scheme === "INCENTIVE" || scheme === "RATIO")
+  // 비율제 근로계약(4대보험) — 근로자라 아래 두 확인서가 모두 맞지 않는다(유보금을 떼지 않고 퇴직급여를
+  // 정식으로 쌓으며, 개인사업자가 아니다). 위탁 비율제는 지금까지와 같다.
+  const ratioWorker = scheme === "RATIO" && contract.ratioEmployee === true;
+  // 퇴직유보금 확인서 — 인센티브·위탁 비율제. 유보금을 떼는 근거가 이 확인서다.
+  if (scheme === "INCENTIVE" || (scheme === "RATIO" && !ratioWorker))
     solo.push(confirmRetentionHtml({ employee, company }));
-  // 개인사업자 지위 확인서 — 위탁계약(프리랜서). 완전비율제는 성질상 언제나 위탁이다.
-  if (contract.isContractor === true || scheme === "RATIO")
+  // 개인사업자 지위 확인서 — 위탁계약(프리랜서). 완전비율제는 근로계약으로 맺지 않은 한 위탁이다.
+  if (isContractorContract({ payScheme: scheme, isContractor: contract.isContractor, ratioEmployee: contract.ratioEmployee }))
     solo.push(confirmSoleProprietorHtml({ employee, company }));
   if (solo.length) groups.push({ bodies: solo });
 

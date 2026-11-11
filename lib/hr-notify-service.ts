@@ -321,6 +321,7 @@ export async function runProbationNotice(
         isProbation: true,
         probationMonths: true,
         isContractor: true,
+        ratioEmployee: true,
         templateKey: true,
         status: true,
         probationNotifiedAt: true,
@@ -344,7 +345,11 @@ export async function runProbationNotice(
       isProbation: c.isProbation,
       probationMonths: c.probationMonths,
       // 판정은 계약 쪽 값으로 — 위탁계약서에는 수습 조항이 없다
-      contractor: isContractorContract({ isContractor: c.isContractor, payScheme: paySchemeOf(c.templateKey) }),
+      contractor: isContractorContract({
+        isContractor: c.isContractor,
+        payScheme: paySchemeOf(c.templateKey),
+        ratioEmployee: c.ratioEmployee,
+      }),
       active: c.employee?.active !== false,
       resignDate: c.employee?.resignDate ? ymd(c.employee.resignDate) : null,
       status: c.status,

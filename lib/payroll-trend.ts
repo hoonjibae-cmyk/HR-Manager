@@ -157,7 +157,8 @@ export interface PayrollTrend {
 
 const labelOf = (mode: TrendMode, key: string): string => {
   if (mode === "ITEM") return TREND_ITEM_LABEL[key] ?? key;
-  if (mode === "SCHEME") return PAY_SCHEME_LABEL[key] ?? key;
+  // 완전비율제 계열에는 위탁과 비율제 근로계약(4대보험)이 함께 들어 있다 — '(위탁)' 을 붙이지 않는다
+  if (mode === "SCHEME") return key === "RATIO" ? "완전비율제" : PAY_SCHEME_LABEL[key] ?? key;
   if (mode === "DEPARTMENT") return key === NO_DEPARTMENT ? "(부서 미지정)" : key;
   return "지급액 계";
 };

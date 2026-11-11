@@ -47,18 +47,47 @@ export const INC_COUNT_METHOD_LABEL: Record<string, string> = {
  * 법정가산(§56)이 모두 적용되지 않고, **계약서에 적힌 시급 또는 비율로만** 지급한다.
  * 주 15시간을 넘겨도 마찬가지다 — 15시간은 근로자일 때 따지는 기준이다.
  *
- * 완전비율제(RATIO)는 성질상 언제나 위탁계약(위탁계약서 템플릿)이라 플래그와 무관하게 포함한다.
+ * 완전비율제(RATIO)는 **기본이 위탁계약**(강의위탁계약서)이라 `isContractor` 와 무관하게 포함한다.
+ * **예외는 비율제 근로계약(`ratioEmployee`)** 하나다 — 매출 × 비율로 받되 4대보험에 드는 근로자
+ * (2026-11, lib/ratio-employee.ts). 그때는 `isContractor` 가 남아 있어도 근로자로 본다 —
+ * 비율제 안에서 위탁/근로를 고르는 자리는 이 표시 하나다.
  * 세무구분(`incomeType`)과는 **별개**다 — 사업소득으로 신고해도 실질이 근로자면 근로기준법이
  * 적용되므로, 세금 처리 방식만 보고 자동으로 판단하지 않고 계약에 명시적으로 체크하게 한다.
  *
  * 새 제외 지점을 만들 때는 `payScheme === "RATIO"` 를 직접 쓰지 말고 반드시 이 함수를 쓴다.
+ * ⚠ **부분 객체를 만들어 넘길 때는 `ratioEmployee` 를 빠뜨리지 않는다** — 빠지면 비율제 근로자가
+ * 다시 위탁으로 읽혀 4대보험·연차·퇴직급여가 조용히 빠진다.
  */
 export function isContractorContract(
-  e: { payScheme?: string | null; isContractor?: boolean | null } | null | undefined
+  e:
+    | { payScheme?: string | null; isContractor?: boolean | null; ratioEmployee?: boolean | null }
+    | null
+    | undefined
 ): boolean {
   if (!e) return false;
-  return e.isContractor === true || e.payScheme === PAY_SCHEME.RATIO;
+  if (e.payScheme === PAY_SCHEME.RATIO) return e.ratioEmployee !== true;
+  return e.isContractor === true;
 }
+
+/** 비율제 근로계약(매출 × 비율로 받는 4대보험 근로자)인가 — 위탁 비율제와 가르는 유일한 판정 */
+export function isRatioEmployee(
+  e: { payScheme?: string | null; ratioEmployee?: boolean | null } | null | undefined
+): boolean {
+  return !!e && e.payScheme === PAY_SCHEME.RATIO && e.ratioEmployee === true;
+}
+
+/**
+ * 급여형태 라벨 — 완전비율제는 **위탁/근로**를 갈라 적는다(`PAY_SCHEME_LABEL.RATIO` 는 위탁 표기).
+ * 같은 '완전비율제' 로 적으면 4대보험 근로자가 위탁으로 읽혀 엉뚱한 서류·공제로 이어진다.
+ */
+export function paySchemeLabelOf(
+  e: { payScheme?: string | null; ratioEmployee?: boolean | null } | null | undefined
+): string {
+  if (!e?.payScheme) return "";
+  if (isRatioEmployee(e)) return RATIO_EMPLOYEE_LABEL;
+  return PAY_SCHEME_LABEL[e.payScheme] ?? e.payScheme;
+}
+export const RATIO_EMPLOYEE_LABEL = "완전비율제(근로)";
 
 /**
  * 월 정기주차 공제율 — 직원 정보의 `parkingFee`(월 정기주차 비용) 중 직원이 부담하는 몫.

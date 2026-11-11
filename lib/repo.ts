@@ -1,4 +1,5 @@
 // DB ↔ 엔진/문서 어댑터
+import { bizPayerOf, bizPayerMissing, type BizPayer } from "./ratio-employee";
 import { prisma } from "./db";
 import {
   computePayroll,
@@ -14,7 +15,18 @@ import type { DocCompany, DocEmployee, DocContract } from "./documents";
 
 let _taxCache: TaxBracketRow[] | null = null;
 
-export async function getCompany(): Promise<DocCompany & { payday: number; transferAlias: string; stampSeam: boolean; pageInitials: boolean }> {
+export async function getCompany(): Promise<
+  DocCompany & {
+    payday: number;
+    transferAlias: string;
+    stampSeam: boolean;
+    pageInitials: boolean;
+    /** 별도 사업장(사업소득 지급처) — 필수 항목이 다 있을 때만. lib/ratio-employee.ts */
+    bizPayer: BizPayer | null;
+    /** 별도 사업장 정보 중 비어 있는 필수 항목(라벨) */
+    bizPayerMissing: string[];
+  }
+> {
   const c = await prisma.company.findFirst({ where: { id: 1 } });
   if (!c) {
     return {
@@ -29,6 +41,9 @@ export async function getCompany(): Promise<DocCompany & { payday: number; trans
       stamp: null,
       stampSeam: true,
       pageInitials: true,
+      bizPayer: null,
+      bizPayerName: null,
+      bizPayerMissing: bizPayerMissing(null),
     };
   }
   return {
@@ -46,6 +61,10 @@ export async function getCompany(): Promise<DocCompany & { payday: number; trans
     stamp: (c as any).stamp ?? null,
     stampSeam: (c as any).stampSeam ?? true,
     pageInitials: (c as any).pageInitials ?? true,
+    // 비율제 근로자의 근로소득 상한 초과분을 사업소득으로 지급하는 별도 사업장
+    bizPayer: bizPayerOf(c as any),
+    bizPayerName: String((c as any).bizPayerName ?? "").trim() || null,
+    bizPayerMissing: bizPayerMissing(c as any),
   };
 }
 
@@ -105,6 +124,8 @@ export function empToPayInput(e: any): EmployeePayInput {
     incRevenuePercent: e.incRevenuePercent,
     ratioPercent: e.ratioPercent,
     ratioMinGuarantee: e.ratioMinGuarantee,
+    ratioEmployee: e.ratioEmployee ?? false,
+    ratioWageCap: e.ratioWageCap ?? null,
     fixedBaseHours: e.fixedBaseHours,
     fixedOtHours: e.fixedOtHours,
     fixedNightHours: e.fixedNightHours,
@@ -128,6 +149,10 @@ export function empToDoc(e: any): DocEmployee {
     resignDate: e.resignDate,
     incomeType: e.incomeType,
     payScheme: e.payScheme,
+    // 위탁 여부를 문서가 스스로 가린다(임금공제 동의서의 4대보험 문구 등) — 빠지면 비율제 근로자가
+    // 위탁으로, 시급제 위탁이 근로자로 읽힌다
+    isContractor: e.isContractor ?? false,
+    ratioEmployee: e.ratioEmployee ?? false,
     baseWage: e.baseWage,
     positionAllow: e.positionAllow,
     mealAllow: e.mealAllow,
@@ -152,6 +177,9 @@ export function contractToDoc(ct: any): DocContract {
     mealAllow: ct.mealAllow,
     carAllow: ct.carAllow,
     ratioPercent: ct.ratioPercent,
+    ratioMinGuarantee: ct.ratioMinGuarantee ?? null,
+    ratioEmployee: ct.ratioEmployee ?? false,
+    ratioWageCap: ct.ratioWageCap ?? null,
     incThreshold: ct.incThreshold,
     incPerStudent: ct.incPerStudent,
     incRevenuePercent: ct.incRevenuePercent,

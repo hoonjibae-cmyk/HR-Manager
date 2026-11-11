@@ -3,7 +3,13 @@ import { prisma } from "@/lib/db";
 import { PageHeader, StatCard, Pill } from "@/components/ui";
 import PayrollTrendChart from "@/components/PayrollTrendChart";
 import type { TrendRecord } from "@/lib/payroll-trend";
-import { INCOME_TYPE_LABEL, PAY_SCHEME_LABEL, LEAVE_STATUS_LABEL, LEAVE_TYPE_LABEL } from "@/lib/constants";
+import {
+  INCOME_TYPE_LABEL,
+  PAY_SCHEME_LABEL,
+  LEAVE_STATUS_LABEL,
+  LEAVE_TYPE_LABEL,
+  paySchemeLabelOf,
+} from "@/lib/constants";
 import { ymd } from "@/lib/format";
 import {
   buildLeaveCalendar,
@@ -55,6 +61,7 @@ export default async function Dashboard() {
           name: true,
           department: true,
           payScheme: true,
+          ratioEmployee: true,
           contracts: {
             select: {
               id: true,
@@ -163,6 +170,7 @@ export default async function Dashboard() {
       name: e.name,
       department: e.department,
       payScheme: e.payScheme,
+      ratioEmployee: e.ratioEmployee,
       contracts: e.contracts.map((c) => ({
         id: c.id,
         startDate: c.startDate,
@@ -235,7 +243,8 @@ export default async function Dashboard() {
           title="급여형태 분포"
           active={active}
           rows={Object.entries(PAY_SCHEME_LABEL).map(([k, label]) => ({
-            label,
+            // 완전비율제 칸에는 위탁과 비율제 근로계약이 함께 센다
+            label: k === "RATIO" ? "완전비율제" : label,
             n: schemeMap[k] ?? 0,
           }))}
         />
@@ -360,7 +369,7 @@ export default async function Dashboard() {
                     </span>
                   </td>
                   <td className="td">
-                    <Pill kind={r.payScheme}>{PAY_SCHEME_LABEL[r.payScheme]}</Pill>
+                    <Pill kind={r.payScheme}>{paySchemeLabelOf(r)}</Pill>
                   </td>
                   <td className="td tnum">{r.dueDate}</td>
                   <td className="td tnum">

@@ -21,6 +21,8 @@ export interface MakeupTotal {
   department: string | null;
   payScheme: string;
   excludedByScheme: boolean;
+  /** 비율제 근로계약 — 통상시급이 그 달 비율급에서 나와 금액은 급여 산정 때 정해진다 */
+  ratioWorker?: boolean;
   missingSchedule: boolean;
   hourlyWage: number;
   amount: number;
@@ -315,6 +317,14 @@ export default function MakeupCalendar({
                           {t.payScheme === "HOURLY" ? "시급제 · 실근로에 이미 반영" : "완전비율제 · 수당 대상 아님"}
                         </span>
                       )}
+                      {t.ratioWorker && (
+                        <span
+                          className="pill bg-emerald-50 text-emerald-700"
+                          title="비율제 근로계약(4대보험) — 근로자라 시간은 셉니다. 통상시급이 그 달 비율급(근로소득분 ÷ 월 환산시간)에서 나오므로 금액은 급여를 산정할 때 정해집니다."
+                        >
+                          비율제 근로 · 금액은 급여 산정 때
+                        </span>
+                      )}
                       {t.missingSchedule && !t.excludedByScheme && (
                         <span className="pill bg-amber-50 text-amber-700">근로시간표 없음</span>
                       )}
@@ -324,14 +334,20 @@ export default function MakeupCalendar({
                         </span>
                       )}
                     </td>
-                    <td className="td text-right tnum text-slate-500">{won(t.hourlyWage)}</td>
+                    <td className="td text-right tnum text-slate-500">{t.ratioWorker ? "-" : won(t.hourlyWage)}</td>
                     <td className="td text-right tnum">{t.result.extraHours || "-"}</td>
                     <td className="td text-right tnum">{t.result.overtimeHours || "-"}</td>
                     <td className="td text-right tnum">{t.result.holidayHours || "-"}</td>
                     <td className="td text-right tnum">{t.result.holidayOverHours || "-"}</td>
                     <td className="td text-right tnum text-slate-500">{t.result.nightHours || "-"}</td>
                     <td className="td text-right tnum font-bold text-brand-600">
-                      {t.amount ? `${won(t.amount)}원` : "-"}
+                      {t.ratioWorker ? (
+                        <span className="text-xs font-normal text-slate-400">급여 산정 때</span>
+                      ) : t.amount ? (
+                        `${won(t.amount)}원`
+                      ) : (
+                        "-"
+                      )}
                     </td>
                   </tr>
                 ))}

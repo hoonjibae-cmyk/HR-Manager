@@ -134,13 +134,37 @@ describe("mirrorFromContract — 카드에 비출 값", () => {
       incRevenuePercent: null,
       ratioPercent: 0.4,
       ratioMinGuarantee: null,
-      isContractor: true, // 완전비율제는 성질상 언제나 위탁계약
+      isContractor: true, // 완전비율제는 기본이 위탁계약
+      // 비율제 근로계약이 아니면 근로 표시·상한은 비운다 — 새 열의 기본값과 같아 크론이 헛되이 고치지 않는다
+      ratioEmployee: false,
+      ratioWageCap: null,
       fixedBaseHours: null,
       fixedOtHours: null,
       fixedNightHours: null,
       nonCompetePay: null,
       nonCompeteRatio: null,
     });
+  });
+
+  it("비율제 근로계약은 위탁이 아니고, 근로소득 상한이 카드로 옮겨진다", () => {
+    const c = ct(1, "2026-01-01", null, {
+      templateKey: "RATIO",
+      incomeType: "EMPLOYEE",
+      ratioPercent: 0.4,
+      ratioEmployee: true,
+      ratioWageCap: 5_000_000,
+      isContractor: true, // 남은 위탁 체크는 비율제 근로계약 표시에 진다
+    });
+    const m = mirrorFromContract(c);
+    expect(m.isContractor).toBe(false);
+    expect(m.ratioEmployee).toBe(true);
+    expect(m.ratioWageCap).toBe(5_000_000);
+  });
+
+  it("비율제가 아닌 계약에 남은 근로 표시·상한은 카드로 옮기지 않는다", () => {
+    const m = mirrorFromContract(ct(1, "2026-01-01", null, { ratioEmployee: true, ratioWageCap: 5_000_000 }));
+    expect(m.ratioEmployee).toBe(false);
+    expect(m.ratioWageCap).toBeNull();
   });
 
   it("위탁계약의 경업금지 보상금 비율도 카드로 옮겨진다", () => {

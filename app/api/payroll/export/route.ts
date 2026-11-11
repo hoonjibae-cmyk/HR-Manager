@@ -32,18 +32,24 @@ export async function GET(req: Request) {
     );
 
   const company = await getCompany();
-  const { buffer, rows, mismatches, missingId } = buildPayrollExportWorkbook({
+  const { buffer, rows, bizRows, mismatches, missingId } = buildPayrollExportWorkbook({
     year,
     month,
     payday: company.payday ?? 7,
     companyName: company.name,
     records: records as any,
+    bizPayerName: company.bizPayer?.name ?? null,
   });
+  // 비율제 근로자의 상한 초과분이 있는데 별도 사업장 정보가 비어 있으면 화면이 알린다
+  // (시트는 내준다 — 세무사가 먼저 숫자를 봐야 하는 경우가 있다. 다만 지급처 이름이 비어 있다고 적힌다)
+  const bizPayerMissing = bizRows.length && !company.bizPayer ? company.bizPayerMissing : [];
 
   // 되돌리기 어려운 작업은 아니지만, 세무사에게 무엇을 언제 넘겼는지는 남겨 둔다
   await logActivity({
     action: "PAYROLL_EXPORT",
-    summary: `${year}.${month} 세무사무소 제출자료 내려받기 — ${rows.length}명`,
+    summary:
+      `${year}.${month} 세무사무소 제출자료 내려받기 — ${rows.length}명` +
+      (bizRows.length ? ` (별도 사업장 사업소득 ${bizRows.length}명 별도 시트)` : ""),
     meta: mismatches.length ? { mismatches } : undefined,
   }).catch(() => {});
 
@@ -55,7 +61,7 @@ export async function GET(req: Request) {
       "Cache-Control": "no-store",
       // 화면이 경고를 띄울 수 있게 (헤더는 ASCII 만 가능해 base64 로 싣는다)
       "X-Export-Warnings": Buffer.from(
-        JSON.stringify({ mismatches, missingId }),
+        JSON.stringify({ mismatches, missingId, bizPayerMissing }),
         "utf8"
       ).toString("base64"),
     },

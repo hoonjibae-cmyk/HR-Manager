@@ -43,7 +43,11 @@ export default async function LeavePage({
     // **퇴직자도 함께 싣는다** — 미사용 연차수당 정산·이력 확인 때문에 퇴직 후에도 봐야 한다.
     // 화면의 재직상태 필터로 가른다(직원 관리 화면과 같은 방식).
     prisma.employee.findMany({
-      where: { payScheme: { not: "RATIO" }, isContractor: false },
+      // 완전비율제는 기본이 위탁이라 빼지만, 비율제 **근로계약**(4대보험)은 근로자라 연차가 있다
+      where: {
+        isContractor: false,
+        OR: [{ payScheme: { not: "RATIO" } }, { ratioEmployee: true }],
+      },
       orderBy: { empNo: "asc" },
     }),
     prisma.leaveTransaction.findMany(),

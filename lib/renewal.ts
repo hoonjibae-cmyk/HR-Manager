@@ -55,6 +55,8 @@ export interface RenewalEmployee {
   name: string;
   department: string | null;
   payScheme: string;
+  /** 비율제 근로계약(4대보험) — 화면 라벨을 위탁과 가르는 데만 쓴다 */
+  ratioEmployee?: boolean | null;
   contracts: RenewalContract[];
 }
 
@@ -63,6 +65,7 @@ export interface RenewalAlert {
   name: string;
   department: string | null;
   payScheme: string;
+  ratioEmployee?: boolean | null;
   kind: RenewalKind;
   /** 만료일(재계약) 또는 연봉협의 기준일(계약 시작일의 N주년) — `YYYY-MM-DD` */
   dueDate: string;
@@ -154,6 +157,7 @@ export function renewalAlerts(
       name: emp.name,
       department: emp.department,
       payScheme: emp.payScheme,
+      ratioEmployee: emp.ratioEmployee ?? false,
     };
 
     if (gov.endDate) {

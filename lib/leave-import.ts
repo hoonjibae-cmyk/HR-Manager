@@ -218,6 +218,9 @@ export interface LeaveTarget {
   id: number;
   name: string;
   payScheme?: string;
+  /** 위탁 판정(isContractorContract)용 — 비율제 근로계약은 RATIO 여도 연차 대상이다 */
+  isContractor?: boolean | null;
+  ratioEmployee?: boolean | null;
 }
 
 /** 이미 등록돼 있는 사용 트랜잭션 (중복 등록 방지용) */

@@ -12,6 +12,7 @@ import {
 import { parseSchedule } from "@/lib/constants";
 import { resolveNonCompetePay, resolveNonCompeteRatio } from "@/lib/non-compete";
 import { parseProbationMonths } from "@/lib/probation";
+import { normalizeRatioTerms } from "@/lib/ratio-employee";
 
 export const dynamic = "force-dynamic";
 
@@ -99,11 +100,29 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       select: { schedule: true, payScheme: true },
     });
     const scheme = paySchemeOfTemplate(merged.templateKey) ?? owner?.payScheme ?? "MONTHLY";
+    // 완전비율제의 위탁/근로(4대보험)·근로소득 상한 — 고친 뒤의 급여형태로 다시 맞춘다.
+    // 안 보낸 칸은 저장값을 잇고, 비율제가 아니게 바꾸면 근로 표시·상한을 지운다.
+    const ratio = normalizeRatioTerms(
+      {
+        payScheme: scheme,
+        ratioEmployee: "ratioEmployee" in body ? body.ratioEmployee === true : undefined,
+        ratioWageCap: "ratioWageCap" in body ? body.ratioWageCap : undefined,
+        isContractor: merged.isContractor === true,
+      },
+      { ratioEmployee: cur.ratioEmployee, ratioWageCap: cur.ratioWageCap }
+    );
+    if (ratio.error) return NextResponse.json({ error: ratio.error }, { status: 400 });
+    if (ratio.ratioEmployee !== cur.ratioEmployee) data.ratioEmployee = ratio.ratioEmployee;
+    if (ratio.ratioWageCap !== (cur.ratioWageCap ?? null)) data.ratioWageCap = ratio.ratioWageCap;
+    if (ratio.isContractor !== cur.isContractor || "isContractor" in data) data.isContractor = ratio.isContractor;
+    // 비율제 근로계약은 4대보험이 전제다 — 세무구분을 근로소득으로 맞춘다
+    if (ratio.incomeType && (data.incomeType ?? cur.incomeType) !== ratio.incomeType)
+      data.incomeType = ratio.incomeType;
     const nc = resolveNonCompetePay({
       raw: "nonCompetePay" in body ? body.nonCompetePay : undefined,
       fallback: cur.nonCompetePay,
       payScheme: scheme,
-      isContractor: !!merged.isContractor,
+      isContractor: ratio.isContractor,
       terms: { ...merged, schedule: parseSchedule(owner?.schedule ?? "[]") },
     });
     if (nc.error) return NextResponse.json({ error: nc.error }, { status: 400 });
@@ -114,6 +133,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       fallback: cur.nonCompeteRatio,
       payScheme: scheme,
       ratioPercent: merged.ratioPercent,
+      ratioEmployee: ratio.ratioEmployee,
     });
     if (ncr.error) return NextResponse.json({ error: ncr.error }, { status: 400 });
     if (ncr.value !== (cur.nonCompeteRatio ?? null)) data.nonCompeteRatio = ncr.value;

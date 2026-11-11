@@ -136,8 +136,18 @@ function CompanyCard({ company, onSave }: any) {
     name: company?.name ?? "", ceo: company?.ceo ?? "", bizNo: company?.bizNo ?? "",
     phone: company?.phone ?? "", address: company?.address ?? "", payday: company?.payday ?? 7,
     transferAlias: company?.transferAlias ?? "",
+    // 별도 사업장(사업소득 지급처) — 비율제 근로자의 근로소득 상한 초과분을 지급하는 사업자
+    bizPayerName: company?.bizPayerName ?? "",
+    bizPayerBizNo: company?.bizPayerBizNo ?? "",
+    bizPayerCeo: company?.bizPayerCeo ?? "",
+    bizPayerPhone: company?.bizPayerPhone ?? "",
+    bizPayerAddress: company?.bizPayerAddress ?? "",
+    bizPayerAlias: company?.bizPayerAlias ?? "",
   });
   const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v }));
+  // 필수 넷 중 일부만 찼으면 명세서·이체 파일을 만들 수 없다 — 빠진 것을 바로 보여 준다
+  const bizFilled = [f.bizPayerName, f.bizPayerBizNo, f.bizPayerCeo, f.bizPayerAddress].map((v) => !!String(v).trim());
+  const bizPartial = bizFilled.some(Boolean) && !bizFilled.every(Boolean);
   return (
     <div className="card p-5">
       <h2 className="font-bold text-slate-800 mb-4">회사 정보</h2>
@@ -154,6 +164,33 @@ function CompanyCard({ company, onSave }: any) {
           </p>
         </F>
         <F l="회사주소" full><input className="input" value={f.address} onChange={(e) => set("address", e.target.value)} /></F>
+      </div>
+
+      <div className="mt-5 border-t border-slate-100 pt-4">
+        <h3 className="font-semibold text-slate-700 text-sm">별도 사업장 (사업소득 지급처)</h3>
+        <p className="text-xs text-slate-500 mt-1 mb-3 leading-relaxed break-keep">
+          <b>비율제 근로계약</b>에 근로소득 상한을 둔 직원의, 상한을 넘은 비율급을 <b>사업소득(3.3%)</b>으로 지급하는
+          사업자입니다. 이 사업장 명의로 「사업소득 지급명세서」·세무 자료 별도 시트·별도 이체 파일이 나갑니다.
+          그런 직원이 없으면 비워 두세요.
+        </p>
+        <div className="grid md:grid-cols-3 gap-4">
+          <F l="상호"><input className="input" value={f.bizPayerName} onChange={(e) => set("bizPayerName", e.target.value)} /></F>
+          <F l="대표자"><input className="input" value={f.bizPayerCeo} onChange={(e) => set("bizPayerCeo", e.target.value)} /></F>
+          <F l="사업자등록번호"><input className="input" placeholder="000-00-00000" value={f.bizPayerBizNo} onChange={(e) => set("bizPayerBizNo", e.target.value)} /></F>
+          <F l="전화번호 (선택)"><input className="input" value={f.bizPayerPhone} onChange={(e) => set("bizPayerPhone", e.target.value)} /></F>
+          <F l="이체 통장표시 약칭 (선택)">
+            <input className="input" placeholder={f.bizPayerName || "비우면 상호"} value={f.bizPayerAlias} onChange={(e) => set("bizPayerAlias", e.target.value)} />
+            <p className="text-[11px] text-slate-400 mt-1">
+              별도 사업장 이체 파일에서 <b>{(f.bizPayerAlias || f.bizPayerName || "상호")}_7월사업소득</b> 으로 찍힙니다.
+            </p>
+          </F>
+          <F l="주소" full><input className="input" value={f.bizPayerAddress} onChange={(e) => set("bizPayerAddress", e.target.value)} /></F>
+        </div>
+        {bizPartial && (
+          <p className="text-xs text-amber-700 mt-2">
+            상호·사업자등록번호·대표자·주소를 모두 넣어야 사업소득 지급명세서와 별도 이체 파일을 만들 수 있습니다.
+          </p>
+        )}
       </div>
       <div className="flex justify-end mt-4"><button className="btn-primary" onClick={() => onSave(f)}>저장</button></div>
     </div>

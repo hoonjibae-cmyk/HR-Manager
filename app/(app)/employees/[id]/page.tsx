@@ -8,12 +8,13 @@ import NewContractForm from "@/components/NewContractForm";
 import ContractEditForm from "@/components/ContractEditForm";
 import {
   INCOME_TYPE_LABEL,
-  PAY_SCHEME_LABEL,
   CONTRACT_STAGE_LABEL,
   PAYROLL_STATUS_LABEL,
   parseSchedule,
   DAY_KO,
   isContractorContract,
+  isRatioEmployee,
+  paySchemeLabelOf,
 } from "@/lib/constants";
 import { won, wonUnit, ymd, kstTodayYmd } from "@/lib/format";
 import { probationTimeline } from "@/lib/probation";
@@ -81,6 +82,9 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         incomeType: gov.incomeType ?? emp.incomeType,
         nonCompetePay: gov.nonCompetePay ?? null,
         nonCompeteRatio: gov.nonCompeteRatio ?? null,
+        isContractor: gov.isContractor,
+        ratioEmployee: gov.ratioEmployee,
+        ratioWageCap: gov.ratioWageCap ?? null,
       }
     : {
         payScheme: emp.payScheme,
@@ -95,7 +99,12 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         incomeType: emp.incomeType,
         nonCompetePay: emp.nonCompetePay ?? null,
         nonCompeteRatio: emp.nonCompeteRatio ?? null,
+        isContractor: emp.isContractor,
+        ratioEmployee: emp.ratioEmployee,
+        ratioWageCap: emp.ratioWageCap ?? null,
       };
+  // 비율제 근로계약(4대보험 근로자) — 같은 '완전비율제' 라도 위탁과 서식·공제·연차가 다르다
+  const ratioWorker = isRatioEmployee(terms);
   const isMonthlyScheme = terms.payScheme === "MONTHLY" || terms.payScheme === "INCENTIVE";
   const upcoming = emp.contracts
     .filter((c) => c.startDate > now)
@@ -106,7 +115,11 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
   // 위탁계약(강의위탁계약서)은 보상금 비율이 없는 계약을 같은 규칙으로 짚는다(부서 무관).
   const ncMissing = emp.contracts.filter((c) => {
     if (!(gov?.id === c.id || c.startDate > now) || c.files.length > 0) return false;
-    const shape = { payScheme: paySchemeOf(c.templateKey), isContractor: c.isContractor };
+    const shape = {
+      payScheme: paySchemeOf(c.templateKey),
+      isContractor: c.isContractor,
+      ratioEmployee: c.ratioEmployee,
+    };
     if (nonCompeteRatioRequired(shape)) return !c.nonCompeteRatio;
     return !c.nonCompetePay && nonCompeteRequired(emp.department, shape);
   });
@@ -138,7 +151,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
             <h2 className="font-bold text-slate-800 mb-3">기본 정보</h2>
             <dl className="text-sm space-y-2">
               <Row k="구분"><Pill kind={emp.incomeType}>{INCOME_TYPE_LABEL[emp.incomeType]}</Pill></Row>
-              <Row k="급여형태"><Pill kind={emp.payScheme}>{PAY_SCHEME_LABEL[emp.payScheme]}</Pill></Row>
+              <Row k="급여형태"><Pill kind={emp.payScheme}>{paySchemeLabelOf(emp)}</Pill></Row>
               <Row k="입사일">{ymd(emp.hireDate)}</Row>
               <Row k="재직상태">{emp.active ? "재직중" : `퇴직 (${ymd(emp.resignDate)})`}</Row>
               <Row k="연락처">{emp.phone ?? "-"}</Row>
@@ -165,8 +178,16 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
             </p>
             <dl className="text-sm space-y-2">
               <Row k="세무/보험">{INCOME_TYPE_LABEL[terms.incomeType] ?? terms.incomeType}</Row>
-              <Row k="급여형태">{PAY_SCHEME_LABEL[terms.payScheme] ?? terms.payScheme}</Row>
-              {isContractorContract({ payScheme: terms.payScheme, isContractor: emp.isContractor }) && (
+              <Row k="급여형태">{paySchemeLabelOf(terms)}</Row>
+              {ratioWorker && (
+                <Row k="계약 성격">
+                  <span className="pill bg-emerald-50 text-emerald-700">비율제 근로계약(4대보험)</span>
+                  <span className="block text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    매출 × 비율로 받는 근로자 — 4대보험·근로소득세·연차·퇴직급여가 적용됩니다.
+                  </span>
+                </Row>
+              )}
+              {isContractorContract(terms) && (
                 <Row k="계약 성격">
                   <span className="pill bg-amber-50 text-amber-700">위탁계약(프리랜서)</span>
                   <span className="block text-[11px] text-slate-500 mt-1 leading-relaxed">
@@ -177,7 +198,21 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
               )}
               {terms.payScheme === "RATIO" ? (
                 <>
-                  <Row k="위탁비율">{((terms.ratioPercent ?? 0) * 100).toFixed(1)}%</Row>
+                  <Row k={ratioWorker ? "임금 비율" : "위탁비율"}>{((terms.ratioPercent ?? 0) * 100).toFixed(1)}%</Row>
+                  {ratioWorker && (
+                    <Row k="근로소득 상한(월)">
+                      {terms.ratioWageCap ? (
+                        <>
+                          {wonUnit(terms.ratioWageCap)}
+                          <span className="block text-[11px] text-slate-400 mt-0.5">
+                            넘는 비율급은 별도 사업장이 사업소득(3.3%)으로 지급
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-slate-500">없음 (비율급 전액 근로소득)</span>
+                      )}
+                    </Row>
+                  )}
                   {(terms.nonCompeteRatio ?? 0) > 0 && (
                     <Row k="경업금지 보상금">
                       매출의 {ratioPctLabel(terms.nonCompeteRatio ?? 0)}
@@ -187,7 +222,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                     </Row>
                   )}
                   {gov?.ratioMinGuarantee ? (
-                    <Row k="최저보장(월)">{wonUnit(gov.ratioMinGuarantee)}</Row>
+                    <Row k={ratioWorker ? "보장급(월, §47)" : "최저보장(월)"}>{wonUnit(gov.ratioMinGuarantee)}</Row>
                   ) : null}
                 </>
               ) : (
@@ -269,7 +304,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
 
         {/* 중앙: 연차 + 계약 */}
         <div className="space-y-6">
-          {emp.payScheme === "RATIO" ? (
+          {isContractorContract(emp) && emp.payScheme === "RATIO" ? (
             <div className="card p-5">
               <h2 className="font-bold text-slate-800 mb-2">연차 현황</h2>
               <p className="text-sm text-slate-400">
@@ -358,6 +393,8 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                   nonCompetePay: emp.nonCompetePay,
                   nonCompeteRatio: emp.nonCompeteRatio,
                   isContractor: emp.isContractor,
+                  ratioEmployee: emp.ratioEmployee,
+                  ratioWageCap: emp.ratioWageCap ?? null,
                   department: emp.department,
                   schedule: emp.schedule,
                   position: emp.position,
@@ -424,12 +461,20 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                     {c.note ? ` · ${c.note}` : ""}
                   </div>
                   <div className="text-xs text-slate-500 mt-1 tnum">
-                    {PAY_SCHEME_LABEL[paySchemeOf(c.templateKey)]} ·{" "}
+                    {paySchemeLabelOf({ payScheme: paySchemeOf(c.templateKey), ratioEmployee: c.ratioEmployee })} ·{" "}
                     {c.templateKey === "RATIO"
-                      ? `위탁 ${((c.ratioPercent ?? 0) * 100).toFixed(1)}%`
+                      ? `${c.ratioEmployee ? "비율급" : "위탁"} ${((c.ratioPercent ?? 0) * 100).toFixed(1)}%`
                       : `${wonUnit(c.baseWage)}`}
-                    {((c as any).isContractor || c.templateKey === "RATIO") && (
-                      <span className="pill bg-amber-50 text-amber-700 ml-1">위탁</span>
+                    {c.templateKey === "RATIO" && c.ratioEmployee && c.ratioWageCap
+                      ? ` · 근로소득 상한 ${wonUnit(c.ratioWageCap)}`
+                      : ""}
+                    {isContractorContract({
+                      payScheme: paySchemeOf(c.templateKey),
+                      isContractor: c.isContractor,
+                      ratioEmployee: c.ratioEmployee,
+                    }) && <span className="pill bg-amber-50 text-amber-700 ml-1">위탁</span>}
+                    {c.templateKey === "RATIO" && c.ratioEmployee && (
+                      <span className="pill bg-emerald-50 text-emerald-700 ml-1">4대보험</span>
                     )}
                     {c.mealAllow > 0 && ` · 식대 ${wonUnit(c.mealAllow)}`}
                     {c.positionAllow > 0 && ` · 직책 ${wonUnit(c.positionAllow)}`}
@@ -467,6 +512,8 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                         incCountMethod: (c as any).incCountMethod ?? null,
                         ratioPercent: c.ratioPercent,
                         ratioMinGuarantee: c.ratioMinGuarantee,
+                        ratioEmployee: c.ratioEmployee,
+                        ratioWageCap: c.ratioWageCap ?? null,
                         fixedBaseHours: c.fixedBaseHours,
                         fixedOtHours: c.fixedOtHours,
                         fixedNightHours: c.fixedNightHours,

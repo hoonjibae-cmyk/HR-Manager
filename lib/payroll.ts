@@ -77,6 +77,16 @@ export interface EmployeePayInput {
   ratioPercent?: number | null;
   /** 위탁 최저보장액(월) — 만근 시 수수료가 이에 못 미쳐도 보장 (계약서 제5조) */
   ratioMinGuarantee?: number | null;
+  /**
+   * 비율제 **근로계약** — 완전비율제(매출 × 비율)지만 위탁이 아니라 4대보험에 드는 근로자.
+   * 있으면 RATIO 여도 위탁으로 보지 않는다(isContractorContract). lib/ratio-employee.ts
+   */
+  ratioEmployee?: boolean | null;
+  /**
+   * 근로소득 상한(월) — 비율제 근로자만. 비율급 중 이 금액까지만 근로소득(4대보험·근로소득세)이고
+   * 넘는 부분은 **별도 사업장**이 지급하는 사업소득(3.3%)으로 가른다(`splitRatioPay`). 없으면 전액 근로소득.
+   */
+  ratioWageCap?: number | null;
 }
 
 /** 인센티브 퇴직유보금 요율 — 확인서 기준 '인센티브 원천액의 8.3%'(= 1/12) */
@@ -197,6 +207,11 @@ export interface PayrollResult {
   bonusP: number;
   unusedLeaveP: number;
   gross: number;
+  /**
+   * 비율제 근로자의 **근로소득 상한 초과분** — `gross`(그리고 `baseP`) 안의 일부이고, 이 회사의 임금이
+   * 아니라 별도 사업장이 지급하는 사업소득(3.3%)이다. 상한이 없거나 넘지 않으면 0.
+   */
+  bizIncomeP: number;
 
   // 공제
   pensionD: number;
@@ -205,18 +220,53 @@ export interface PayrollResult {
   longTermD: number;
   incomeTaxD: number;
   localTaxD: number;
+  /** `bizIncomeP` 의 사업소득세(3%) — 법정공제(incomeTaxD)와 섞지 않는다(지급처가 다르다) */
+  bizTaxD: number;
+  /** `bizIncomeP` 의 지방소득세(사업소득세의 10%) */
+  bizLocalTaxD: number;
   retentionD: number; // 퇴직유보금 (인센티브×8.3%)
   otherD: number;
   totalDeduct: number;
 
   net: number;
   taxableGross: number; // 과세 대상 급여 (비과세 제외)
+  /** 4대보험·근로소득세의 기준 — 과세 급여에서 별도 사업장 몫(`bizIncomeP`)을 뺀 값 */
+  wageTaxable: number;
   notes: string[];
 }
 
 /** 10원 미만 절사 (Excel ROUNDDOWN(x,-1)) */
 export function floor10(x: number): number {
   return Math.floor(x / 10) * 10;
+}
+
+/**
+ * **비율급을 근로소득(상한까지)과 사업소득(넘는 부분)으로 가른다** — 비율제 근로자 전용.
+ *
+ * 상한이 없거나(null·0 이하) 비율급이 상한 이하면 전부 근로소득이다. 상한은 **비율급에만** 걸린다 —
+ * 연차수당·연장수당·상여처럼 근로자라서 받는 돈은 언제나 근로소득이라 여기 넣지 않는다.
+ */
+export function splitRatioPay(
+  ratioPay: number,
+  cap: number | null | undefined
+): { wage: number; biz: number } {
+  const total = Math.round(ratioPay || 0);
+  if (cap == null || !(cap > 0) || total <= cap) return { wage: total, biz: 0 };
+  const wage = Math.round(cap);
+  return { wage, biz: total - wage };
+}
+
+/**
+ * 사업소득 원천징수 — 소득세 3% + 지방소득세(소득세의 10%), 각각 10원 절사.
+ * 위탁계약 공제(아래 computePayroll)와 같은 식이다. 0 이하면 떼지 않는다.
+ */
+export function businessWithholding(
+  amount: number,
+  rates: Pick<InsuranceRates, "businessIncomeTax" | "localIncomeTaxRate">
+): { tax: number; local: number } {
+  if (!(amount > 0)) return { tax: 0, local: 0 };
+  const tax = floor10(amount * rates.businessIncomeTax);
+  return { tax, local: floor10(tax * rates.localIncomeTaxRate) };
 }
 function round0(x: number): number {
   return Math.round(x);
@@ -513,6 +563,12 @@ export function computePayroll(
   // 주휴(§55)·연차·퇴직유보금·4대보험·법정가산(§56)이 모두 빠지고 계약서의 시급/비율로만 지급한다.
   // 주 15시간을 넘겨도 마찬가지 — 15시간은 '근로자' 일 때 따지는 기준이다.
   const contractor = isContractorContract(emp);
+  // 비율제 근로자 — 매출 × 비율로 받되 근로자(4대보험). 통상시급·가산·연차수당은 근로자 규칙을 따른다.
+  const ratioWorker = emp.payScheme === "RATIO" && !contractor;
+  // 4대보험·근로소득세를 떼는가 — 위탁이거나 세무구분이 사업소득(3.3%)이면 아니다
+  const insured = !(emp.incomeType === "FREELANCE" || contractor);
+  // 비율제 근로자의 근로소득 상한 초과분(별도 사업장 사업소득) — 아래 비율제 분기에서 정한다
+  let bizIncomeP = 0;
 
   const monthlyStdHours =
     Math.max(weeklyContractual + weeklyHoliday, 0) * WEEKS_PER_MONTH;
@@ -566,7 +622,8 @@ export function computePayroll(
   if (emp.payScheme === "HOURLY") {
     hourlyWage = emp.baseWage; // 시급 자체
   } else if (emp.payScheme === "RATIO") {
-    hourlyWage = 0; // 비율제 프리랜서 — 통상시급 개념 미적용
+    // 위탁은 통상시급 개념이 없다. 비율제 근로자는 그 달 비율급이 나와야 정해지므로 아래 분기에서 정한다.
+    hourlyWage = 0;
   } else {
     // 월급제/인센티브: 기준급여 ÷ (소정 + 1.5×약정연장 + 0.5×약정야간).
     // 포괄임금 약정이 없으면 분모가 소정시간뿐이라 기존 계산과 같다.
@@ -631,9 +688,39 @@ export function computePayroll(
           : `최저보장 ${floor.toLocaleString()}원 — 산출 수수료가 이를 넘어 그대로 지급`
       );
     }
+    if (ratioWorker) {
+      // ── 비율제 근로계약 ──
+      // 근로소득 상한: 4대보험에 드는 경우에만 가른다(세무구분이 사업소득이면 어차피 전액 3.3%).
+      const split = insured ? splitRatioPay(baseP, emp.ratioWageCap) : { wage: baseP, biz: 0 };
+      bizIncomeP = split.biz;
+      if (split.biz > 0)
+        notes.push(
+          `근로소득 상한 ${Math.round(emp.ratioWageCap ?? 0).toLocaleString()}원 — 비율급 ${baseP.toLocaleString()}원 중 ` +
+            `${split.wage.toLocaleString()}원은 근로소득(4대보험·근로소득세), ` +
+            `${split.biz.toLocaleString()}원은 별도 사업장이 지급하는 사업소득(3.3%)으로 나눴습니다.`
+        );
+      // 통상시급 — 도급(비율)제 임금은 '그 달 임금 총액 ÷ 총 근로시간'(근로기준법 시행령 §6②6).
+      // 비율급에 주휴일 임금이 포함된 것으로 약정하므로(근로계약서 제4조) 월급제와 같은 월 환산시간
+      // (소정+주휴)×4.345 로 나눈다. 별도 사업장 몫은 이 회사의 임금이 아니라 분자에서 뺀다.
+      // 식대·차량유지비(정액)는 월급제가 총액 안에 두고 나누는 것과 같게 분자에 넣는다.
+      let hours = monthlyStdHours;
+      if (hours <= 0) {
+        hours = 209;
+        notes.push(
+          "⚠️ 근로시간표가 비어 있어 통상시급을 209시간(주 40시간 기준)으로 환산했습니다. " +
+            "직원 정보에 근로시간표를 채우면 계약 소정근로시간 기준으로 다시 계산됩니다."
+        );
+      }
+      const wageBase = split.wage + (emp.mealAllow || 0) + (emp.carAllow || 0);
+      hourlyWage = wageBase > 0 ? round0(wageBase / hours) : 0;
+      notes.push(
+        `통상시급: 그 달 임금 ${wageBase.toLocaleString()}원 ÷ ${round0(hours)}시간 = ${hourlyWage.toLocaleString()}원 ` +
+          `(비율급 — 근로기준법 시행령 §6②6. 연장·휴일·야간수당과 연차수당의 기준)`
+      );
+    }
     // 경업금지 보상금 — 같은 매출에 보상금 비율을 곱해 수수료와 **별도로** 더한다(강의위탁계약서 제5조).
-    // 최저보장은 수수료에만 걸린다 — 보상금은 언제나 매출 × 비율이다.
-    const ncr = emp.nonCompeteRatio ?? 0;
+    // 최저보장은 수수료에만 걸린다 — 보상금은 언제나 매출 × 비율이다. **위탁 전용**(근로계약서에는 없는 조항).
+    const ncr = contractor ? emp.nonCompeteRatio ?? 0 : 0;
     if (ncr > 0) {
       nonCompeteP = round0(rev * ncr);
       notes.push(
@@ -793,9 +880,15 @@ export function computePayroll(
     incomeTaxD = 0,
     localTaxD = 0;
 
+  // 비율제 근로자의 상한 초과분 — 별도 사업장이 지급하는 사업소득이라 법정공제(근로소득)와 따로 뗀다
+  let bizTaxD = 0,
+    bizLocalTaxD = 0;
+  // 4대보험·근로소득세의 기준 — 별도 사업장 몫은 이 회사의 보수가 아니다
+  const wageTaxable = Math.max(taxableGross - bizIncomeP, 0);
+
   // 위탁계약은 근로자가 아니라 4대보험 가입 대상이 아니므로, 세무구분이 실수로
   // EMPLOYEE 로 남아 있어도 보험료를 떼지 않는다 (사업소득 3.3% 로 처리).
-  if (emp.incomeType === "FREELANCE" || contractor) {
+  if (!insured) {
     // 사업소득 3.3% (지급총액 기준)
     incomeTaxD = floor10(gross * rates.businessIncomeTax);
     localTaxD = floor10(incomeTaxD * rates.localIncomeTaxRate);
@@ -805,17 +898,24 @@ export function computePayroll(
           "계약의 세무구분을 '사업소득(3.3%)'으로 맞춰 주세요."
       );
   } else {
-    // 4대보험 (보수월액 = 과세급여 기준)
+    // 4대보험 (보수월액 = 과세급여 기준). 비율제 근로자의 상한 초과분은 빼고 잰다(wageTaxable).
     const pensionBase = Math.min(
-      Math.max(taxableGross, rates.pensionBaseMin),
+      Math.max(wageTaxable, rates.pensionBaseMin),
       rates.pensionBaseMax
     );
     pensionD = floor10(pensionBase * rates.nationalPension);
-    employmentD = floor10(taxableGross * rates.employment);
-    healthD = floor10(taxableGross * rates.health);
+    employmentD = floor10(wageTaxable * rates.employment);
+    healthD = floor10(wageTaxable * rates.health);
     longTermD = floor10(healthD * rates.longTermCare);
-    incomeTaxD = lookupIncomeTax(taxableGross, emp.dependents, taxTable);
+    incomeTaxD = lookupIncomeTax(wageTaxable, emp.dependents, taxTable);
     localTaxD = floor10(incomeTaxD * rates.localIncomeTaxRate);
+    if (bizIncomeP > 0) {
+      ({ tax: bizTaxD, local: bizLocalTaxD } = businessWithholding(bizIncomeP, rates));
+      notes.push(
+        `별도 사업장 사업소득 ${bizIncomeP.toLocaleString()}원 — 사업소득세 ${bizTaxD.toLocaleString()}원 + ` +
+          `지방소득세 ${bizLocalTaxD.toLocaleString()}원 원천징수 (4대보험·근로소득세 대상에서 제외)`
+      );
+    }
   }
 
   // --- 퇴직유보금: 인센티브 계약은 **인센티브 원천액**의 1/12(8.3%)를 별도통장 송금(공제) ---
@@ -843,6 +943,8 @@ export function computePayroll(
     longTermD +
     incomeTaxD +
     localTaxD +
+    bizTaxD +
+    bizLocalTaxD +
     retentionD +
     otherD;
   const net = gross - totalDeduct;
@@ -866,17 +968,21 @@ export function computePayroll(
     bonusP,
     unusedLeaveP,
     gross,
+    bizIncomeP,
     pensionD,
     employmentD,
     healthD,
     longTermD,
     incomeTaxD,
     localTaxD,
+    bizTaxD,
+    bizLocalTaxD,
     retentionD,
     otherD,
     totalDeduct,
     net,
     taxableGross,
+    wageTaxable,
     notes,
   };
 }

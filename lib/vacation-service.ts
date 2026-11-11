@@ -221,6 +221,7 @@ async function allEmployeesForTargets(): Promise<(TargetEmployee & { schedule: s
       resignDate: true,
       slackUserId: true,
       isContractor: true,
+      ratioEmployee: true,
       payScheme: true,
       schedule: true,
     },

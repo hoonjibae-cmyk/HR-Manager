@@ -18,6 +18,7 @@
 
 import * as XLSX from "xlsx";
 import { isContractorContract } from "./constants";
+import { recordSplit } from "./ratio-employee";
 
 /* ============================ 은행명 ============================ */
 
@@ -76,10 +77,20 @@ export interface TransferPayrollRecord {
   retentionD: number; // 퇴직유보금 (별도 통장)
   incomeType: string;
   payScheme: string;
+  /** 비율제 근로계약으로 산정한 기록(스냅샷) — RATIO 여도 '급여' 로 적는다 */
+  ratioEmployee?: boolean | null;
+  /**
+   * 비율제 근로자의 근로소득 상한 초과분 — `net` 안에 들어 있지만 **별도 사업장이 보내는 돈**이다.
+   * 이 회사 파일에서는 빼고, 별도 사업장 파일(`payer: "BIZ"`)에 싣는다(출금 계좌가 다르다).
+   */
+  bizIncomeP?: number | null;
+  bizTaxD?: number | null;
+  bizLocalTaxD?: number | null;
   employee: {
     name: string;
     empNo: string;
     isContractor?: boolean | null;
+    ratioEmployee?: boolean | null;
     bankName?: string | null;
     bankAccount?: string | null;
     bankHolder?: string | null;
@@ -109,17 +120,33 @@ export interface TransferRow {
  * 통장에 '사업소득' 으로 찍히면 근로자성을 스스로 부정하는 기록이 남는다.
  */
 export function incomeLabelOf(r: TransferPayrollRecord): string {
-  return isContractorContract({ payScheme: r.payScheme, isContractor: r.employee.isContractor })
+  return isContractorContract({
+    payScheme: r.payScheme,
+    isContractor: r.employee.isContractor,
+    // 기록에 새긴 값이 우선 — 산정 때 비율제 근로계약이었으면 그 달 돈은 급여다
+    ratioEmployee: r.ratioEmployee ?? r.employee.ratioEmployee,
+  })
     ? "사업소득"
     : "급여";
+}
+
+/** 비율제 근로자의 상한 초과분(별도 사업장 사업소득) 실지급액 — 없으면 0 */
+function bizNetOf(r: TransferPayrollRecord): number {
+  return recordSplit({ gross: 0, totalDeduct: 0, net: r.net, bizIncomeP: r.bizIncomeP, bizTaxD: r.bizTaxD, bizLocalTaxD: r.bizLocalTaxD })
+    .biz?.net ?? 0;
 }
 
 export interface BuildTransferArgs {
   year: number;
   month: number;
-  /** 통장표시 앞에 붙는 학원 약칭 (Company.transferAlias) */
+  /** 통장표시 앞에 붙는 학원 약칭 (Company.transferAlias, 별도 사업장 파일이면 그 사업장 약칭) */
   alias: string;
   records: TransferPayrollRecord[];
+  /**
+   * 어느 지급처의 파일인가 — 기본은 이 회사. `"BIZ"` 면 별도 사업장이 보내는 사업소득(비율제 근로자의
+   * 근로소득 상한 초과분)만 싣는다. 출금 계좌가 다른 사업자라 **한 파일에 섞지 않는다**.
+   */
+  payer?: "COMPANY" | "BIZ";
 }
 
 export interface TransferPlan {
@@ -128,6 +155,8 @@ export interface TransferPlan {
   missingAccount: string[];
   /** 보낼 금액이 0 이하라 건너뛴 사람 */
   zeroAmount: string[];
+  /** 이 회사 파일에서 빠진 별도 사업장 몫이 있는 사람 — 별도 사업장 파일을 따로 받아야 한다 */
+  bizExcluded: string[];
   total: number;
 }
 
@@ -146,6 +175,31 @@ export function buildTransferRows(args: BuildTransferArgs): TransferPlan {
   const rows: TransferRow[] = [];
   const missingAccount: string[] = [];
   const zeroAmount: string[] = [];
+  const bizExcluded: string[] = [];
+
+  // 별도 사업장 파일 — 상한 초과분만, 사업소득으로. 유보금·이 회사 급여는 싣지 않는다
+  if (args.payer === "BIZ") {
+    for (const r of records) {
+      const amount = bizNetOf(r);
+      if (amount <= 0) continue;
+      const e = r.employee;
+      const bank = normalizeBankName(e.bankName);
+      const account = normalizeAccountNo(e.bankAccount);
+      if (!bank || !account) missingAccount.push(e.name);
+      else
+        rows.push({
+          bank,
+          account,
+          amount,
+          holder: (e.bankHolder || "").trim() || e.name,
+          depositMemo: `${alias}_${mm}사업소득`,
+          withdrawMemo: `${e.name}_${mm}`,
+          kind: "PAY",
+          name: e.name,
+        });
+    }
+    return { rows, missingAccount, zeroAmount, bizExcluded, total: rows.reduce((a, r) => a + r.amount, 0) };
+  }
 
   const pay: TransferRow[] = [];
   const contractorPay: TransferRow[] = [];
@@ -157,14 +211,18 @@ export function buildTransferRows(args: BuildTransferArgs): TransferPlan {
     const bank = normalizeBankName(e.bankName);
     const account = normalizeAccountNo(e.bankAccount);
     const label = incomeLabelOf(r);
+    // 별도 사업장이 보내는 몫은 이 회사 파일에서 뺀다(출금 계좌가 다르다)
+    const bizNet = bizNetOf(r);
+    if (bizNet > 0) bizExcluded.push(e.name);
+    const net = r.net - bizNet;
 
-    if (r.net > 0) {
+    if (net > 0) {
       if (!bank || !account) missingAccount.push(e.name);
       else
         (label === "사업소득" ? contractorPay : pay).push({
           bank,
           account,
-          amount: r.net,
+          amount: net,
           holder,
           depositMemo: `${alias}_${mm}${label}`,
           withdrawMemo: `${e.name}_${mm}`,
@@ -199,6 +257,7 @@ export function buildTransferRows(args: BuildTransferArgs): TransferPlan {
     rows,
     missingAccount,
     zeroAmount,
+    bizExcluded,
     total: rows.reduce((a, r) => a + r.amount, 0),
   };
 }

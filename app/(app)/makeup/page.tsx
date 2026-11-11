@@ -52,6 +52,7 @@ export default async function MakeupPage({
           department: t.department,
           payScheme: t.payScheme,
           excludedByScheme: t.excludedByScheme,
+          ratioWorker: t.ratioWorker,
           missingSchedule: t.missingSchedule,
           hourlyWage: t.hourlyWage,
           amount: t.amount,

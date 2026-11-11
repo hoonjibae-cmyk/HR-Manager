@@ -21,6 +21,7 @@ import {
 } from "@/lib/non-compete";
 import NonCompeteField from "./NonCompeteField";
 import NonCompeteRatioField from "./NonCompeteRatioField";
+import RatioContractField from "./RatioContractField";
 
 const DAYS: ScheduleDay["day"][] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -79,6 +80,9 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     incThreshold: initial?.incThreshold ?? "",
     incPerStudent: initial?.incPerStudent ?? "",
     ratioPercent: initial?.ratioPercent != null ? initial.ratioPercent * 100 : "",
+    // 완전비율제 초기 계약의 형태 — 위탁(기본) / 근로(4대보험). 근로면 근로소득 상한을 둘 수 있다
+    ratioEmployee: false,
+    ratioWageCap: "" as number | "",
     // 초기 계약의 경업금지 보상금 — 등록 때만 쓴다(이후 변경은 계약 이력에서)
     nonCompetePay: "",
     nonCompeteRatio: "", // 위탁(완전비율제) — % 로 받는다
@@ -108,7 +112,8 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     setSchedule((s) => s.map((d, idx) => (idx === i ? { ...d, [k]: v } : d)));
 
   // 경업금지 보상금 — 초기 계약이 월급제·인센티브면 넣을 수 있고, 교수부는 필수(서버도 다시 막는다)
-  const ncShape = { payScheme: f.payScheme, isContractor: f.payScheme === "RATIO" };
+  const ratioWorker = f.payScheme === "RATIO" && !!f.ratioEmployee;
+  const ncShape = { payScheme: f.payScheme, isContractor: f.payScheme === "RATIO" && !ratioWorker, ratioEmployee: ratioWorker };
   const ncApplies = !editing && nonCompetePayApplies(ncShape);
   const ncRequired = !editing && nonCompeteRequired(f.department, ncShape);
   const ncTerms = {
@@ -119,8 +124,8 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     schedule,
   };
   // 위탁(완전비율제) 초기 계약 — 매출에 곱하는 보상금 비율. 필수
-  const ncrApplies = !editing && nonCompeteRatioApplies({ payScheme: f.payScheme });
-  const ncrRequired = !editing && nonCompeteRatioRequired({ payScheme: f.payScheme });
+  const ncrApplies = !editing && nonCompeteRatioApplies({ payScheme: f.payScheme, ratioEmployee: ratioWorker });
+  const ncrRequired = !editing && nonCompeteRatioRequired({ payScheme: f.payScheme, ratioEmployee: ratioWorker });
   const ratioFrac = f.ratioPercent === "" ? 0 : Number(f.ratioPercent) / 100;
   const ncrFrac = f.nonCompeteRatio === "" ? null : Number(f.nonCompeteRatio) / 100;
   const ncMissing =
@@ -144,7 +149,7 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     const {
       baseWage, positionAllow, mealAllow, carAllow,
       incThreshold, incPerStudent, ratioPercent, payScheme, incomeType, contractEnd,
-      nonCompetePay, nonCompeteRatio, skipNonCompete,
+      nonCompetePay, nonCompeteRatio, skipNonCompete, ratioEmployee, ratioWageCap,
       ...personal
     } = f;
     // "" = 자동 판정(null), "1"/"0" = 강제
@@ -156,6 +161,12 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           ...f,
           leaveEligible,
           ratioPercent: f.ratioPercent !== "" ? Number(f.ratioPercent) / 100 : null,
+          // 완전비율제 화면에는 식대·수당 칸이 없다 — 숨은 기본값(식대 20만)이 비율급 위에 얹히지 않게 비운다
+          ...(f.payScheme === "RATIO" ? { mealAllow: 0, carAllow: 0, positionAllow: 0 } : {}),
+          incomeType: ratioWorker ? "EMPLOYEE" : f.incomeType,
+          isContractor: f.payScheme === "RATIO" ? !ratioWorker : undefined,
+          ratioEmployee: ratioWorker,
+          ratioWageCap: ratioWorker && f.ratioWageCap !== "" ? Number(f.ratioWageCap) : null,
           nonCompetePay: ncApplies && f.nonCompetePay !== "" ? Number(f.nonCompetePay) : null,
           nonCompeteRatio: ncrApplies && ncrFrac != null ? ncrFrac : null,
           skipNonCompete: ncMissing ? !!f.skipNonCompete : false,
@@ -258,7 +269,9 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           <Field label="세무/보험 구분">
             <select
               className="input"
-              value={f.incomeType}
+              value={ratioWorker ? "EMPLOYEE" : f.incomeType}
+              // 비율제 근로계약은 4대보험이 전제다(서버도 근로소득으로 맞춘다)
+              disabled={ratioWorker}
               onChange={(e) => {
                 const v = e.target.value;
                 // 4대보험 직원은 식대 20만원 포함이 기본 (전환 시 자동 설정)
@@ -271,8 +284,22 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           )}
           {!editing && (
           <Field label="급여형태">
-            <select className="input" value={f.payScheme} onChange={(e) => set("payScheme", e.target.value)}>
-              {Object.entries(PAY_SCHEME_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            <select
+              className="input"
+              value={f.payScheme}
+              onChange={(e) => {
+                const v = e.target.value;
+                // 완전비율제로 바꾸면 기본인 위탁(사업소득)으로 맞춘다 — 근로계약은 아래 '계약 형태' 에서 고른다
+                setF((p: any) =>
+                  v === "RATIO"
+                    ? { ...p, payScheme: v, ratioEmployee: false, incomeType: "FREELANCE", mealAllow: 0 }
+                    : { ...p, payScheme: v }
+                );
+              }}
+            >
+              {Object.entries(PAY_SCHEME_LABEL).map(([k, v]) => (
+                <option key={k} value={k}>{k === "RATIO" ? "완전비율제" : v}</option>
+              ))}
             </select>
           </Field>
           )}
@@ -396,9 +423,19 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
             </>
           )}
           {f.payScheme === "RATIO" && (
-            <Field label="위탁 비율 (%)"><input type="number" step="0.1" className="input" placeholder="50" value={f.ratioPercent} onChange={(e) => set("ratioPercent", e.target.value)} /></Field>
+            <Field label={ratioWorker ? "임금 비율 (%) — 수강료 입금액 중" : "위탁 비율 (%)"}><input type="number" step="0.1" className="input" placeholder="50" value={f.ratioPercent} onChange={(e) => set("ratioPercent", e.target.value)} /></Field>
           )}
         </div>
+        {f.payScheme === "RATIO" && (
+          <div className="mt-4">
+            <RatioContractField
+              employee={ratioWorker}
+              cap={f.ratioWageCap}
+              onEmployee={(v) => setF((p: any) => ({ ...p, ratioEmployee: v, incomeType: v ? "EMPLOYEE" : "FREELANCE" }))}
+              onCap={(v) => set("ratioWageCap", v)}
+            />
+          </div>
+        )}
         {ncApplies && (
           <div className="mt-4">
             <NonCompeteField

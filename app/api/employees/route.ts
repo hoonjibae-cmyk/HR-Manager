@@ -5,6 +5,7 @@ import { isAuthed } from "@/lib/auth";
 import { templateKeyOf } from "@/lib/contracts";
 import { parseSchedule } from "@/lib/constants";
 import { PROBATION_MONTHS } from "@/lib/probation";
+import { normalizeRatioTerms } from "@/lib/ratio-employee";
 import {
   resolveNonCompetePay,
   nonCompeteRequired,
@@ -78,9 +79,23 @@ export async function POST(req: Request) {
     schedule: typeof body.schedule === "string" ? body.schedule : JSON.stringify(body.schedule || []),
   };
 
+  // 완전비율제 초기 계약의 위탁/근로(4대보험)·근로소득 상한 — 신규 계약 작성과 같은 규칙.
+  // 카드는 초기 계약을 비추는 거울이라 같은 값을 함께 적는다(비율제 근로자는 세무구분이 근로소득).
+  const ratio = normalizeRatioTerms({
+    payScheme: data.payScheme,
+    ratioEmployee: body.ratioEmployee === true,
+    ratioWageCap: body.ratioWageCap,
+    isContractor: body.isContractor === true,
+  });
+  if (ratio.error) return NextResponse.json({ error: ratio.error }, { status: 400 });
+  data.isContractor = ratio.isContractor;
+  data.ratioEmployee = ratio.ratioEmployee;
+  data.ratioWageCap = ratio.ratioWageCap;
+  if (ratio.incomeType) data.incomeType = ratio.incomeType;
+
   // 초기 계약의 경업금지 보상금 — 교수부 월급제·인센티브는 필수(신규 계약 작성과 같은 규칙).
   // 카드(data.nonCompetePay)는 초기 계약을 비추는 거울이라 계약을 만들 때만 같이 적는다.
-  const ncShape = { payScheme: data.payScheme, isContractor: data.payScheme === "RATIO" };
+  const ncShape = { payScheme: data.payScheme, isContractor: ratio.isContractor, ratioEmployee: ratio.ratioEmployee };
   const nc = body.createContract
     ? resolveNonCompetePay({
         raw: body.nonCompetePay,
@@ -98,10 +113,12 @@ export async function POST(req: Request) {
         fallback: null,
         payScheme: data.payScheme,
         ratioPercent: data.ratioPercent,
+        ratioEmployee: ratio.ratioEmployee,
       })
     : { value: null, error: null };
   if (ncr.error) return NextResponse.json({ error: ncr.error }, { status: 400 });
-  const ncrRequired = !!body.createContract && nonCompeteRatioRequired({ payScheme: data.payScheme });
+  const ncrRequired =
+    !!body.createContract && nonCompeteRatioRequired({ payScheme: data.payScheme, ratioEmployee: ratio.ratioEmployee });
   const missing = (ncRequired && !nc.value) || (ncrRequired && !ncr.value);
   const skipNonCompete = missing && body.skipNonCompete === true;
   if (missing && !skipNonCompete)
@@ -139,6 +156,9 @@ export async function POST(req: Request) {
           incRevenuePercent: emp.incRevenuePercent,
           ratioPercent: emp.ratioPercent,
           nonCompeteRatio: ncr.value,
+          isContractor: ratio.isContractor,
+          ratioEmployee: ratio.ratioEmployee,
+          ratioWageCap: ratio.ratioWageCap,
           status: "ACTIVE",
         },
       });
@@ -151,6 +171,11 @@ export async function POST(req: Request) {
         `직원 ${emp.name}(${emp.empNo})을 등록했습니다.` +
         (nc.value ? ` 초기 계약 경업금지 보상금 월 ${nc.value.toLocaleString()}원.` : "") +
         (ncr.value ? ` 초기 계약 경업금지 보상금 매출의 ${ratioPctLabel(ncr.value)}.` : "") +
+        (ratio.ratioEmployee
+          ? ` 비율제 근로계약(4대보험)${
+              ratio.ratioWageCap ? ` · 근로소득 상한 월 ${ratio.ratioWageCap.toLocaleString()}원` : ""
+            }.`
+          : "") +
         (skipNonCompete
           ? ncrRequired
             ? ` 위탁 초기 계약이지만 경업금지 보상금 없이 작성했습니다(관리자 선택).`

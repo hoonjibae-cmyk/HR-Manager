@@ -83,6 +83,16 @@ model Company {
   /// 각 장 이니셜란 — 2장 이상인 계약서의 아래 여백에 `갑 (서명) ___ 을 (서명) ___` 줄을 넣을지.
   /// 장마다 서명을 받으면 민사소송법 §358 의 진정성립 추정이 그 장에 직접 붙는다(간인보다 곧바르다).
   pageInitials         Boolean  @default(true)
+  /// 별도 사업장(사업소득 지급처) — 비율제 근로자의 근로소득 상한 초과분을 사업소득으로 지급하는 사업자.
+  /// 한 사업장에서 같은 사람에게 근로·사업소득을 함께 처리하지 않으므로 지급처를 따로 둔다.
+  /// 사업소득 지급명세서 머리글·은행 이체 적요에 쓴다. lib/ratio-employee.ts
+  bizPayerName         String?
+  bizPayerBizNo        String?
+  bizPayerCeo          String?
+  bizPayerAddress      String?
+  bizPayerPhone        String?
+  /// 이체 적요 약칭 — 비우면 상호
+  bizPayerAlias        String?
   updatedAt            DateTime @updatedAt
 }
 
@@ -241,6 +251,10 @@ model Employee {
   // 비율제(RATIO) 설정
   ratioPercent      Float? // 담당 반 매출액의 % (예: 0.5 = 50%)
   ratioMinGuarantee Int? // 위탁 최저보장액(월) — 만근 시 수수료가 이 금액에 못 미쳐도 보장
+  /// 비율제 근로계약 — 계약(Contract.ratioEmployee)을 비추는 거울. lib/ratio-employee.ts
+  ratioEmployee     Boolean @default(false)
+  /// 근로소득 상한(월) — 계약(Contract.ratioWageCap)을 비추는 거울
+  ratioWageCap      Int?
 
   // 주간 근로시간표: JSON [{day:"mon",work:true,start:"15:00",end:"22:00",breakH:0.5}, ...]
   schedule String @default("[]")
@@ -300,10 +314,16 @@ model Contract {
   /// null/"WEIGHTED"=가중인원(수업 회차 비례). 라벨은 lib/constants.ts.
   incCountMethod    String?
   ratioPercent      Float?
-  ratioMinGuarantee Int? // 위탁 최저보장액(월)
+  ratioMinGuarantee Int? // 위탁 최저보장액(월) — 비율제 근로계약이면 근로기준법 §47 보장급
   /// 위탁계약(프리랜서) — 주휴·연차·퇴직금·4대보험 등 근로기준법 항목을 일절 적용하지 않는다.
-  /// 완전비율제(RATIO)는 성질상 항상 위탁이라 이 값과 무관하게 제외된다.
+  /// 완전비율제(RATIO)는 기본이 위탁이라 이 값과 무관하게 제외된다(아래 ratioEmployee 만 예외).
   isContractor      Boolean @default(false)
+  /// 비율제 **근로계약**(2026-11) — 완전비율제(매출 × 비율)로 받되 위탁이 아니라 4대보험 근로자.
+  /// 강의위탁계약서가 아니라 근로계약서가 나가고 4대보험·연차·퇴직급여가 붙는다. lib/ratio-employee.ts
+  ratioEmployee     Boolean @default(false)
+  /// 근로소득 상한(월, 원) — 비율제 근로계약만. 비율급 중 이 금액까지만 이 회사의 임금(근로소득)이고
+  /// 넘는 부분은 별도 사업장이 사업소득(3.3%)으로 지급한다. null 이면 전액 근로소득.
+  ratioWageCap      Int?
   fixedBaseHours    Float? // 포괄임금 기본급 산정시간(월)
   fixedOtHours      Float? // 포괄임금 약정 시간외근로시간(월)
   fixedNightHours   Float? // 포괄임금 약정 야간근로시간(월)
@@ -537,6 +557,11 @@ model PayrollRecord {
   bonusP         Int @default(0) // 상여
   unusedLeaveP   Int @default(0) // 연차미사용수당
   gross          Int @default(0) // 지급액 계
+  /// 비율제 근로계약으로 산정한 기록(스냅샷) — 같은 RATIO 라도 위탁/근로를 기록만 보고 가른다
+  ratioEmployee  Boolean @default(false)
+  /// 비율제 근로자의 근로소득 상한 초과분 — gross(와 baseP) 안의 일부이고, 이 회사의 임금이 아니라
+  /// 별도 사업장이 지급하는 사업소득이다. 명세서·세무 시트·이체 파일이 따로 낸다(lib/ratio-employee.ts)
+  bizIncomeP     Int @default(0)
 
   // 공제
   // 공제모드: MANUAL(세무사 지정값 직접입력, 기본) | AUTO(엔진 자동산출)
@@ -547,6 +572,9 @@ model PayrollRecord {
   longTermD   Int     @default(0) // 장기요양
   incomeTaxD  Int     @default(0) // 소득세 (근로 or 사업 3%)
   localTaxD   Int     @default(0) // 지방소득세
+  /// bizIncomeP 의 사업소득세(3%) · 지방소득세(0.3%) — 공제모드와 무관하게 늘 자동(지급처가 다르다)
+  bizTaxD      Int    @default(0)
+  bizLocalTaxD Int    @default(0)
   retentionD  Int     @default(0) // 퇴직유보금 (인센티브 원천액의 8.3%, 별도통장 송금)
   parkingD    Int     @default(0) // 월 정기주차비 공제 (본인부담분)
   expenseD    Int     @default(0) // 실비 정산 (+공제 / -환급)

@@ -1,6 +1,7 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { prisma } from "./db";
 import { genPayslip } from "./doc-service";
+import { recordSplit } from "./ratio-employee";
 import { ymd } from "./format";
 import { planPayslipSend, payslipEmailOf } from "./payslip-send";
 
@@ -104,6 +105,11 @@ export async function sendPayslipsForMonth(
       // 어느 것이 최종본인지 알 수 없다.
       const fix = r.reissueCount > 0;
       const firstSent = r.firstSentAt ?? r.emailedAt;
+      // 비율제 근로자의 근로소득 상한 초과분은 별도 사업장이 지급한다 — 첨부도 두 장이라 금액을 갈라 적는다
+      const sp = recordSplit(r);
+      const netLine = sp.biz
+        ? `실수령액: ${r.net.toLocaleString()}원 (임금 ${sp.wage.net.toLocaleString()}원 + 별도 사업장 사업소득 ${sp.biz.net.toLocaleString()}원)`
+        : `실수령액: ${r.net.toLocaleString()}원`;
       await t.sendMail({
         from: mailFrom(),
         to,
@@ -113,9 +119,9 @@ export async function sendPayslipsForMonth(
             ? `${r.employee.name}님, 앞서 보내드린 ${year}년 ${month}월 ${docName}에 정정할 내용이 있어 다시 보내드립니다.\n` +
               `본 메일에 첨부된 것이 최종본이며, 이전 메일의 명세서는 무효입니다.\n` +
               (firstSent ? `최초 발급일: ${ymd(firstSent)}\n` : "") +
-              `\n실수령액: ${r.net.toLocaleString()}원\n\n주식회사 유쌤에듀 드림`
+              `\n${netLine}\n\n주식회사 유쌤에듀 드림`
             : `${r.employee.name}님, ${year}년 ${month}월 ${isFree ? "사업소득 지급" : "급여"}명세서를 첨부드립니다.\n` +
-              `실수령액: ${r.net.toLocaleString()}원\n\n주식회사 유쌤에듀 드림`),
+              `${netLine}\n\n주식회사 유쌤에듀 드림`),
         attachments: [{ filename, content: pdf }],
       });
       sent++;

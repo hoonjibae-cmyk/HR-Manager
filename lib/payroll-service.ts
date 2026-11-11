@@ -10,7 +10,7 @@ import { getActiveRates, getTaxTable, empToPayInput } from "./repo";
 import { summarizeIncentive, isRevenueRoster, type RosterStudent } from "./incentive";
 import { overtimeInputsFor } from "./makeup-service";
 import { mergeOvertimeHours, ledgerApplied } from "./overtime-inputs";
-import { parkingDeductionOf, isContractorContract } from "./constants";
+import { parkingDeductionOf, isContractorContract, isRatioEmployee } from "./constants";
 import { holidayWorkFromEntries, type HolidayWork } from "./timesheet";
 import {
   planSheetCleanup,
@@ -322,9 +322,17 @@ function assembleDeductions(args: {
   parkingD: number;
   expenseD: number;
   otherD: number;
+  /**
+   * 비율제 근로자의 상한 초과분(별도 사업장 사업소득)에 대한 원천징수 — **공제모드와 무관하게 늘 자동**이다.
+   * 세무사가 지정하는 법정공제(근로소득분)와 지급처가 달라 수동값에 섞지 않는다.
+   */
+  bizTaxD?: number;
+  bizLocalTaxD?: number;
   gross: number;
 }) {
   const statutory = args.deductMode === "AUTO" ? args.auto : args.manual;
+  const bizTaxD = args.bizTaxD ?? 0;
+  const bizLocalTaxD = args.bizLocalTaxD ?? 0;
   const totalDeduct =
     statutory.pensionD +
     statutory.employmentD +
@@ -332,12 +340,16 @@ function assembleDeductions(args: {
     statutory.longTermD +
     statutory.incomeTaxD +
     statutory.localTaxD +
+    bizTaxD +
+    bizLocalTaxD +
     args.retentionD +
     args.parkingD +
     args.expenseD +
     args.otherD;
   return {
     ...statutory,
+    bizTaxD,
+    bizLocalTaxD,
     retentionD: args.retentionD,
     parkingD: args.parkingD,
     expenseD: args.expenseD,
@@ -578,6 +590,9 @@ export async function runPayrollMonth(
       parkingD: existing?.parkingD || parkingDeductionOf((emp as any).parkingFee),
       expenseD: existing?.expenseD ?? 0,
       otherD: existing?.otherD ?? 0,
+      // 별도 사업장 사업소득의 3.3% — 수동 공제모드여도 엔진 값을 그대로 쓴다
+      bizTaxD: r.bizTaxD,
+      bizLocalTaxD: r.bizLocalTaxD,
       gross: r.gross,
     });
 
@@ -587,6 +602,8 @@ export async function runPayrollMonth(
       month,
       incomeType: emp.incomeType,
       payScheme: emp.payScheme,
+      // 같은 RATIO 라도 위탁/근로를 기록만 보고 가를 수 있게 산정 시점 값을 새긴다
+      ratioEmployee: isRatioEmployee(emp as any),
       workedHours: mInput.workedHours ?? null,
       weeklyHolidayHours: mInput.weeklyHolidayHours ?? null,
       extraHours: mInput.extraHours ?? 0,
@@ -615,6 +632,7 @@ export async function runPayrollMonth(
       bonusP: r.bonusP,
       unusedLeaveP: r.unusedLeaveP,
       gross: r.gross,
+      bizIncomeP: r.bizIncomeP,
       deductMode,
       ...fin,
       hourlyWage: r.hourlyWage,
@@ -872,6 +890,9 @@ export async function updateDeductions(payrollId: number, patch: DeductionPatch)
     parkingD: num(patch.parkingD, rec.parkingD),
     expenseD: num(patch.expenseD, rec.expenseD),
     otherD: otherDVal,
+    // 별도 사업장 사업소득의 원천징수는 산정 때 정해진 값 그대로(공제 편집 대상이 아니다)
+    bizTaxD: rec.bizTaxD,
+    bizLocalTaxD: rec.bizLocalTaxD,
     gross: rec.gross,
   });
 

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Pill, Empty } from "@/components/ui";
-import { INCOME_TYPE_LABEL, PAY_SCHEME_LABEL } from "@/lib/constants";
+import { INCOME_TYPE_LABEL, PAY_SCHEME_LABEL, paySchemeLabelOf } from "@/lib/constants";
 import { won } from "@/lib/format";
 import {
   useTableSort,
@@ -25,6 +25,8 @@ export interface EmployeeRow {
   position: string | null;
   incomeType: string;
   payScheme: string;
+  /** 비율제 근로계약(4대보험) — 같은 완전비율제라도 위탁과 라벨을 가른다 */
+  ratioEmployee?: boolean;
   baseWage: number;
   ratioPercent: number | null;
   hireDate: string; // YYYY-MM-DD
@@ -57,7 +59,7 @@ function pick(e: EmployeeRow, key: string): any {
     case "incomeType":
       return INCOME_TYPE_LABEL[e.incomeType] ?? e.incomeType;
     case "payScheme":
-      return PAY_SCHEME_LABEL[e.payScheme] ?? e.payScheme;
+      return paySchemeLabelOf(e);
     // 비율제는 기준액 개념이 달라(매출 대비 %) 금액과 섞어 줄 세울 수 없다.
     // 금액 기준으로 정렬하고 비율제는 0 으로 모인다.
     case "amount":
@@ -183,7 +185,7 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
           label="급여형태"
           value={scheme}
           onChange={set("scheme")}
-          options={Object.entries(PAY_SCHEME_LABEL).map(([v, l]) => ({ value: v, label: l }))}
+          options={Object.entries(PAY_SCHEME_LABEL).map(([v, l]) => ({ value: v, label: v === "RATIO" ? "완전비율제" : l }))}
         />
         <FilterSelect
           label="세무/보험"
@@ -270,7 +272,7 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
                     <Pill kind={e.incomeType}>{INCOME_TYPE_LABEL[e.incomeType]}</Pill>
                   </td>
                   <td className="td">
-                    <Pill kind={e.payScheme}>{PAY_SCHEME_LABEL[e.payScheme]}</Pill>
+                    <Pill kind={e.payScheme}>{paySchemeLabelOf(e)}</Pill>
                   </td>
                   <td className="td text-right tnum">
                     {e.payScheme === "RATIO"

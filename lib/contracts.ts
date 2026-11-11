@@ -8,6 +8,7 @@
 //     인적사항만 카드에서 수정하고, 보수조건은 계약을 새로 쓰거나 고쳐서 바꾼다.
 
 import { prisma } from "./db";
+import { isContractorContract } from "./constants";
 
 /** 계약서에 스냅샷으로 남는 보수조건 */
 export const CONTRACT_TERM_FIELDS = [
@@ -25,6 +26,8 @@ export const CONTRACT_TERM_FIELDS = [
   "fixedNightHours",
   "nonCompetePay",
   "nonCompeteRatio",
+  "ratioEmployee",
+  "ratioWageCap",
 ] as const;
 
 /** 직원 카드에서 수정할 수 있는 항목 — 인적사항·소속·근태 설정만 */
@@ -128,6 +131,10 @@ export interface ContractLike {
   nonCompetePay?: number | null;
   /** 경업금지 보상금 비율(위탁) — 매출 × 비율로 수수료와 별도 지급(lib/non-compete.ts) */
   nonCompeteRatio?: number | null;
+  /** 비율제 근로계약 — RATIO 지만 4대보험 근로자(lib/ratio-employee.ts) */
+  ratioEmployee?: boolean | null;
+  /** 근로소득 상한(월) — 비율제 근로계약만 */
+  ratioWageCap?: number | null;
 }
 
 const DAY = 86400000;
@@ -268,8 +275,15 @@ export function mirrorFromContract(c: ContractLike): Record<string, any> {
     incRevenuePercent: c.incRevenuePercent ?? null,
     ratioPercent: c.ratioPercent ?? null,
     ratioMinGuarantee: c.ratioMinGuarantee ?? null,
-    // 위탁계약 여부도 계약이 진실 — 완전비율제는 성질상 언제나 위탁이다
-    isContractor: c.isContractor === true || paySchemeOf(c.templateKey) === "RATIO",
+    // 위탁계약 여부도 계약이 진실 — 완전비율제는 기본이 위탁이고, 비율제 근로계약만 예외다
+    isContractor: isContractorContract({
+      payScheme: paySchemeOf(c.templateKey),
+      isContractor: c.isContractor,
+      ratioEmployee: c.ratioEmployee,
+    }),
+    ratioEmployee: paySchemeOf(c.templateKey) === "RATIO" && c.ratioEmployee === true,
+    ratioWageCap:
+      paySchemeOf(c.templateKey) === "RATIO" && c.ratioEmployee === true ? c.ratioWageCap ?? null : null,
     fixedBaseHours: c.fixedBaseHours ?? null,
     fixedOtHours: c.fixedOtHours ?? null,
     fixedNightHours: c.fixedNightHours ?? null,
@@ -314,7 +328,13 @@ export function withContractTerms<T extends Record<string, any>>(
   const m = mirrorFromContract(gov);
   // 모르는 templateKey 를 월급제로 떨어뜨리지 않는다 — 카드의 급여형태로 물러난다
   m.payScheme = paySchemeOfTemplate(gov.templateKey) ?? emp.payScheme;
-  m.isContractor = gov.isContractor === true || m.payScheme === "RATIO";
+  m.ratioEmployee = m.payScheme === "RATIO" && gov.ratioEmployee === true;
+  m.ratioWageCap = m.ratioEmployee ? gov.ratioWageCap ?? null : null;
+  m.isContractor = isContractorContract({
+    payScheme: m.payScheme,
+    isContractor: gov.isContractor,
+    ratioEmployee: m.ratioEmployee,
+  });
   return { ...emp, ...m };
 }
 

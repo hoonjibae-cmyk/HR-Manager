@@ -48,7 +48,8 @@ export async function POST(req: Request) {
     );
 
   const employees = await prisma.employee.findMany({
-    select: { id: true, name: true, payScheme: true },
+    // 위탁 판정에 필요한 셋을 함께 — 비율제 근로자(4대보험)는 연차 대상이다
+    select: { id: true, name: true, payScheme: true, isContractor: true, ratioEmployee: true },
   });
   // 같은 날짜에 이미 기록된 사용분은 다시 넣지 않는다 (두 번 올려도 안전)
   const existing = await prisma.leaveTransaction.findMany({

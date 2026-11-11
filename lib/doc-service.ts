@@ -3,6 +3,7 @@ import { htmlToPdf, htmlPagesToPdf, docGroupsToPdf, type PdfOptions } from "./pd
 import { newHirePackageGroups, contractGroups } from "./documents";
 import {
   payslipHtml,
+  bizIncomeSlipHtml,
   rosterDetailHtml,
   overtimeDetailHtml,
   certEmploymentHtml,
@@ -13,6 +14,7 @@ import {
 import { getCompany, empToDoc, contractToDoc } from "./repo";
 import { docPolicyFor, documentBlockReason } from "./departments";
 import { PROBATION_MONTHS } from "./probation";
+import { bizPayerMissingMessage } from "./ratio-employee";
 import { MAKEUP_CATEGORY_LABEL, isContractorContract } from "./constants";
 import { incentiveRosterFor, rosterToStudents } from "./payroll-service";
 import { employeesWithMonthTerms } from "./contracts";
@@ -101,6 +103,9 @@ export async function genNewHirePackage(employeeId: number, contractId?: number)
         mealAllow: emp.mealAllow,
         carAllow: emp.carAllow,
         ratioPercent: emp.ratioPercent,
+        ratioMinGuarantee: emp.ratioMinGuarantee,
+        ratioEmployee: emp.ratioEmployee,
+        ratioWageCap: emp.ratioWageCap,
         incThreshold: emp.incThreshold,
         incPerStudent: emp.incPerStudent,
         incRevenuePercent: emp.incRevenuePercent,
@@ -168,7 +173,14 @@ export async function genPayslip(payrollId: number) {
   );
   const payroll: DocPayroll = { ...(pr as any), parkingFee: (monthEmp as any).parkingFee ?? 0, leaveCarryover };
   const employee = empToDoc(monthEmp);
-  const pages = [payslipHtml({ employee, payroll, company })];
+  // 비율제 근로자의 근로소득 상한 초과분 — 별도 사업장이 지급하는 사업소득이라 그 사업장 이름으로 된
+  // 「사업소득 지급명세서」를 함께 낸다. 지급처 정보가 없으면 만들지 않는다 — 이 회사 이름으로 사업소득을
+  // 적어 내면 한 사업장이 근로·사업소득을 함께 처리한 문서가 된다(세무대리인이 갈라 달라고 한 그것).
+  const bizSlip = (pr.bizIncomeP ?? 0) > 0;
+  if (bizSlip && !company.bizPayer) throw new Error(bizPayerMissingMessage(company.bizPayerMissing));
+  const pages = [payslipHtml({ employee, payroll, company, bizPayer: company.bizPayer })];
+  if (bizSlip && company.bizPayer)
+    pages.push(bizIncomeSlipHtml({ employee, payroll, payer: company.bizPayer, company }));
 
   // 월급+인센티브·완전비율제: 그 달 학생 명단이 있으면 산정 내역서를 뒤에 붙인다.
   //  · 명단에 매출 열이 있으면 「사업소득/인센티브 산정 내역서」(매출 × 배분율)
@@ -179,13 +191,16 @@ export async function genPayslip(payrollId: number) {
     const roster = await incentiveRosterFor(pr.employeeId, pr.year, pr.month);
     if (roster?.length) {
       const isRatio = monthEmp.payScheme === "RATIO";
+      const ratioWorker = isRatio && (monthEmp as any).ratioEmployee === true;
       const detail = rosterDetailHtml({
         employee,
         company,
         year: pr.year,
         month: pr.month,
         students: rosterToStudents(roster),
-        kind: isRatio ? "BUSINESS" : "INCENTIVE",
+        // 위탁 비율제는 사업소득, 비율제 근로계약은 비율급(임금) 산정 내역이다
+        kind: isRatio ? (ratioWorker ? "WAGE" : "BUSINESS") : "INCENTIVE",
+        wageCap: ratioWorker ? (monthEmp as any).ratioWageCap ?? null : null,
         // 배분율은 계약이 진실이다 — 명단에 적힌 율은 대조용으로만 넘긴다
         percent: isRatio ? monthEmp.ratioPercent : monthEmp.incRevenuePercent,
         sheetPercent: roster.find((r) => r.sharePercent != null)?.sharePercent ?? null,

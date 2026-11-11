@@ -7,7 +7,9 @@ import {
   INCOME_TYPE_LABEL,
   PAYROLL_STATUS_LABEL,
   isContractorContract,
+  paySchemeLabelOf,
 } from "@/lib/constants";
+import { recordSplit } from "@/lib/ratio-employee";
 import { Pill } from "@/components/ui";
 import { resignStatusOf, resignBadgeLabel, resignedSummary } from "@/lib/payroll-roster";
 import { isEstimatedHourly } from "@/lib/payroll";
@@ -39,9 +41,15 @@ interface Rec {
   month: number;
   incomeType: string;
   payScheme: string;
+  /** 비율제 근로계약으로 산정한 기록(스냅샷) — 같은 RATIO 라도 위탁과 가른다 */
+  ratioEmployee?: boolean;
   gross: number;
   totalDeduct: number;
   net: number;
+  /** 비율제 근로자의 근로소득 상한 초과분(별도 사업장 사업소득) — gross 안의 일부 */
+  bizIncomeP?: number;
+  bizTaxD?: number;
+  bizLocalTaxD?: number;
   incentiveP: number;
   bonusP: number;
   status: string;
@@ -124,7 +132,7 @@ function pickRec(r: Rec, key: string): any {
       return r.employee.name;
     // '형태' 는 급여형태 + 세무구분이 한 칸에 있으므로 보이는 순서대로 이어 붙여 줄 세운다
     case "scheme":
-      return `${PAY_SCHEME_LABEL[r.payScheme] ?? r.payScheme} ${INCOME_TYPE_LABEL[r.incomeType] ?? ""}`;
+      return `${paySchemeLabelOf(r)} ${INCOME_TYPE_LABEL[r.incomeType] ?? ""}`;
     case "status":
       return PAYROLL_STATUS_LABEL[r.status] ?? r.status;
     default:
@@ -368,6 +376,10 @@ export default function PayrollClient({ today }: { today: string }) {
               ? `주민등록번호(ID)가 비어 있는 직원 ${w.missingId.length}명: ${w.missingId.join(", ")}\n→ 직원 정보에 입력한 뒤 다시 받으세요.`
               : "",
             w.mismatches?.length ? `합계가 맞지 않는 행 ${w.mismatches.length}건:\n${w.mismatches.join("\n")}` : "",
+            // 비율제 근로자의 상한 초과분은 별도 시트 — 지급처(별도 사업장) 이름이 비어 있으면 알린다
+            w.bizPayerMissing?.length
+              ? `별도 사업장(사업소득 지급처) 정보가 비어 있습니다: ${w.bizPayerMissing.join("·")}\n→ 설정 → 회사 정보에 넣으세요. 상한 초과분은 '별도 사업장 사업소득' 시트에 따로 실렸습니다.`
+              : "",
           ].filter(Boolean);
           if (msgs.length) alert("⚠️ 확인이 필요합니다\n\n" + msgs.join("\n\n"));
         }
@@ -386,11 +398,15 @@ export default function PayrollClient({ today }: { today: string }) {
     }
   }
 
-  /** 은행 파일이체(대량이체)용 파일 — 세후 실지급액이 그대로 돈이 되어 나간다 */
-  async function exportForBank() {
-    setBusy("bank");
+  /**
+   * 은행 파일이체(대량이체)용 파일 — 세후 실지급액이 그대로 돈이 되어 나간다.
+   * `biz` 면 별도 사업장이 보내는 사업소득(비율제 근로자의 근로소득 상한 초과분)만 담은 파일이다 —
+   * 출금 계좌가 다른 사업자라 이 회사 파일과 따로 받는다.
+   */
+  async function exportForBank(biz = false) {
+    setBusy(biz ? "bankBiz" : "bank");
     try {
-      const res = await fetch(`/api/payroll/bank-export?year=${year}&month=${month}`);
+      const res = await fetch(`/api/payroll/bank-export?year=${year}&month=${month}${biz ? "&payer=biz" : ""}`);
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         alert("내려받기 실패: " + (j.error || res.statusText));
@@ -405,6 +421,9 @@ export default function PayrollClient({ today }: { today: string }) {
               ? `계좌가 없어 빠진 ${w.missingAccount.length}건: ${w.missingAccount.join(", ")}\n→ 직원 정보에 은행·계좌번호를 넣은 뒤 다시 받으세요.`
               : "",
             w.zeroAmount?.length ? `지급액이 0원이라 빠진 직원: ${w.zeroAmount.join(", ")}` : "",
+            w.bizExcluded?.length
+              ? `별도 사업장이 지급하는 사업소득(근로소득 상한 초과분)은 이 파일에서 뺐습니다: ${w.bizExcluded.join(", ")}\n→ '🏦 별도 사업장 이체 파일' 을 따로 받아 그 사업장 계좌로 올리세요.`
+              : "",
             // 돈이 실제로 나가는 파일이라 여기서 한 번 더 걸리게 한다 (막지는 않는다)
             w.resigned?.count
               ? `오늘 기준 이미 퇴직한 직원 ${w.resigned.count}명이 이체 파일에 있습니다 (실지급 ${Number(
@@ -419,7 +438,7 @@ export default function PayrollClient({ today }: { today: string }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `이체_${year}-${String(month).padStart(2, "0")}.xls`;
+      a.download = `${biz ? "이체_별도사업장" : "이체"}_${year}-${String(month).padStart(2, "0")}.xls`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -696,12 +715,23 @@ export default function PayrollClient({ today }: { today: string }) {
             </button>
             <button
               className="btn-outline"
-              onClick={exportForBank}
+              onClick={() => exportForBank(false)}
               disabled={!!busy}
               title="세후 실지급액을 은행 파일이체(대량이체)에 올릴 수 있는 엑셀로 받습니다"
             >
               {busy === "bank" ? "만드는 중…" : "🏦 은행 이체 파일"}
             </button>
+            {/* 비율제 근로자의 근로소득 상한 초과분 — 별도 사업장 계좌에서 나가는 돈이라 파일을 따로 낸다 */}
+            {recs.some((r) => (r.bizIncomeP ?? 0) > 0) && (
+              <button
+                className="btn-outline"
+                onClick={() => exportForBank(true)}
+                disabled={!!busy}
+                title="비율제 근로자의 근로소득 상한 초과분(사업소득 3.3% 공제 후)을 별도 사업장 계좌에서 보내는 이체 파일입니다"
+              >
+                {busy === "bankBiz" ? "만드는 중…" : "🏦 별도 사업장 이체 파일"}
+              </button>
+            )}
             <button
               className="btn-outline"
               onClick={() => setPayoutOpen(true)}
@@ -983,7 +1013,8 @@ export default function PayrollClient({ today }: { today: string }) {
               label="급여형태"
               value={filter.scheme}
               onChange={setF("scheme")}
-              options={Object.entries(PAY_SCHEME_LABEL).map(([v, l]) => ({ value: v, label: l }))}
+              // 완전비율제는 위탁·근로를 함께 거른다(세무/보험 필터로 다시 가를 수 있다)
+              options={Object.entries(PAY_SCHEME_LABEL).map(([v, l]) => ({ value: v, label: v === "RATIO" ? "완전비율제" : l }))}
             />
             <FilterSelect
               label="세무/보험"
@@ -1065,7 +1096,11 @@ export default function PayrollClient({ today }: { today: string }) {
                 const statutory = !isContractorContract({
                   payScheme: r.payScheme,
                   isContractor: r.employee?.isContractor,
+                  // 기록에 새긴 값 — 산정 때 비율제 근로계약이었으면 근로자 행이다
+                  ratioEmployee: r.ratioEmployee,
                 });
+                // 근로소득 상한을 넘은 비율급 — 별도 사업장이 사업소득으로 주는 몫(금액 칸에 따로 적는다)
+                const split = recordSplit(r);
                 // **조회 시점** 기준 퇴직 여부 — 이 달 시트에 있는 것은 맞아도(마지막 급여)
                 // 지금은 이미 나간 사람일 수 있다. 이름만 봐서는 구분이 안 돼 엉뚱한 사람에게
                 // 급여가 나갈 수 있으므로 행째로 다르게 그린다.
@@ -1163,7 +1198,7 @@ export default function PayrollClient({ today }: { today: string }) {
                   </td>
                   <td className="td w-px">
                     <div className="flex flex-col items-start gap-1">
-                      <Pill kind={r.payScheme}>{PAY_SCHEME_LABEL[r.payScheme]}</Pill>
+                      <Pill kind={r.payScheme}>{paySchemeLabelOf(r)}</Pill>
                       <Pill kind={r.incomeType}>{r.incomeType === "FREELANCE" ? "사업소득" : "근로소득"}</Pill>
                       {!statutory && (
                         <span
@@ -1266,6 +1301,14 @@ export default function PayrollClient({ today }: { today: string }) {
                     ) : (
                       <span className="tnum">{won(r.gross)}</span>
                     )}
+                    {split.biz && (
+                      <div
+                        className="text-[10px] text-violet-700 leading-tight"
+                        title="근로소득 상한을 넘은 비율급 — 이 회사의 임금이 아니라 별도 사업장이 사업소득(3.3%)으로 지급합니다. 명세서·세무 자료·이체 파일이 따로 나갑니다."
+                      >
+                        근로 {won(split.wage.gross)} · 별도 사업장 {won(split.biz.gross)}
+                      </div>
+                    )}
                   </td>
                   <td className="td text-right whitespace-nowrap">
                     <button
@@ -1281,7 +1324,14 @@ export default function PayrollClient({ today }: { today: string }) {
                       {r.deductMode === "AUTO" ? "자동" : "수동"} ▾
                     </div>
                   </td>
-                  <td className="td text-right tnum font-bold whitespace-nowrap">{won(r.net)}</td>
+                  <td className="td text-right whitespace-nowrap">
+                    <span className="tnum font-bold">{won(r.net)}</span>
+                    {split.biz && (
+                      <div className="text-[10px] text-violet-700 leading-tight tnum" title="실수령 = 근로분 + 별도 사업장 사업소득(3.3% 공제 후)">
+                        {won(split.wage.net)} + {won(split.biz.net)}
+                      </div>
+                    )}
+                  </td>
                   <td className="td w-px whitespace-nowrap">
                     <Pill kind={r.status}>{PAYROLL_STATUS_LABEL[r.status] ?? r.status}</Pill>
                     {r.reissueCount > 0 && (
@@ -1825,6 +1875,7 @@ function DeductionEditor({ rec, onSaved, onClose }: { rec: Rec; onSaved: () => P
           !isContractorContract({
             payScheme: rec.payScheme,
             isContractor: rec.employee?.isContractor,
+            ratioEmployee: rec.ratioEmployee,
           }) && (
             <DedField label="퇴직유보금 (인센티브 × 1/12)" v={f.retentionD} onChange={(v) => set("retentionD", v)} />
           )}

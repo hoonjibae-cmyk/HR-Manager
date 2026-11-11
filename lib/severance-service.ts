@@ -7,7 +7,7 @@
 
 import { prisma } from "./db";
 import { tenureOf } from "./format";
-import { parseSchedule, isContractorContract, PAY_SCHEME_LABEL } from "./constants";
+import { parseSchedule, isContractorContract, paySchemeLabelOf } from "./constants";
 import { computeWeeklyHours } from "./payroll";
 import {
   DEFAULT_SEVERANCE_POLICY,
@@ -39,6 +39,8 @@ const payItemsOf = (r: any): SeverancePayItems => ({
   mealP: r.mealP ?? 0,
   carP: r.carP ?? 0,
   nonCompeteP: r.nonCompeteP ?? 0,
+  // 비율제 근로자의 상한 초과분 — 별도 사업장 몫이라 산정기준 임금에서 빠진다
+  bizIncomeP: r.bizIncomeP ?? 0,
   unusedLeaveP: r.unusedLeaveP ?? 0,
   incentiveP: r.incentiveP ?? 0,
   bonusP: r.bonusP ?? 0,
@@ -249,7 +251,7 @@ export async function severanceMonth(year: number, month: number) {
       name: e.name,
       department: e.department,
       payScheme: e.payScheme,
-      paySchemeLabel: PAY_SCHEME_LABEL[e.payScheme] ?? e.payScheme,
+      paySchemeLabel: paySchemeLabelOf(e),
       hireDate: ymd(e.hireDate),
       serviceLabel: svc.label,
       serviceMonths: svc.months,

@@ -13,6 +13,7 @@ import {
 } from "@/lib/non-compete";
 import FixedHoursFields from "./FixedHoursFields";
 import ContractorField from "./ContractorField";
+import RatioContractField from "./RatioContractField";
 import NonCompeteField from "./NonCompeteField";
 import NonCompeteRatioField from "./NonCompeteRatioField";
 import { probationMonthOptions, probationOptionLabel } from "@/lib/probation";
@@ -41,6 +42,10 @@ export interface ContractSnapshot {
   ratioPercent: number | null; // 0~1
   ratioMinGuarantee: number | null;
   isContractor: boolean;
+  /** 비율제 근로계약(4대보험) — RATIO 일 때만 뜻이 있다 */
+  ratioEmployee: boolean;
+  /** 근로소득 상한(월) — 비율제 근로계약만 */
+  ratioWageCap: number | null;
   fixedBaseHours: number | null;
   fixedOtHours: number | null;
   fixedNightHours: number | null;
@@ -81,6 +86,8 @@ export default function ContractEditForm({
     incCountMethod: contract.incCountMethod ?? "SNAPSHOT15",
     ratioPercent: contract.ratioPercent != null ? contract.ratioPercent * 100 : "",
     ratioMinGuarantee: contract.ratioMinGuarantee ?? "",
+    ratioEmployee: !!contract.ratioEmployee,
+    ratioWageCap: (contract.ratioWageCap ?? "") as number | "",
     fixedBaseHours: contract.fixedBaseHours ?? "",
     fixedOtHours: contract.fixedOtHours ?? "",
     fixedNightHours: contract.fixedNightHours ?? "",
@@ -89,11 +96,14 @@ export default function ContractEditForm({
       contract.nonCompeteRatio != null ? Math.round(contract.nonCompeteRatio * 10000) / 100 : "",
   });
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
-  const ncrApplies = nonCompeteRatioApplies({ payScheme: f.payScheme });
+  // 완전비율제는 계약 형태(위탁/근로)로, 그 밖은 위탁 체크칸으로 위탁 여부가 정해진다
+  const ratioWorker = f.payScheme === "RATIO" && !!f.ratioEmployee;
+  const contractorNow = f.payScheme === "RATIO" ? !f.ratioEmployee : !!f.isContractor;
+  const ncrApplies = nonCompeteRatioApplies({ payScheme: f.payScheme, ratioEmployee: ratioWorker });
   const ratioFrac = f.ratioPercent === "" ? 0 : Number(f.ratioPercent) / 100;
   const ncrFrac = f.nonCompeteRatio === "" ? null : Number(f.nonCompeteRatio) / 100;
 
-  const ncShape = { payScheme: f.payScheme, isContractor: f.payScheme === "RATIO" || !!f.isContractor };
+  const ncShape = { payScheme: f.payScheme, isContractor: contractorNow, ratioEmployee: ratioWorker };
   const ncApplies = nonCompetePayApplies(ncShape);
   const ncTerms = {
     baseWage: Number(f.baseWage) || 0,
@@ -141,7 +151,9 @@ export default function ContractEditForm({
         incCountMethod: f.incCountMethod || null,
         ratioPercent: f.ratioPercent === "" ? null : Number(f.ratioPercent) / 100,
         ratioMinGuarantee: f.ratioMinGuarantee === "" ? null : Number(f.ratioMinGuarantee),
-        isContractor: f.payScheme === "RATIO" ? true : !!f.isContractor,
+        isContractor: contractorNow,
+        ratioEmployee: ratioWorker,
+        ratioWageCap: ratioWorker && f.ratioWageCap !== "" ? Number(f.ratioWageCap) : null,
         fixedBaseHours: f.fixedBaseHours === "" ? null : Number(f.fixedBaseHours),
         fixedOtHours: f.fixedOtHours === "" ? null : Number(f.fixedOtHours),
         fixedNightHours: f.fixedNightHours === "" ? null : Number(f.fixedNightHours),
@@ -224,16 +236,35 @@ export default function ContractEditForm({
           <input type="date" className="input" value={f.endDate} onChange={(e) => set("endDate", e.target.value)} />
         </L>
         <L label="세무/보험">
-          <select className="input" value={f.incomeType} onChange={(e) => set("incomeType", e.target.value)}>
+          <select
+            className="input"
+            value={ratioWorker ? "EMPLOYEE" : f.incomeType}
+            // 비율제 근로계약은 4대보험이 전제다(서버도 근로소득으로 맞춘다)
+            disabled={ratioWorker}
+            onChange={(e) => set("incomeType", e.target.value)}
+          >
             {Object.entries(INCOME_TYPE_LABEL).map(([k, v]) => (
               <option key={k} value={k}>{v}</option>
             ))}
           </select>
         </L>
         <L label="급여형태">
-          <select className="input" value={f.payScheme} onChange={(e) => set("payScheme", e.target.value)}>
+          <select
+            className="input"
+            value={f.payScheme}
+            onChange={(e) => {
+              const v = e.target.value;
+              // 완전비율제로 바꾸면 기본인 위탁(사업소득)으로 맞추고, 화면에 칸이 없는 식대·수당을 비운다
+              setF((p: any) =>
+                v === "RATIO" && p.payScheme !== "RATIO"
+                  ? { ...p, payScheme: v, ratioEmployee: false, incomeType: "FREELANCE", mealAllow: 0, carAllow: 0, positionAllow: 0 }
+                  : { ...p, payScheme: v }
+              );
+            }}
+          >
             {Object.entries(PAY_SCHEME_LABEL).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
+              // 완전비율제의 위탁/근로는 아래 '계약 형태' 에서 고른다
+              <option key={k} value={k}>{k === "RATIO" ? "완전비율제" : v}</option>
             ))}
           </select>
         </L>
@@ -244,10 +275,10 @@ export default function ContractEditForm({
         )}
         {f.payScheme === "RATIO" && (
           <>
-            <L label="위탁 비율 (%)">
+            <L label={ratioWorker ? "임금 비율 (%) — 수강료 입금액 중" : "위탁 비율 (%)"}>
               <input type="number" step="0.1" className="input" value={f.ratioPercent} onChange={(e) => set("ratioPercent", e.target.value)} />
             </L>
-            <L label="위탁 최저보장 (월, 원)">
+            <L label={ratioWorker ? "보장급 (월, 원) — 근로기준법 §47" : "위탁 최저보장 (월, 원)"}>
               <input type="number" className="input" placeholder="없으면 비움" value={f.ratioMinGuarantee} onChange={(e) => set("ratioMinGuarantee", e.target.value)} />
             </L>
           </>
@@ -283,11 +314,20 @@ export default function ContractEditForm({
         )}
         <L label="비고"><input className="input" value={f.note} onChange={(e) => set("note", e.target.value)} /></L>
       </div>
-      <ContractorField
-        checked={!!f.isContractor}
-        payScheme={f.payScheme}
-        onChange={(v) => set("isContractor", v)}
-      />
+      {f.payScheme === "RATIO" ? (
+        <RatioContractField
+          employee={!!f.ratioEmployee}
+          cap={f.ratioWageCap}
+          onEmployee={(v) => setF((p: any) => ({ ...p, ratioEmployee: v, incomeType: v ? "EMPLOYEE" : "FREELANCE" }))}
+          onCap={(v) => set("ratioWageCap", v)}
+        />
+      ) : (
+        <ContractorField
+          checked={!!f.isContractor}
+          payScheme={f.payScheme}
+          onChange={(v) => set("isContractor", v)}
+        />
+      )}
       {isMonthly && !f.isContractor && f.payScheme !== "RATIO" && (
         <FixedHoursFields f={f} set={set} />
       )}
@@ -303,7 +343,7 @@ export default function ContractEditForm({
         <NonCompeteRatioField
           value={f.nonCompeteRatio}
           onChange={(v) => set("nonCompeteRatio", v)}
-          required={nonCompeteRatioRequired({ payScheme: f.payScheme })}
+          required={nonCompeteRatioRequired({ payScheme: f.payScheme, ratioEmployee: ratioWorker })}
           ratioPercent={ratioFrac}
         />
       )}

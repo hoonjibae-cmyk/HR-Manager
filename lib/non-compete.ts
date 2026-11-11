@@ -39,6 +39,8 @@ export interface NonCompeteContractLike {
   /** 계약의 급여형태 (MONTHLY | INCENTIVE | HOURLY | RATIO) */
   payScheme?: string | null;
   isContractor?: boolean | null;
+  /** 비율제 근로계약 — 위탁 판정(isContractorContract)에 함께 넘긴다 */
+  ratioEmployee?: boolean | null;
 }
 
 /**
@@ -181,13 +183,16 @@ export function resolveNonCompetePay(args: {
 // 지급한다(예: 수수료 40% + 보상금 3% → 매출의 43%). 근로계약처럼 총액 안에서 떼는 구조가 아니다
 // (2026-11 결정 — 비율은 계약마다 정한다). 사업소득 3.3% 원천징수는 보상금에도 함께 걸린다.
 
-/** 보상금 비율을 둘 수 있는 계약인가 — 강의위탁계약서(완전비율제)만 */
-export function nonCompeteRatioApplies(c: { payScheme?: string | null }): boolean {
-  return c.payScheme === "RATIO";
+/**
+ * 보상금 비율을 둘 수 있는 계약인가 — 강의위탁계약서(**위탁** 완전비율제)만.
+ * 비율제 **근로계약**(`ratioEmployee`)은 근로계약서를 쓰고 이 조항이 없다(lib/ratio-employee.ts).
+ */
+export function nonCompeteRatioApplies(c: { payScheme?: string | null; ratioEmployee?: boolean | null }): boolean {
+  return c.payScheme === "RATIO" && c.ratioEmployee !== true;
 }
 
 /** 위탁계약은 **새 계약마다** 보상금 비율이 필수다(부서와 무관 — 강의위탁계약서 전부) */
-export function nonCompeteRatioRequired(c: { payScheme?: string | null }): boolean {
+export function nonCompeteRatioRequired(c: { payScheme?: string | null; ratioEmployee?: boolean | null }): boolean {
   return nonCompeteRatioApplies(c);
 }
 
@@ -226,8 +231,10 @@ export function resolveNonCompeteRatio(args: {
   fallback: number | null | undefined;
   payScheme: string;
   ratioPercent: number | null | undefined;
+  /** 비율제 근로계약이면 위탁 조항이 없으므로 값을 지운다 */
+  ratioEmployee?: boolean | null;
 }): { value: number | null; error: string | null } {
-  const applies = nonCompeteRatioApplies({ payScheme: args.payScheme });
+  const applies = nonCompeteRatioApplies({ payScheme: args.payScheme, ratioEmployee: args.ratioEmployee });
   if (!applies) return { value: null, error: null };
   const candidate = args.raw === undefined ? args.fallback : args.raw;
   const error = nonCompeteRatioError(candidate, args.ratioPercent);

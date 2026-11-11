@@ -15,6 +15,7 @@ import {
 } from "@/lib/non-compete";
 import FixedHoursFields from "./FixedHoursFields";
 import ContractorField from "./ContractorField";
+import RatioContractField from "./RatioContractField";
 import NonCompeteField from "./NonCompeteField";
 import NonCompeteRatioField from "./NonCompeteRatioField";
 import { PROBATION_MONTHS, probationTimeline } from "@/lib/probation";
@@ -45,6 +46,10 @@ interface EmpSnapshot {
   /** 경업금지 보상금 비율(위탁, 0.03 = 3%) — 카드(지금 계약)의 값 */
   nonCompeteRatio?: number | null;
   isContractor?: boolean;
+  /** 비율제 근로계약(4대보험) — 카드(지금 계약)의 값. 갱신 계약에 그대로 이어 적는다 */
+  ratioEmployee?: boolean;
+  /** 근로소득 상한(월) — 비율제 근로계약만 */
+  ratioWageCap?: number | null;
   /** 교수부면 보상금이 필수다 */
   department?: string | null;
   /** 근로시간표(JSON) — 보상금 미리보기의 기본급 산정시간 환산용 */
@@ -80,6 +85,8 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
     ratioPercent: emp.ratioPercent != null ? emp.ratioPercent * 100 : "",
     ratioMinGuarantee: emp.ratioMinGuarantee ?? "",
     isContractor: !!emp.isContractor,
+    ratioEmployee: !!emp.ratioEmployee,
+    ratioWageCap: (emp.ratioWageCap ?? "") as number | "",
     fixedBaseHours: emp.fixedBaseHours ?? "",
     fixedOtHours: emp.fixedOtHours ?? "",
     fixedNightHours: emp.fixedNightHours ?? "",
@@ -98,7 +105,10 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
   const probation = f.isProbation ? probationTimeline(f.startDate, PROBATION_MONTHS) : null;
 
   // 경업금지 보상금 — 월급제·인센티브 근로계약만. 교수부는 필수(서버도 같은 함수로 다시 막는다)
-  const ncShape = { payScheme: f.payScheme, isContractor: f.payScheme === "RATIO" || !!f.isContractor };
+  // 완전비율제는 계약 형태(위탁/근로)로, 그 밖은 위탁 체크칸으로 위탁 여부가 정해진다
+  const ratioWorker = f.payScheme === "RATIO" && f.ratioEmployee;
+  const contractorNow = f.payScheme === "RATIO" ? !f.ratioEmployee : !!f.isContractor;
+  const ncShape = { payScheme: f.payScheme, isContractor: contractorNow, ratioEmployee: ratioWorker };
   const ncApplies = nonCompetePayApplies(ncShape);
   const ncRequired = nonCompeteRequired(emp.department, ncShape);
   const ncTerms = {
@@ -112,8 +122,8 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
     schedule: parseSchedule(emp.schedule ?? "[]"),
   };
   // 위탁(강의위탁계약서) — 매출에 곱하는 보상금 비율. 새 위탁계약은 필수
-  const ncrApplies = nonCompeteRatioApplies({ payScheme: f.payScheme });
-  const ncrRequired = nonCompeteRatioRequired({ payScheme: f.payScheme });
+  const ncrApplies = nonCompeteRatioApplies({ payScheme: f.payScheme, ratioEmployee: ratioWorker });
+  const ncrRequired = nonCompeteRatioRequired({ payScheme: f.payScheme, ratioEmployee: ratioWorker });
   const ratioFrac = f.ratioPercent === "" ? 0 : Number(f.ratioPercent) / 100;
   const ncrFrac = f.nonCompeteRatio === "" ? null : Number(f.nonCompeteRatio) / 100;
   // 필수 항목이 비었는가 — 근로(교수부 보상금)와 위탁(보상금 비율) 중 이 계약에 해당하는 쪽
@@ -157,7 +167,10 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
         incCountMethod: f.incCountMethod || null,
         ratioPercent: f.ratioPercent === "" ? null : Number(f.ratioPercent) / 100,
         ratioMinGuarantee: f.ratioMinGuarantee === "" ? null : Number(f.ratioMinGuarantee),
-        isContractor: f.payScheme === "RATIO" ? true : !!f.isContractor,
+        isContractor: contractorNow,
+        ratioEmployee: ratioWorker,
+        // 상한은 비율제 근로계약에서만 뜻이 있다 — 서버도 같은 규칙으로 지운다(normalizeRatioTerms)
+        ratioWageCap: ratioWorker && f.ratioWageCap !== "" ? Number(f.ratioWageCap) : null,
         fixedBaseHours: f.fixedBaseHours === "" ? null : Number(f.fixedBaseHours),
         fixedOtHours: f.fixedOtHours === "" ? null : Number(f.fixedOtHours),
         fixedNightHours: f.fixedNightHours === "" ? null : Number(f.fixedNightHours),
@@ -217,16 +230,32 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
           </select>
         </L>
         <L label="급여형태 (변경 가능)">
-          <select className="input" value={f.payScheme} onChange={(e) => set("payScheme", e.target.value)}>
+          <select
+            className="input"
+            value={f.payScheme}
+            onChange={(e) => {
+              const v = e.target.value;
+              // 완전비율제로 바꾸면 기본인 위탁(사업소득)으로 맞추고, 화면에 칸이 없는 식대·수당을 비운다
+              // (숨은 값이 비율급 위에 얹히지 않게). 근로계약은 아래 '계약 형태' 에서 고른다
+              setF((p) =>
+                v === "RATIO" && p.payScheme !== "RATIO"
+                  ? { ...p, payScheme: v, ratioEmployee: false, incomeType: "FREELANCE", mealAllow: 0, carAllow: 0, positionAllow: 0 }
+                  : { ...p, payScheme: v }
+              );
+            }}
+          >
             {Object.entries(PAY_SCHEME_LABEL).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
+              // 완전비율제의 위탁/근로는 아래 '계약 형태' 에서 고른다
+              <option key={k} value={k}>{k === "RATIO" ? "완전비율제" : v}</option>
             ))}
           </select>
         </L>
         <L label="세무/보험 구분 (4대보험 · 3.3%)">
           <select
             className="input"
-            value={f.incomeType}
+            value={ratioWorker ? "EMPLOYEE" : f.incomeType}
+            // 비율제 근로계약은 4대보험이 전제라 고를 것이 없다(서버도 근로소득으로 맞춘다)
+            disabled={ratioWorker}
             onChange={(e) => {
               const v = e.target.value;
               // 4대보험 직원은 식대 20만원 포함이 기본 규칙 (전환 시 자동 반영, 수정 가능)
@@ -311,19 +340,29 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
         )}
         {f.payScheme === "RATIO" && (
           <>
-            <L label="위탁 비율 (%)"><input type="number" step="0.1" className="input" value={f.ratioPercent} onChange={(e) => set("ratioPercent", e.target.value)} /></L>
-            <L label="위탁 최저보장 (월, 원)"><input type="number" className="input" placeholder="없으면 비움" value={f.ratioMinGuarantee} onChange={(e) => set("ratioMinGuarantee", e.target.value)} /></L>
+            <L label={ratioWorker ? "임금 비율 (%) — 수강료 입금액 중" : "위탁 비율 (%)"}><input type="number" step="0.1" className="input" value={f.ratioPercent} onChange={(e) => set("ratioPercent", e.target.value)} /></L>
+            <L label={ratioWorker ? "보장급 (월, 원) — 근로기준법 §47" : "위탁 최저보장 (월, 원)"}><input type="number" className="input" placeholder="없으면 비움" value={f.ratioMinGuarantee} onChange={(e) => set("ratioMinGuarantee", e.target.value)} /></L>
           </>
         )}
         <L label="직책"><input className="input" value={f.position} onChange={(e) => set("position", e.target.value)} /></L>
         <L label="업무내용"><input className="input" value={f.duty} onChange={(e) => set("duty", e.target.value)} /></L>
       </div>
 
-      <ContractorField
-        checked={!!f.isContractor}
-        payScheme={f.payScheme}
-        onChange={(v) => set("isContractor", v)}
-      />
+      {f.payScheme === "RATIO" ? (
+        <RatioContractField
+          employee={f.ratioEmployee}
+          cap={f.ratioWageCap}
+          // 근로계약이면 4대보험(근로소득), 위탁이면 사업소득 — 세무구분을 함께 옮긴다
+          onEmployee={(v) => setF((p) => ({ ...p, ratioEmployee: v, incomeType: v ? "EMPLOYEE" : "FREELANCE" }))}
+          onCap={(v) => set("ratioWageCap", v)}
+        />
+      ) : (
+        <ContractorField
+          checked={!!f.isContractor}
+          payScheme={f.payScheme}
+          onChange={(v) => set("isContractor", v)}
+        />
+      )}
       {isMonthly && !f.isContractor && f.payScheme !== "RATIO" && (
         <FixedHoursFields f={f} set={set} />
       )}

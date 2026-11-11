@@ -8,6 +8,7 @@ import {
   MAKEUP_CATEGORY_LABEL,
   MAKEUP_STATUS_LABEL,
   isContractorContract,
+  isRatioEmployee,
   isStaffWork,
   makeupKindLabel,
 } from "./constants";
@@ -113,6 +114,11 @@ export interface EmployeeOvertime {
   payScheme: string;
   /** 완전비율제는 수당 대상이 아니라 계산에서 빠진다 */
   excludedByScheme: boolean;
+  /**
+   * 비율제 근로계약(4대보험) — 근로자라 시간은 센다. 다만 통상시급이 **그 달 비율급**에서 나와
+   * 급여 산정 전에는 금액을 낼 수 없다(근로기준법 시행령 §6②6). 화면이 '급여 산정 때' 로 적는다.
+   */
+  ratioWorker: boolean;
   /** 근로시간표가 비어 있으면 소정근로시간을 뺄 수 없다 — 화면에서 경고한다 */
   missingSchedule: boolean;
   hourlyWage: number;
@@ -226,6 +232,7 @@ export async function overtimeForMonth(
       department: emp.department,
       payScheme: emp.payScheme,
       excludedByScheme,
+      ratioWorker: isRatioEmployee(emp),
       missingSchedule: schedule.filter((d) => d.work).length === 0,
       hourlyWage,
       result,

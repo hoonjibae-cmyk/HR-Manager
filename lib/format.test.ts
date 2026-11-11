@@ -49,3 +49,13 @@ describe("ymd — 표시 형식이 사전순 = 시간순", () => {
     expect(ymd(d("2026-09-03")) < ymd(d("2026-10-01"))).toBe(true);
   });
 });
+
+describe("josa — 받침에 맞춘 조사", () => {
+  it("받침이 있으면 앞의 것, 없으면 뒤의 것", async () => {
+    const { josa } = await import("./format");
+    expect(josa("유쌤에듀", "과", "와")).toBe("유쌤에듀와");
+    expect(josa("유쌤학원", "과", "와")).toBe("유쌤학원과");
+    expect(josa("가상아카데미", "이", "가")).toBe("가상아카데미가");
+    expect(josa("ABC", "이", "가")).toBe("ABC이(가)");
+  });
+});

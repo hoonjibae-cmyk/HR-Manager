@@ -20,6 +20,7 @@
 
 import { addMonths, isBefore } from "date-fns";
 import { fixedOvertimeOf, variableOvertimeOf } from "./payroll";
+import { isContractorContract } from "./constants";
 
 /* ───────────── 정책 ───────────── */
 
@@ -183,6 +184,11 @@ export interface SeverancePayItems {
   carP: number; // 차량유지비
   /** 경업금지 보상금 — 계약 월 급여총액 안에서 기본급과 구분한 몫(없던 기록은 0) */
   nonCompeteP?: number;
+  /**
+   * 비율제 근로자의 근로소득 상한 초과분 — `baseP` 안에 들어 있지만 별도 사업장이 지급하는 사업소득이라
+   * 이 회사의 임금이 아니다. 산정기준 임금에서 뺀다(없던 기록은 0).
+   */
+  bizIncomeP?: number;
   unusedLeaveP: number; // 연차미사용수당
   incentiveP: number; // 인센티브
   bonusP: number; // 상여
@@ -230,8 +236,12 @@ export function severanceBase(
     if (amount) excluded.push([label, amount, why]);
   };
 
-  // 언제나 들어가는 것 — 기본급과 정기 수당
-  take("기본급", p.baseP);
+  // 언제나 들어가는 것 — 기본급과 정기 수당.
+  // 비율제 근로자의 상한 초과분은 기본급(비율급) 안에 있지만 별도 사업장이 주는 사업소득이라 뺀다 —
+  // 이 회사가 부담할 퇴직급여의 기준은 이 회사가 주는 임금이다(무엇을 뺐는지는 아래 목록에 남긴다).
+  const bizPart = Math.max(p.bizIncomeP ?? 0, 0);
+  take("기본급", p.baseP - bizPart);
+  drop("별도 사업장 사업소득(근로소득 상한 초과분)", bizPart, "다른 사업장이 사업소득으로 지급");
   take("주휴수당", p.weeklyHolidayP);
   take("직책수당", p.positionP);
   // 경업금지 보상금은 **계약 월 급여총액 안에서 기본급을 갈라 낸 몫**이다 — 빼면 산정기준 임금이
@@ -287,6 +297,8 @@ export interface ContractWageTerms {
   mealAllow: number;
   carAllow: number;
   isContractor: boolean;
+  /** 비율제 근로계약 — RATIO 지만 퇴직급여 대상(월 급여가 매출에 달려 추산은 못 한다) */
+  ratioEmployee?: boolean | null;
 }
 
 export interface ContractBaseEstimate {
@@ -330,8 +342,16 @@ export function estimateContractBase(
   const prorate = Math.min(Math.max(opts.prorate ?? 1, 0), 1);
   const won = (n: number) => Math.round(n).toLocaleString("ko-KR");
 
-  if (t.isContractor || t.payScheme === "RATIO")
+  if (isContractorContract(t))
     return { base: 0, note: "위탁계약(프리랜서) — 퇴직급여 대상 아님", excluded: true };
+  // 비율제 근로자 — 퇴직급여 대상이지만 월 급여가 그 달 매출에 달려 계약만으로는 값을 지을 수 없다.
+  // 0 으로 돌려 추산을 건너뛴다(그 달 급여 기록이나 관리자 지정값이 대신한다). 지어내면 누계가 틀어진다.
+  if (t.payScheme === "RATIO")
+    return {
+      base: 0,
+      note: "비율제 근로계약 — 월 급여가 매출에 따라 달라 계약만으로는 추산하지 않습니다(그 달 급여 기록·관리자 지정값을 씁니다)",
+      excluded: false,
+    };
 
   let full: number;
   let how: string;

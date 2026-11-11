@@ -11,6 +11,7 @@ import { buildBankTransferWorkbook } from "@/lib/bank-transfer";
 import { logActivity } from "@/lib/activity";
 import { resignedSummary } from "@/lib/payroll-roster";
 import { kstTodayYmd } from "@/lib/format";
+import { bizPayerMissingMessage } from "@/lib/ratio-employee";
 
 export const dynamic = "force-dynamic";
 
@@ -34,15 +35,25 @@ export async function GET(req: Request) {
     );
 
   const company = await getCompany();
-  const { buffer, rows, missingAccount, zeroAmount, total } = buildBankTransferWorkbook({
+  // payer=biz — 별도 사업장이 보내는 사업소득(비율제 근로자의 근로소득 상한 초과분)만 담은 파일.
+  // 출금 계좌가 다른 사업자라 이 회사 파일과 섞지 않는다(lib/ratio-employee.ts).
+  const biz = searchParams.get("payer") === "biz";
+  if (biz && !company.bizPayer)
+    return NextResponse.json({ error: bizPayerMissingMessage(company.bizPayerMissing) }, { status: 400 });
+  const { buffer, rows, missingAccount, zeroAmount, bizExcluded, total } = buildBankTransferWorkbook({
     year,
     month,
-    alias: company.transferAlias,
+    alias: biz ? company.bizPayer!.alias : company.transferAlias,
     records: records as any,
+    payer: biz ? "BIZ" : "COMPANY",
   });
   if (rows.length === 0)
     return NextResponse.json(
-      { error: "이체할 줄이 없습니다. 직원 정보에 은행·계좌번호가 입력돼 있는지 확인하세요." },
+      {
+        error: biz
+          ? `${year}년 ${month}월에는 별도 사업장이 지급할 사업소득(근로소득 상한 초과분)이 없습니다.`
+          : "이체할 줄이 없습니다. 직원 정보에 은행·계좌번호가 입력돼 있는지 확인하세요.",
+      },
       { status: 400 }
     );
 
@@ -50,12 +61,12 @@ export async function GET(req: Request) {
   await logActivity({
     action: "PAYROLL_EXPORT",
     summary:
-      `${year}.${month} 은행 이체 파일 내려받기 — ${rows.length}건 / ${total.toLocaleString()}원` +
+      `${year}.${month} ${biz ? `별도 사업장(${company.bizPayer!.name}) ` : ""}은행 이체 파일 내려받기 — ${rows.length}건 / ${total.toLocaleString()}원` +
       (missingAccount.length ? ` (계좌 없음 ${missingAccount.length}명 제외)` : ""),
     meta: missingAccount.length ? { missingAccount } : undefined,
   }).catch(() => {});
 
-  const filename = `이체_${year}-${String(month).padStart(2, "0")}.xls`;
+  const filename = `${biz ? "이체_별도사업장" : "이체"}_${year}-${String(month).padStart(2, "0")}.xls`;
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/vnd.ms-excel",
@@ -66,6 +77,8 @@ export async function GET(req: Request) {
         JSON.stringify({
           missingAccount,
           zeroAmount,
+          // 이 회사 파일에서 빠진 별도 사업장 몫 — 화면이 '별도 사업장 이체 파일' 을 따로 받으라고 알린다
+          bizExcluded,
           count: rows.length,
           total,
           // 여기가 돈이 실제로 나가는 자리다 — 오늘 기준 이미 퇴직한 사람이 파일에

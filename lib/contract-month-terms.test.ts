@@ -93,3 +93,53 @@ describe("그 달 계약 조건 (카드가 아니라 계약에서)", () => {
     expect(e.id).toBe(7);
   });
 });
+
+describe("그 달 계약 조건 — 비율제 위탁 ↔ 근로계약", () => {
+  const ratioBase = {
+    ...base,
+    templateKey: "RATIO",
+    incomeType: "FREELANCE",
+    baseWage: 0,
+    mealAllow: 0,
+    incPerStudent: null,
+    incThreshold: null,
+    ratioPercent: 0.4,
+    isContractor: true,
+    ratioEmployee: false,
+    ratioWageCap: null,
+  };
+  // 10/1 부터 같은 비율로 4대보험 근로계약 + 근로소득 상한 500만으로 바꿨다
+  const list = [
+    { ...ratioBase, id: 1, startDate: d("2026-03-01") },
+    {
+      ...ratioBase,
+      id: 2,
+      startDate: d("2026-10-01"),
+      incomeType: "EMPLOYEE",
+      isContractor: false,
+      ratioEmployee: true,
+      ratioWageCap: 5_000_000,
+    },
+  ];
+  const card: Record<string, any> & { id: number; resignDate: Date | null } = {
+    id: 9,
+    name: "가상강사",
+    payScheme: "RATIO",
+    resignDate: null,
+  };
+
+  it("9월은 위탁 — 근로 표시·상한 없음", () => {
+    const e = withContractTerms(card, list as any, monthTermsDate(card, 2026, 9));
+    expect(e.ratioEmployee).toBe(false);
+    expect(e.isContractor).toBe(true);
+    expect(e.ratioWageCap).toBeNull();
+  });
+
+  it("10월부터 근로계약 — 위탁이 아니고 상한 500만", () => {
+    const e = withContractTerms(card, list as any, monthTermsDate(card, 2026, 10));
+    expect(e.ratioEmployee).toBe(true);
+    expect(e.isContractor).toBe(false);
+    expect(e.ratioWageCap).toBe(5_000_000);
+    expect(e.incomeType).toBe("EMPLOYEE");
+  });
+});
