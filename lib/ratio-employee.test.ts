@@ -22,7 +22,12 @@ import {
   bizPayerMissing,
   bizPayerOf,
 } from "./ratio-employee";
-import { nonCompeteRatioApplies, resolveNonCompeteRatio } from "./non-compete";
+import {
+  nonCompeteRatioApplies,
+  nonCompeteRatioRequired,
+  nonCompeteRatioRequiredMessage,
+  resolveNonCompeteRatio,
+} from "./non-compete";
 
 // 학원 강사 — 주 5일 14:00~22:00, 휴게 30분 → 1일 7.5h · 주 37.5h · 주휴 7.5h
 const teacher: ScheduleDay[] = [
@@ -81,12 +86,37 @@ describe("isContractorContract — 비율제 근로계약", () => {
     expect(paySchemeLabelOf({ payScheme: "RATIO" })).toBe("완전비율제(위탁)");
     expect(paySchemeLabelOf({ payScheme: "MONTHLY" })).toBe("월급제");
   });
-  it("위탁 경업금지 보상금 비율은 비율제 근로계약에 붙지 않는다", () => {
+  it("경업금지 보상금 비율은 비율제 근로계약에도 붙는다(v1.58) — 위탁 ↔ 근로를 바꿔도 값이 산다", () => {
     expect(nonCompeteRatioApplies({ payScheme: "RATIO" })).toBe(true);
-    expect(nonCompeteRatioApplies({ payScheme: "RATIO", ratioEmployee: true })).toBe(false);
+    expect(nonCompeteRatioApplies({ payScheme: "MONTHLY" })).toBe(false);
     expect(
       resolveNonCompeteRatio({ raw: 0.03, fallback: null, payScheme: "RATIO", ratioPercent: 0.4, ratioEmployee: true })
+    ).toEqual({ value: 0.03, error: null });
+    // 조건 수정에서 보상금 칸을 건드리지 않고 계약 형태만 바꾸면 저장값이 그대로 간다
+    expect(
+      resolveNonCompeteRatio({ raw: undefined, fallback: 0.03, payScheme: "RATIO", ratioPercent: 0.4, ratioEmployee: true })
+    ).toEqual({ value: 0.03, error: null });
+    // 완전비율제가 아니게 바꾸면 지운다
+    expect(
+      resolveNonCompeteRatio({ raw: undefined, fallback: 0.03, payScheme: "MONTHLY", ratioPercent: null })
     ).toEqual({ value: null, error: null });
+  });
+  it("필수는 위탁이면 언제나, 비율제 근로계약이면 교수부만(월급제 교수부와 같은 규칙)", () => {
+    expect(nonCompeteRatioRequired({ payScheme: "RATIO" })).toBe(true);
+    expect(nonCompeteRatioRequired({ payScheme: "RATIO" }, "교육운영팀")).toBe(true);
+    expect(nonCompeteRatioRequired({ payScheme: "RATIO", ratioEmployee: true }, "교수부")).toBe(true);
+    expect(nonCompeteRatioRequired({ payScheme: "RATIO", ratioEmployee: true }, "교수부(중등)")).toBe(true);
+    expect(nonCompeteRatioRequired({ payScheme: "RATIO", ratioEmployee: true }, "교육운영팀")).toBe(false);
+    expect(nonCompeteRatioRequired({ payScheme: "RATIO", ratioEmployee: true })).toBe(false);
+    expect(nonCompeteRatioRequired({ payScheme: "MONTHLY" }, "교수부")).toBe(false);
+    expect(nonCompeteRatioRequiredMessage(true)).toContain("근로계약서(비율급)");
+    expect(nonCompeteRatioRequiredMessage(false)).toContain("강의위탁계약서");
+    expect(nonCompeteRatioRequiredMessage(true)).toContain("보상금을 두지 않음");
+  });
+  it("위탁·임금 비율과 합쳐 매출의 100% 를 넘으면 거른다 — 문구가 갈린다", () => {
+    const base = { raw: 0.7, fallback: null, payScheme: "RATIO", ratioPercent: 0.4 };
+    expect(resolveNonCompeteRatio({ ...base, ratioEmployee: true }).error).toContain("임금 비율(40%)");
+    expect(resolveNonCompeteRatio(base).error).toContain("위탁 비율(40%)");
   });
 });
 
@@ -193,14 +223,59 @@ describe("computePayroll — 비율제 근로자", () => {
     expect(r.hourlyWage).toBe(Math.round(6_000_000 / MONTH_HOURS));
   });
 
-  it("위탁 경업금지 보상금 비율은 비율제 근로자에게 붙지 않는다", () => {
+  it("경업금지 보상금 비율 — 비율급과 별도로 매출 × 비율, 근로소득(상한과 무관), 통상시급 분자에 든다", () => {
     const r = computePayroll(
       ratioEmp({ nonCompeteRatio: 0.03 }),
+      { classRevenue: 15_000_000, extraHours: 10 },
+      DEFAULT_RATES_2025,
+      taxTable
+    );
+    expect(r.baseP).toBe(6_000_000); // 비율급 40% — 보상금이 끼어들지 않는다
+    expect(r.nonCompeteP).toBe(450_000); // 1,500만 × 3%
+    // 상한은 비율급에만 걸린다 — 초과분은 그대로 100만이고 보상금은 이 회사의 근로소득으로 남는다
+    expect(r.bizIncomeP).toBe(1_000_000);
+    // 통상시급 = (근로분 500만 + 보상금 45만) ÷ 월 환산시간
+    const hw = Math.round(5_450_000 / MONTH_HOURS);
+    expect(r.hourlyWage).toBe(hw);
+    expect(r.extraP).toBe(10 * hw);
+    expect(r.gross).toBe(6_000_000 + 450_000 + 10 * hw);
+    expect(r.wageTaxable).toBe(r.gross - 1_000_000);
+    // 4대보험·근로소득세는 보상금을 포함한 근로분 기준
+    expect(r.healthD).toBe(Math.floor((r.wageTaxable * DEFAULT_RATES_2025.health) / 10) * 10);
+    expect(r.employmentD).toBe(Math.floor((r.wageTaxable * DEFAULT_RATES_2025.employment) / 10) * 10);
+    // 별도 사업장 몫(3.3%)은 초과분 100만에만
+    expect(r.bizTaxD).toBe(30_000);
+    expect(r.bizLocalTaxD).toBe(3_000);
+    expect(r.net).toBe(r.gross - r.totalDeduct);
+    expect(r.notes.some((n) => n.includes("근로계약서 제8조") && n.includes("상한과 무관"))).toBe(true);
+    expect(r.notes.some((n) => n.includes("경업금지 보상금 포함"))).toBe(true);
+  });
+
+  it("보상금은 보장급(§47)과 무관하게 언제나 매출 × 비율", () => {
+    const r = computePayroll(
+      ratioEmp({ ratioMinGuarantee: 2_500_000, nonCompeteRatio: 0.03 }),
+      { classRevenue: 3_000_000 },
+      DEFAULT_RATES_2025,
+      taxTable
+    );
+    expect(r.baseP).toBe(2_500_000);
+    expect(r.nonCompeteP).toBe(90_000);
+    expect(r.gross).toBe(2_590_000);
+    expect(r.bizIncomeP).toBe(0);
+  });
+
+  it("상한 없는 비율제 근로자 — 보상금까지 전액 근로소득", () => {
+    const r = computePayroll(
+      ratioEmp({ ratioWageCap: null, nonCompeteRatio: 0.025 }),
       { classRevenue: 10_000_000 },
       DEFAULT_RATES_2025,
       taxTable
     );
-    expect(r.nonCompeteP).toBe(0);
+    expect(r.nonCompeteP).toBe(250_000);
+    expect(r.gross).toBe(4_250_000);
+    expect(r.wageTaxable).toBe(4_250_000);
+    expect(r.bizIncomeP).toBe(0);
+    expect(r.hourlyWage).toBe(Math.round(4_250_000 / MONTH_HOURS));
   });
 
   it("근로시간표가 비면 209시간으로 환산한다(통상시급 0 으로 수당이 사라지지 않게)", () => {

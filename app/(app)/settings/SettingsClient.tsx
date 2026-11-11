@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { DEFAULT_BIZ_PAYER_SERVICE } from "@/lib/ratio-employee";
 
 export default function SettingsClient() {
   const [data, setData] = useState<any>(null);
@@ -143,6 +144,7 @@ function CompanyCard({ company, onSave }: any) {
     bizPayerPhone: company?.bizPayerPhone ?? "",
     bizPayerAddress: company?.bizPayerAddress ?? "",
     bizPayerAlias: company?.bizPayerAlias ?? "",
+    bizPayerService: company?.bizPayerService ?? "",
   });
   const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v }));
   // 필수 넷 중 일부만 찼으면 명세서·이체 파일을 만들 수 없다 — 빠진 것을 바로 보여 준다
@@ -170,8 +172,8 @@ function CompanyCard({ company, onSave }: any) {
         <h3 className="font-semibold text-slate-700 text-sm">별도 사업장 (사업소득 지급처)</h3>
         <p className="text-xs text-slate-500 mt-1 mb-3 leading-relaxed break-keep">
           <b>비율제 근로계약</b>에 근로소득 상한을 둔 직원의, 상한을 넘은 비율급을 <b>사업소득(3.3%)</b>으로 지급하는
-          사업자입니다. 이 사업장 명의로 「사업소득 지급명세서」·세무 자료 별도 시트·별도 이체 파일이 나갑니다.
-          그런 직원이 없으면 비워 두세요.
+          사업자입니다. 이 사업장 명의로 「용역위탁계약서」(근로계약서와 함께)·「사업소득 지급명세서」·세무 자료 별도
+          시트·별도 이체 파일이 나갑니다. 그런 직원이 없으면 비워 두세요.
         </p>
         <div className="grid md:grid-cols-3 gap-4">
           <F l="상호"><input className="input" value={f.bizPayerName} onChange={(e) => set("bizPayerName", e.target.value)} /></F>
@@ -185,10 +187,24 @@ function CompanyCard({ company, onSave }: any) {
             </p>
           </F>
           <F l="주소" full><input className="input" value={f.bizPayerAddress} onChange={(e) => set("bizPayerAddress", e.target.value)} /></F>
+          <F l="용역위탁계약서의 위탁 용역 (선택)" full>
+            <input
+              className="input"
+              placeholder={DEFAULT_BIZ_PAYER_SERVICE}
+              value={f.bizPayerService}
+              onChange={(e) => set("bizPayerService", e.target.value)}
+            />
+            <p className="text-[11px] text-slate-500 mt-1 leading-relaxed break-keep">
+              이 사업장을 위해 <b>실제로 하는 일</b>을 적으세요(비우면 위 회색 문구). 계약서 제2조에 그대로 들어갑니다.
+              이 회사 근로계약과 같은 강의를 금액으로만 나눈 것이면 이 구조는 실질과세·근로자성 판단에서 하나로
+              합쳐질 수 있습니다 — 업무·지휘감독·장소가 실제로 달라야 버팁니다.
+            </p>
+          </F>
         </div>
         {bizPartial && (
           <p className="text-xs text-amber-700 mt-2">
-            상호·사업자등록번호·대표자·주소를 모두 넣어야 사업소득 지급명세서와 별도 이체 파일을 만들 수 있습니다.
+            상호·사업자등록번호·대표자·주소를 모두 넣어야 용역위탁계약서·사업소득 지급명세서·별도 이체 파일을 만들 수
+            있습니다.
           </p>
         )}
       </div>

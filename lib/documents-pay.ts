@@ -504,14 +504,19 @@ export function payslipHtml(args: {
     }
     ${(() => {
       if (!p.nonCompeteP) return "";
-      // 위탁(완전비율제)은 매출 × 비율로 수수료와 **별도로** 주는 돈이고 근거 조항도 다르다(강의위탁계약서
-      // 제5조·제7조). 근로계약은 월 급여 총액 안에서 기본급과 구분한 몫이다(근로계약서 제8조).
+      // 완전비율제는 매출 × 비율로 수수료·비율급과 **별도로** 주는 돈이다 — 위탁은 강의위탁계약서 제5조·제7조
+      // (사업소득 3.3%), 비율제 근로자는 근로계약서 제8조(근로소득, 근로소득 상한과 무관). 월급제는 월 급여 총액
+      // 안에서 기본급과 구분한 몫이다(근로계약서 제8조).
       if (p.payScheme === "RATIO") {
         const nc = bd?.nonCompete;
         const formula =
           nc && typeof nc.ratio === "number" && typeof nc.revenue === "number"
             ? ` — 수강료 입금액 ${won(nc.revenue)}원 × ${ratioPctLabel(nc.ratio)} = <b>${won(p.nonCompeteP)}원</b>`
             : "";
+        if (p.ratioEmployee)
+          return `<div class="small">· 경업금지 보상금: 근로계약서 제8조의 경업금지 의무에 대한 대가로 비율급과 별도로 지급하는 금액입니다${formula}. 근로소득으로 과세되고 4대보험 산정에 포함됩니다${
+            (p.bizIncomeP ?? 0) > 0 ? "(근로소득 상한과 관계없이 이 회사가 지급)" : ""
+          }. 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 조).</div>`;
         return `<div class="small">· 경업금지 보상금: 강의위탁계약서 제5조·제7조에 따라 경업금지 의무의 대가로 용역수수료와 별도로 지급하는 금액입니다${formula}. 수수료와 함께 사업소득세(3.3%)를 원천징수하며, 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 계약서 제7조).</div>`;
       }
       return `<div class="small">· 경업금지 보상금: 근로계약서 제8조의 경업금지 의무에 대한 대가로, 월 급여 총액 중 기본급과 구분해 지급하는 금액입니다(과세). 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 조).</div>`;
@@ -560,7 +565,7 @@ export function bizIncomeSlipHtml(args: {
   <p style="text-align:center" class="muted">${p.year}년 ${p.month}월분</p>
   <table class="kv">
     <tr><th>성명</th><td>${esc(e.name)}</td><th>지급자</th><td>${esc(payer.name)}</td></tr>
-    <tr><th>지급 내용</th><td colspan="3">강의 용역 대가 — 비율급 중 월 ${won(cap)}원을 넘는 부분</td></tr>
+    <tr><th>지급 내용</th><td colspan="3">용역위탁계약에 따른 용역수수료 — 비율급 중 월 ${won(cap)}원을 넘는 부분</td></tr>
   </table>
   <table class="pay">
     <thead><tr><th colspan="2">지 급</th><th colspan="2">공 제</th></tr>
@@ -573,7 +578,7 @@ export function bizIncomeSlipHtml(args: {
     </tbody>
   </table>
   <div class="clause" style="margin-top:10px">
-    <div class="small">· 이 금액은 ${esc(josa(args.company.name, "과", "와"))}의 근로계약(제4조)에서 근로소득 상한(월 ${won(cap)}원)을 넘는 비율급으로, ${esc(e.name)}님과 ${esc(payer.name)} 사이의 계약에 따라 ${esc(josa(payer.name, "이", "가"))} 지급합니다. 근로소득이 아니므로 4대보험료·근로소득세를 공제하지 않습니다.</div>
+    <div class="small">· 이 금액은 ${esc(josa(args.company.name, "과", "와"))}의 근로계약(제4조)에서 근로소득 상한(월 ${won(cap)}원)을 넘는 비율급으로, ${esc(e.name)}님과 ${esc(payer.name)} 사이의 용역위탁계약(제3조)에 따라 ${esc(josa(payer.name, "이", "가"))} 지급합니다. 근로소득이 아니므로 4대보험료·근로소득세를 공제하지 않습니다.</div>
     <div class="small">· 사업소득 원천징수: 지급액의 3.3%(소득세 3% + 지방소득세 0.3%) — 「소득세법」 제127조. 다른 소득과 합산하여 다음 해 5월 종합소득세 신고 대상이 될 수 있습니다.</div>
   </div>`;
 }

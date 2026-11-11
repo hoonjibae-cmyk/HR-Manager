@@ -80,8 +80,9 @@ export default function RatioContractField({
               </div>
               <p className="text-amber-700 leading-relaxed break-keep">⚠ {RATIO_SPLIT_RISK_NOTE}</p>
               <p className="text-slate-500 leading-relaxed break-keep">
-                별도 사업장 정보(상호·사업자등록번호·대표자·주소)는 설정 → 회사 정보에 넣어야 사업소득
-                지급명세서·이체 파일이 만들어집니다.
+                계약서를 발급하면 근로계약서와 함께 <b>별도 사업장 명의의 용역위탁계약서</b>(수수료 = 비율급 중 상한
+                초과분)가 나갑니다. 별도 사업장 정보(상호·사업자등록번호·대표자·주소)는 설정 → 회사 정보에 넣어야
+                이 계약서와 사업소득 지급명세서·이체 파일이 만들어집니다.
               </p>
             </>
           )}

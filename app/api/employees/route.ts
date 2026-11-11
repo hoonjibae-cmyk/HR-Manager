@@ -13,7 +13,7 @@ import {
   nonCompeteRatioRequired,
   ratioPctLabel,
   NON_COMPETE_REQUIRED_MESSAGE,
-  NON_COMPETE_RATIO_REQUIRED_MESSAGE,
+  nonCompeteRatioRequiredMessage,
 } from "@/lib/non-compete";
 
 export const dynamic = "force-dynamic";
@@ -106,7 +106,8 @@ export async function POST(req: Request) {
     : { value: null, error: null };
   if (nc.error) return NextResponse.json({ error: nc.error }, { status: 400 });
   const ncRequired = !!body.createContract && nonCompeteRequired(data.department, ncShape);
-  // 위탁(강의위탁계약서) 초기 계약 — 매출에 곱하는 보상금 비율이 필수(신규 계약 작성과 같은 규칙)
+  // 완전비율제 초기 계약 — 매출에 곱하는 보상금 비율. 위탁은 언제나, 비율제 근로계약은 교수부만 필수
+  // (신규 계약 작성과 같은 규칙)
   const ncr = body.createContract
     ? resolveNonCompeteRatio({
         raw: body.nonCompeteRatio,
@@ -118,13 +119,14 @@ export async function POST(req: Request) {
     : { value: null, error: null };
   if (ncr.error) return NextResponse.json({ error: ncr.error }, { status: 400 });
   const ncrRequired =
-    !!body.createContract && nonCompeteRatioRequired({ payScheme: data.payScheme, ratioEmployee: ratio.ratioEmployee });
+    !!body.createContract &&
+    nonCompeteRatioRequired({ payScheme: data.payScheme, ratioEmployee: ratio.ratioEmployee }, data.department);
   const missing = (ncRequired && !nc.value) || (ncrRequired && !ncr.value);
   const skipNonCompete = missing && body.skipNonCompete === true;
   if (missing && !skipNonCompete)
     return NextResponse.json(
       {
-        error: ncrRequired ? NON_COMPETE_RATIO_REQUIRED_MESSAGE : NON_COMPETE_REQUIRED_MESSAGE,
+        error: ncrRequired ? nonCompeteRatioRequiredMessage(ratio.ratioEmployee) : NON_COMPETE_REQUIRED_MESSAGE,
         code: "NON_COMPETE_REQUIRED",
       },
       { status: 400 }
@@ -177,7 +179,7 @@ export async function POST(req: Request) {
             }.`
           : "") +
         (skipNonCompete
-          ? ncrRequired
+          ? ncrRequired && !ratio.ratioEmployee
             ? ` 위탁 초기 계약이지만 경업금지 보상금 없이 작성했습니다(관리자 선택).`
             : ` 교수부 초기 계약이지만 경업금지 조항 없이 작성했습니다(관리자 선택).`
           : ""),

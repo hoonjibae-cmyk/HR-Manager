@@ -17,7 +17,7 @@ import {
   nonCompeteRatioRequired,
   nonCompeteRatioError,
   NON_COMPETE_REQUIRED_MESSAGE,
-  NON_COMPETE_RATIO_REQUIRED_MESSAGE,
+  nonCompeteRatioRequiredMessage,
 } from "@/lib/non-compete";
 import NonCompeteField from "./NonCompeteField";
 import NonCompeteRatioField from "./NonCompeteRatioField";
@@ -85,7 +85,7 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     ratioWageCap: "" as number | "",
     // 초기 계약의 경업금지 보상금 — 등록 때만 쓴다(이후 변경은 계약 이력에서)
     nonCompetePay: "",
-    nonCompeteRatio: "", // 위탁(완전비율제) — % 로 받는다
+    nonCompeteRatio: "", // 완전비율제(위탁·비율제 근로계약) — % 로 받는다
     skipNonCompete: false,
   });
   const [schedule, setSchedule] = useState<ScheduleDay[]>(
@@ -123,9 +123,10 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     carAllow: Number(f.carAllow) || 0,
     schedule,
   };
-  // 위탁(완전비율제) 초기 계약 — 매출에 곱하는 보상금 비율. 필수
-  const ncrApplies = !editing && nonCompeteRatioApplies({ payScheme: f.payScheme, ratioEmployee: ratioWorker });
-  const ncrRequired = !editing && nonCompeteRatioRequired({ payScheme: f.payScheme, ratioEmployee: ratioWorker });
+  // 완전비율제 초기 계약 — 매출에 곱하는 보상금 비율. 위탁은 필수, 비율제 근로계약은 교수부만 필수
+  const ncrApplies = !editing && nonCompeteRatioApplies({ payScheme: f.payScheme });
+  const ncrRequired =
+    !editing && nonCompeteRatioRequired({ payScheme: f.payScheme, ratioEmployee: ratioWorker }, f.department);
   const ratioFrac = f.ratioPercent === "" ? 0 : Number(f.ratioPercent) / 100;
   const ncrFrac = f.nonCompeteRatio === "" ? null : Number(f.nonCompeteRatio) / 100;
   const ncMissing =
@@ -139,11 +140,11 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
       if (ncErr) return setErr(ncErr);
     }
     if (ncrApplies) {
-      const ncrErr = nonCompeteRatioError(ncrFrac, ratioFrac);
+      const ncrErr = nonCompeteRatioError(ncrFrac, ratioFrac, ratioWorker);
       if (ncrErr) return setErr(ncrErr);
     }
     if (ncMissing && !f.skipNonCompete)
-      return setErr(ncrRequired ? NON_COMPETE_RATIO_REQUIRED_MESSAGE : NON_COMPETE_REQUIRED_MESSAGE);
+      return setErr(ncrRequired ? nonCompeteRatioRequiredMessage(ratioWorker) : NON_COMPETE_REQUIRED_MESSAGE);
     setSaving(true);
     // 보수조건은 계약이 정한다 — 수정 모드에서는 인적사항만 보낸다
     const {
@@ -455,6 +456,8 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
               onChange={(v) => set("nonCompeteRatio", v)}
               required={ncrRequired}
               ratioPercent={ratioFrac}
+              worker={ratioWorker}
+              capped={ratioWorker && f.ratioWageCap !== ""}
               skip={f.skipNonCompete}
               onSkip={(v) => set("skipNonCompete", v)}
             />

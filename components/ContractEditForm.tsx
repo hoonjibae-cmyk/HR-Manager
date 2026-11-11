@@ -99,7 +99,8 @@ export default function ContractEditForm({
   // 완전비율제는 계약 형태(위탁/근로)로, 그 밖은 위탁 체크칸으로 위탁 여부가 정해진다
   const ratioWorker = f.payScheme === "RATIO" && !!f.ratioEmployee;
   const contractorNow = f.payScheme === "RATIO" ? !f.ratioEmployee : !!f.isContractor;
-  const ncrApplies = nonCompeteRatioApplies({ payScheme: f.payScheme, ratioEmployee: ratioWorker });
+  // 보상금 비율 — 완전비율제 전부(위탁·비율제 근로계약). 위탁 ↔ 근로를 바꿔도 값은 그대로 간다
+  const ncrApplies = nonCompeteRatioApplies({ payScheme: f.payScheme });
   const ratioFrac = f.ratioPercent === "" ? 0 : Number(f.ratioPercent) / 100;
   const ncrFrac = f.nonCompeteRatio === "" ? null : Number(f.nonCompeteRatio) / 100;
 
@@ -124,7 +125,7 @@ export default function ContractEditForm({
       if (ncErr) return setErr(ncErr);
     }
     if (ncrApplies) {
-      const ncrErr = nonCompeteRatioError(ncrFrac, ratioFrac);
+      const ncrErr = nonCompeteRatioError(ncrFrac, ratioFrac, ratioWorker);
       if (ncrErr) return setErr(ncrErr);
     }
     setSaving(true);
@@ -343,8 +344,10 @@ export default function ContractEditForm({
         <NonCompeteRatioField
           value={f.nonCompeteRatio}
           onChange={(v) => set("nonCompeteRatio", v)}
-          required={nonCompeteRatioRequired({ payScheme: f.payScheme, ratioEmployee: ratioWorker })}
+          required={nonCompeteRatioRequired({ payScheme: f.payScheme, ratioEmployee: ratioWorker }, department)}
           ratioPercent={ratioFrac}
+          worker={ratioWorker}
+          capped={ratioWorker && f.ratioWageCap !== ""}
         />
       )}
       {err && <p className="text-xs text-red-600">{err}</p>}

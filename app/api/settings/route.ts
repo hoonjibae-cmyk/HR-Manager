@@ -97,7 +97,15 @@ export async function PATCH(req: Request) {
         // 보낸 칸만 고치고, 빈칸은 비운다(null). lib/ratio-employee.ts
         ...Object.fromEntries(
           (
-            ["bizPayerName", "bizPayerBizNo", "bizPayerCeo", "bizPayerAddress", "bizPayerPhone", "bizPayerAlias"] as const
+            [
+              "bizPayerName",
+              "bizPayerBizNo",
+              "bizPayerCeo",
+              "bizPayerAddress",
+              "bizPayerPhone",
+              "bizPayerAlias",
+              "bizPayerService",
+            ] as const
           )
             .filter((k) => k in data)
             .map((k) => [k, String(data[k] ?? "").trim() || null])

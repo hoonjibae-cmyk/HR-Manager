@@ -69,8 +69,9 @@ export interface EmployeePayInput {
    */
   nonCompetePay?: number | null;
   /**
-   * 경업금지 보상금 비율(0.03 = 3%) — **완전비율제(위탁)만**. 용역수수료와 같은 매출에 곱해
-   * 수수료와 **별도로** 더해 지급한다(사업소득 3.3% 원천징수도 함께 걸린다). lib/non-compete.ts
+   * 경업금지 보상금 비율(0.03 = 3%) — **완전비율제**(위탁·비율제 근로계약). 수수료·비율급과 같은 매출에
+   * 곱해 그것과 **별도로** 더해 지급한다. 위탁이면 사업소득 3.3% 가 함께 걸리고, 비율제 근로자면
+   * 근로소득(4대보험·근로소득세)이며 근로소득 상한과 무관하다. lib/non-compete.ts
    */
   nonCompeteRatio?: number | null;
   // 비율제
@@ -103,7 +104,7 @@ export interface WageSegment {
   carAllow: number;
   /** 경업금지 보상금(월) — 총액 안에서 떼는 몫이라 총액과 같이 역일수로 가중한다 */
   nonCompetePay?: number | null;
-  /** 경업금지 보상금 비율(위탁) — 위탁 비율과 같이 역일수로 가중한다 */
+  /** 경업금지 보상금 비율(완전비율제) — 위탁·임금 비율과 같이 역일수로 가중한다 */
   nonCompeteRatio?: number | null;
   ratioPercent?: number | null;
   ratioMinGuarantee?: number | null;
@@ -688,6 +689,21 @@ export function computePayroll(
           : `최저보장 ${floor.toLocaleString()}원 — 산출 수수료가 이를 넘어 그대로 지급`
       );
     }
+    // 경업금지 보상금 — 같은 매출에 보상금 비율을 곱해 수수료·비율급과 **별도로** 더한다.
+    // 최저보장은 수수료·비율급에만 걸린다 — 보상금은 언제나 매출 × 비율이다.
+    //  · 위탁: 강의위탁계약서 제5조·제7조(사업소득 3.3% 가 함께 걸린다).
+    //  · 비율제 근로계약: 근로계약서 제4조·제8조. 근로소득이고 **근로소득 상한과 무관**하다 — 상한은
+    //    비율급에만 걸린다(아래 splitRatioPay 에 넘기지 않는다). 경업금지 약정의 당사자가 이 회사다.
+    const ncr = emp.nonCompeteRatio ?? 0;
+    if (ncr > 0) {
+      nonCompeteP = round0(rev * ncr);
+      notes.push(
+        `경업금지 보상금: 매출 ${rev.toLocaleString()}원 × ${(ncr * 100).toFixed(1)}% = ${nonCompeteP.toLocaleString()}원 ` +
+          (ratioWorker
+            ? `(비율급과 별도 · 근로계약서 제8조 · 근로소득 — 근로소득 상한과 무관하게 이 회사가 지급)`
+            : `(용역수수료와 별도 · 강의위탁계약서 제5조·제7조)`)
+      );
+    }
     if (ratioWorker) {
       // ── 비율제 근로계약 ──
       // 근로소득 상한: 4대보험에 드는 경우에만 가른다(세무구분이 사업소득이면 어차피 전액 3.3%).
@@ -703,6 +719,8 @@ export function computePayroll(
       // 비율급에 주휴일 임금이 포함된 것으로 약정하므로(근로계약서 제4조) 월급제와 같은 월 환산시간
       // (소정+주휴)×4.345 로 나눈다. 별도 사업장 몫은 이 회사의 임금이 아니라 분자에서 뺀다.
       // 식대·차량유지비(정액)는 월급제가 총액 안에 두고 나누는 것과 같게 분자에 넣는다.
+      // 경업금지 보상금도 넣는다 — 월급제가 보상금을 통상시급에서 빼지 않는 것과 같은 원칙이다(임금으로
+      // 판단되면 뺀 만큼이 연장·휴일·야간·연차수당 체불이 된다. 덜 주는 쪽으로 틀리지 않게).
       let hours = monthlyStdHours;
       if (hours <= 0) {
         hours = 209;
@@ -711,21 +729,12 @@ export function computePayroll(
             "직원 정보에 근로시간표를 채우면 계약 소정근로시간 기준으로 다시 계산됩니다."
         );
       }
-      const wageBase = split.wage + (emp.mealAllow || 0) + (emp.carAllow || 0);
+      const wageBase = split.wage + nonCompeteP + (emp.mealAllow || 0) + (emp.carAllow || 0);
       hourlyWage = wageBase > 0 ? round0(wageBase / hours) : 0;
       notes.push(
-        `통상시급: 그 달 임금 ${wageBase.toLocaleString()}원 ÷ ${round0(hours)}시간 = ${hourlyWage.toLocaleString()}원 ` +
+        `통상시급: 그 달 임금 ${wageBase.toLocaleString()}원${nonCompeteP > 0 ? "(경업금지 보상금 포함)" : ""} ÷ ` +
+          `${round0(hours)}시간 = ${hourlyWage.toLocaleString()}원 ` +
           `(비율급 — 근로기준법 시행령 §6②6. 연장·휴일·야간수당과 연차수당의 기준)`
-      );
-    }
-    // 경업금지 보상금 — 같은 매출에 보상금 비율을 곱해 수수료와 **별도로** 더한다(강의위탁계약서 제5조).
-    // 최저보장은 수수료에만 걸린다 — 보상금은 언제나 매출 × 비율이다. **위탁 전용**(근로계약서에는 없는 조항).
-    const ncr = contractor ? emp.nonCompeteRatio ?? 0 : 0;
-    if (ncr > 0) {
-      nonCompeteP = round0(rev * ncr);
-      notes.push(
-        `경업금지 보상금: 매출 ${rev.toLocaleString()}원 × ${(ncr * 100).toFixed(1)}% = ${nonCompeteP.toLocaleString()}원 ` +
-          `(용역수수료와 별도 · 강의위탁계약서 제5조·제7조)`
       );
     }
   } else {

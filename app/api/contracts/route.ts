@@ -13,7 +13,7 @@ import {
   nonCompeteRatioRequired,
   ratioPctLabel,
   NON_COMPETE_REQUIRED_MESSAGE,
-  NON_COMPETE_RATIO_REQUIRED_MESSAGE,
+  nonCompeteRatioRequiredMessage,
 } from "@/lib/non-compete";
 
 export const dynamic = "force-dynamic";
@@ -101,8 +101,8 @@ export async function POST(req: Request) {
   });
   if (nc.error) return NextResponse.json({ error: nc.error }, { status: 400 });
   const ncRequired = nonCompeteRequired(emp.department, { payScheme, isContractor, ratioEmployee });
-  // 위탁(강의위탁계약서)은 금액이 아니라 **매출에 곱하는 비율**로 정하고, 새 계약마다 필수다(부서 무관).
-  // 위탁 비율과 합쳐 매출의 100% 를 넘으면 거른다.
+  // 완전비율제는 금액이 아니라 **매출에 곱하는 비율**로 정한다 — 위탁은 새 계약마다 필수(부서 무관),
+  // 비율제 근로계약은 교수부만 필수(월급제 교수부와 같은 규칙). 위탁·임금 비율과 합쳐 매출의 100% 를 넘으면 거른다.
   const ratioPercent = numOrNull(body.ratioPercent, emp.ratioPercent);
   const ncr = resolveNonCompeteRatio({
     raw: body.nonCompeteRatio,
@@ -115,13 +115,13 @@ export async function POST(req: Request) {
   // 수습 개월 — 화면은 보내지 않아 현행 기본값(3개월)이 들어간다. API 를 직접 부른 값만 거른다
   const probation = parseProbationMonths(body.probationMonths, PROBATION_MONTHS);
   if (probation.error) return NextResponse.json({ error: probation.error }, { status: 400 });
-  const ncrRequired = nonCompeteRatioRequired({ payScheme, ratioEmployee });
+  const ncrRequired = nonCompeteRatioRequired({ payScheme, ratioEmployee }, emp.department);
   const missing = (ncRequired && !nc.value) || (ncrRequired && !ncr.value);
   const skipNonCompete = missing && body.skipNonCompete === true;
   if (missing && !skipNonCompete)
     return NextResponse.json(
       {
-        error: ncrRequired ? NON_COMPETE_RATIO_REQUIRED_MESSAGE : NON_COMPETE_REQUIRED_MESSAGE,
+        error: ncrRequired ? nonCompeteRatioRequiredMessage(ratioEmployee) : NON_COMPETE_REQUIRED_MESSAGE,
         code: "NON_COMPETE_REQUIRED",
       },
       { status: 400 }
@@ -195,7 +195,7 @@ export async function POST(req: Request) {
             }.`
           : "") +
         (skipNonCompete
-          ? ncrRequired
+          ? ncrRequired && !ratioEmployee
             ? ` 위탁계약이지만 경업금지 보상금 없이 작성했습니다(관리자 선택).`
             : ` 교수부 계약이지만 경업금지 조항 없이 작성했습니다(관리자 선택).`
           : "") +

@@ -85,7 +85,7 @@ model Company {
   pageInitials         Boolean  @default(true)
   /// 별도 사업장(사업소득 지급처) — 비율제 근로자의 근로소득 상한 초과분을 사업소득으로 지급하는 사업자.
   /// 한 사업장에서 같은 사람에게 근로·사업소득을 함께 처리하지 않으므로 지급처를 따로 둔다.
-  /// 사업소득 지급명세서 머리글·은행 이체 적요에 쓴다. lib/ratio-employee.ts
+  /// 사업소득 지급명세서·용역위탁계약서 머리글·은행 이체 적요에 쓴다. lib/ratio-employee.ts
   bizPayerName         String?
   bizPayerBizNo        String?
   bizPayerCeo          String?
@@ -93,6 +93,9 @@ model Company {
   bizPayerPhone        String?
   /// 이체 적요 약칭 — 비우면 상호
   bizPayerAlias        String?
+  /// 별도 사업장 용역위탁계약서의 「위탁 용역」 — 그 사업장을 위해 실제로 하는 일. 비우면 기본 문구
+  /// (lib/ratio-employee.ts DEFAULT_BIZ_PAYER_SERVICE)
+  bizPayerService      String?
   updatedAt            DateTime @updatedAt
 }
 

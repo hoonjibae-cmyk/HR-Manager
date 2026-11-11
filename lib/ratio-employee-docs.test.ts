@@ -11,6 +11,9 @@ import * as XLSX from "xlsx";
 import {
   contractHtml,
   contractGroups,
+  newHirePackageGroups,
+  bizPayerContractHtml,
+  needsBizPayerContract,
   deductsInsurance,
   type DocCompany,
   type DocContract,
@@ -21,7 +24,7 @@ import { computePayroll, DEFAULT_RATES_2025, type EmployeePayInput } from "./pay
 import { buildExportRow, buildBizExportRow, reconcileRow, buildPayrollExportWorkbook, type ExportPayrollRecord } from "./payroll-export";
 import { buildTransferRows, type TransferPayrollRecord } from "./bank-transfer";
 import { severanceBase } from "./severance";
-import type { BizPayer } from "./ratio-employee";
+import { DEFAULT_BIZ_PAYER_SERVICE, type BizPayer } from "./ratio-employee";
 
 const company: DocCompany = {
   name: "주식회사 유쌤에듀",
@@ -40,7 +43,10 @@ const payer: BizPayer = {
   address: "경기도 하남시 가상로 1",
   phone: "",
   alias: "가상A",
+  service: "",
 };
+/** 별도 사업장 정보까지 채운 회사 — 상한이 있는 비율제 근로계약의 계약서 세트에 필요하다 */
+const companyB: DocCompany = { ...company, bizPayer: payer, bizPayerMissing: [] };
 
 const emp = (over: Partial<DocEmployee> = {}): DocEmployee =>
   ({
@@ -130,12 +136,13 @@ describe("근로계약서 — 비율급 근로계약", () => {
     expect(h).not.toContain("근로계약서 (비율급)");
   });
 
-  it("함께 받는 확인서 — 비율제 근로자는 퇴직유보금·개인사업자 지위 확인서가 없다", () => {
-    const worker = contractGroups({ employee: emp(), contract: ct(), company });
+  it("함께 받는 확인서 — 비율제 근로자는 이 회사 앞으로 퇴직유보금·개인사업자 지위 확인서가 없다", () => {
+    // 상한이 없으면 근로계약서 한 묶음뿐
+    const worker = contractGroups({ employee: emp(), contract: ct({ ratioWageCap: null }), company });
     const all = worker.flatMap((g) => g.bodies).map(text).join("\n");
     expect(all).not.toContain("(퇴직유보금)");
     expect(all).not.toContain("개인사업자");
-    expect(worker).toHaveLength(1); // 근로계약서 한 묶음뿐
+    expect(worker).toHaveLength(1);
 
     const contractor = contractGroups({
       employee: emp({ ratioEmployee: false, incomeType: "FREELANCE" }),
@@ -154,6 +161,164 @@ describe("근로계약서 — 비율급 근로계약", () => {
     expect(deductsInsurance(emp({ ratioEmployee: false, incomeType: "EMPLOYEE" }))).toBe(false);
     // 시급제 위탁 — 문서용 직원 정보에 위탁 표시가 실려 이제 바르게 가린다
     expect(deductsInsurance(emp({ payScheme: "HOURLY", ratioEmployee: false, isContractor: true }))).toBe(false);
+  });
+});
+
+describe("근로계약서(비율급) — 경업금지 보상금 비율(v1.58)", () => {
+  const html = (c: Partial<DocContract> = {}, e: Partial<DocEmployee> = {}) =>
+    text(contractHtml({ employee: emp(e), contract: ct(c), company }));
+
+  it("제4조에 비율급과 별도 지급을 적고, 상한과 관계없이 갑이 준다고 적는다", () => {
+    const h = html({ nonCompeteRatio: 0.03 });
+    expect(h).toContain(
+      "제①항의 임금과 별도로, 제8조에 따른 경업금지 의무의 대가로 매월 제①항의 수강료 입금액에 3%를 곱한 금액을 경업금지 보상금으로 지급한다."
+    );
+    // 상한 조항이 ④(정액 수당 없음) — 그 번호를 가리킨다
+    expect(h).toContain("경업금지 보상금은 제④항의 상한과 관계없이 \"갑\"이 지급하며, 4대보험료와 근로소득세 공제 대상에 포함한다.");
+    // 정액 수당이 끼면 상한 조항이 ⑤ 로 밀리고, 가리키는 번호도 함께 밀린다
+    expect(html({ nonCompeteRatio: 0.03, mealAllow: 200_000 })).toContain("제⑤항의 상한과 관계없이");
+  });
+
+  it("제8조 「경업금지 및 경업금지 보상금」이 들어가고 기타사항이 제9조로 밀린다", () => {
+    const h = html({ nonCompeteRatio: 0.03 });
+    expect(h).toContain("제 8조 (경업금지 및 경업금지 보상금)");
+    expect(h).toContain("근로계약 종료일로부터 6개월간");
+    expect(h).toContain("반경 2km");
+    expect(h).toContain(
+      "매월 제4조 제①항의 수강료 입금액에 3%를 곱한 금액을 경업금지 보상금으로 제4조의 임금과 구분하여 임금 지급일에 함께 지급한다."
+    );
+    expect(h).toContain("전액을 \"갑\"의 서면 청구일로부터 30일 이내");
+    expect(h).toContain("위약금이나 손해배상액의 예정이 아니며");
+    expect(h).toContain("보상금의 비율 및 반환 의무");
+    expect(h).toContain("제 9조 (기타사항)");
+    expect(h).not.toContain("일할 계산"); // 매출 비례라 일할 문구가 없다(월급제와 다른 점)
+  });
+
+  it("상한이 없으면 '상한과 관계없이' 문구가 없다", () => {
+    const h = html({ nonCompeteRatio: 0.025, ratioWageCap: null });
+    expect(h).toContain("수강료 입금액에 2.5%를 곱한 금액을 경업금지 보상금으로 지급한다.");
+    expect(h).not.toContain("상한과 관계없이");
+  });
+
+  it("보상금 비율이 없으면 경업금지 조항이 없다 — 기타사항은 제8조", () => {
+    const h = html();
+    expect(h).not.toContain("경업금지");
+    expect(h).toContain("제 8조 (기타사항)");
+  });
+});
+
+describe("별도 사업장 용역위탁계약서(v1.58)", () => {
+  const doc = (c: Partial<DocContract> = {}, p: Partial<BizPayer> = {}) =>
+    text(bizPayerContractHtml({ employee: emp(), contract: ct(c), company, payer: { ...payer, ...p } }));
+
+  it("갑은 별도 사업장 — 이 회사 이름·사업자번호가 당사자로 나오지 않는다", () => {
+    const h = doc();
+    expect(h).toContain("용역위탁계약서");
+    expect(h).toContain("가상아카데미 (이하 \"갑\"이라 한다) 과(와) 가상강사 (이하 \"을\"이라 한다)");
+    expect(h).toContain("123-45-67890");
+    expect(h).toContain("대표 홍길동");
+    expect(h).not.toContain("418-86-02289");
+    expect(h).not.toContain("유쌤에듀");
+  });
+
+  it("수수료 산식은 엔진과 같다 — 수강료 입금액 × 비율 중 상한 초과분", () => {
+    const h = doc();
+    expect(h).toContain("수강료(가) 입금액에 40%를 곱한 금액 중 월 5,000,000원을 초과하는 금액으로 한다");
+    expect(h).toContain("월 5,000,000원 이하인 달에는 용역수수료가 발생하지 아니한다");
+    expect(h).toContain("다음 달 7일에 사업소득세(3.0%)와 지방소득세(0.3%)를 공제");
+    // 근로계약서 제4조의 상한 문구와 같은 금액을 가리킨다
+    expect(text(contractHtml({ employee: emp(), contract: ct(), company }))).toContain(
+      "월 5,000,000원을 넘는 부분은 이 계약에 따른 임금에 포함하지 아니하며"
+    );
+  });
+
+  it("서명란의 갑은 '위탁자' — 사용자(근로관계)로 적지 않는다", () => {
+    const raw = bizPayerContractHtml({ employee: emp(), contract: ct(), company, payer });
+    expect(raw).toContain('"갑" (위탁자)');
+    expect(raw).not.toContain("(사용자)");
+    expect(raw).toContain('"을" (수탁자)');
+  });
+
+  it("근로자 아님·지휘감독 없음을 적고, 경업금지·위약금은 두지 않는다", () => {
+    const h = doc();
+    expect(h).toContain("지휘·감독을 받지 아니하고");
+    expect(h).toContain("근로기준법상 근로자의 지위에 있지 아니하며");
+    expect(h).toContain("제 4조 (기밀유지)");
+    expect(h).not.toContain("경업금지");
+    expect(h).not.toContain("위약금");
+  });
+
+  it("위탁 용역은 설정값 — 비우면 기본 문구", () => {
+    expect(doc()).toContain(DEFAULT_BIZ_PAYER_SERVICE);
+    const custom = doc({}, { service: "온라인 강의 콘텐츠 제작" });
+    expect(custom).toContain("위탁 용역온라인 강의 콘텐츠 제작");
+    expect(custom).not.toContain(DEFAULT_BIZ_PAYER_SERVICE);
+  });
+
+  it("이 회사 인감·로고를 싣지 않는다", () => {
+    const raw = bizPayerContractHtml({
+      employee: emp(),
+      contract: ct(),
+      company: { ...company, stamp: "data:image/png;base64,AAAA", logo: "data:image/png;base64,BBBB" },
+      payer,
+    });
+    expect(raw).not.toContain("data:image/png");
+  });
+
+  it("작성일자 = min(발급일, 계약 시작일) — 근로계약서와 같다", () => {
+    const printedAt = new Date(Date.UTC(2025, 11, 20));
+    const h = text(
+      bizPayerContractHtml({ employee: emp(), contract: ct(), company, payer, printedAt })
+    );
+    expect(h).toContain("2025년 12월 20일");
+  });
+});
+
+describe("계약서 세트 — 상한이 있으면 별도 사업장 용역위탁계약서가 함께 나간다", () => {
+  const OPTS = { seamStamp: "data:image/png;base64,SEAM", initials: true, paginate: true, fitPages: 2 };
+
+  it("근로계약서 · 별도 사업장 용역위탁계약서 · 그 사업장 앞 개인사업자 지위 확인서", () => {
+    const g = contractGroups({ employee: emp(), contract: ct(), company: companyB, bilateralOpts: OPTS });
+    expect(g).toHaveLength(3);
+    expect(text(g[0].bodies[0])).toContain("근로계약서 (비율급)");
+    expect(text(g[1].bodies[0])).toContain("용역위탁계약서");
+    // 남의 계약서에 이 회사 인감으로 간인을 찍지 않는다 — 이니셜란·쪽번호는 그대로, 한 장짜리 서식이라 1장 맞춤
+    expect(g[1].opts?.seamStamp).toBeNull();
+    expect(g[1].opts?.initials).toBe(true);
+    expect(g[1].opts?.fitPages).toBe(1);
+    expect(g[0].opts?.seamStamp).toBe("data:image/png;base64,SEAM"); // 근로계약서는 그대로
+    const confirm = text(g[2].bodies[0]);
+    expect(confirm).toContain("개인사업자 지위 확인서");
+    expect(confirm).toContain("위탁 용역을 수행함에 있어서");
+    expect(confirm).not.toContain("입사함에 있어서");
+    expect(confirm).toContain("가상아카데미 대표 홍길동 귀하");
+    expect(confirm).not.toContain("유쌤에듀");
+  });
+
+  it("상한이 없거나 위탁 비율제면 붙지 않는다", () => {
+    expect(needsBizPayerContract(ct({ ratioWageCap: null }))).toBe(false);
+    expect(needsBizPayerContract(ct({ ratioEmployee: false, ratioWageCap: null }))).toBe(false);
+    expect(needsBizPayerContract(ct({ templateKey: "MONTHLY", ratioEmployee: false, ratioWageCap: null }))).toBe(false);
+    expect(needsBizPayerContract(ct())).toBe(true);
+    const g = contractGroups({ employee: emp(), contract: ct({ ratioWageCap: null }), company: companyB });
+    expect(g.flatMap((x) => x.bodies).map(text).join("\n")).not.toContain("용역위탁계약서");
+  });
+
+  it("별도 사업장 정보가 비면 발급을 막는다 — 지급 근거 없는 근로계약서가 나가지 않게", () => {
+    expect(() =>
+      contractGroups({
+        employee: emp(),
+        contract: ct(),
+        company: { ...company, bizPayer: null, bizPayerMissing: ["상호", "주소"] },
+      })
+    ).toThrow(/별도 사업장.*상호·주소.*용역위탁계약서/);
+  });
+
+  it("신규입사 패키지에도 같은 묶음이 들어간다", () => {
+    const g = newHirePackageGroups({ employee: emp(), contract: ct(), company: companyB });
+    const all = g.flatMap((x) => x.bodies).map(text).join("\n");
+    expect(all).toContain("용역위탁계약서");
+    expect(all).toContain("가상아카데미 대표 홍길동 귀하");
   });
 });
 
@@ -214,6 +379,33 @@ describe("명세서 — 지급처별로 가른다", () => {
     // 조사가 이름의 받침에 맞는다 — '유쌤에듀와', '가상아카데미가'
     expect(h).toContain("주식회사 유쌤에듀와의 근로계약");
     expect(h).toContain("가상아카데미가 지급합니다");
+    // 근거는 별도 사업장 명의의 용역위탁계약서(근로계약서와 함께 발급) — 그 조항을 가리킨다
+    expect(h).toContain("용역위탁계약(제3조)에 따라");
+    expect(h).toContain("용역위탁계약에 따른 용역수수료");
+  });
+
+  it("경업금지 보상금(비율) 각주 — 근로계약서 제8조 · 근로소득 · 상한과 무관", () => {
+    const rr = computePayroll({ ...payInput, nonCompeteRatio: 0.03 }, { classRevenue: 15_000_000 }, DEFAULT_RATES_2025, []);
+    const h = text(
+      payslipHtml({
+        employee: emp(),
+        payroll: {
+          ...payroll,
+          ...rr,
+          breakdown: JSON.stringify({ nonCompete: { ratio: 0.03, revenue: 15_000_000 } }),
+        },
+        company,
+        bizPayer: payer,
+      })
+    );
+    expect(h).toContain("근로계약서 제8조의 경업금지 의무에 대한 대가로 비율급과 별도로 지급");
+    expect(h).toContain("수강료 입금액 15,000,000원 × 3% = 450,000원");
+    expect(h).toContain("근로소득 상한과 관계없이 이 회사가 지급");
+    expect(h).not.toContain("강의위탁계약서");
+    // 임금명세서의 지급액 계 = 근로분 비율급 500만 + 보상금 45만(별도 사업장 몫 100만은 빠진다)
+    expect(cells(payslipHtml({ employee: emp(), payroll: { ...payroll, ...rr }, company, bizPayer: payer }))).toContain(
+      "지급액 계 5,450,000"
+    );
   });
 
   it("상한을 넘지 않은 달은 예전 명세서와 같다(사업소득 안내가 없다)", () => {

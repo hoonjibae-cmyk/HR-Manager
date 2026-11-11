@@ -15,8 +15,9 @@
 // 범위(퇴직 후 6개월 · 반경 2km)는 보안서약서의 경업금지 항목과 **같은 값**을 쓴다 —
 // 한 사람이 서명한 두 문서의 범위가 갈리면 어느 쪽이 맞는지 다툼이 된다.
 //
-// **강의위탁계약(완전비율제)은 갈래가 다르다** — 아래 '위탁' 절. 금액이 아니라 매출에 곱하는 비율이고,
-// 수수료와 별도로 더해 준다(총액에서 떼지 않는다). 경업금지 범위는 위탁계약서 제7조 원문 그대로다.
+// **완전비율제(강의위탁계약 · 비율제 근로계약)는 갈래가 다르다** — 아래 '완전비율제' 절. 금액이 아니라
+// 매출에 곱하는 비율이고, 수수료·비율급과 별도로 더해 준다(총액에서 떼지 않는다). 위탁의 경업금지 범위는
+// 위탁계약서 제7조 원문 그대로, 비율제 근로계약은 월급제와 같은 근로계약서 제8조다.
 
 import { isContractorContract, type ScheduleDay } from "./constants";
 import { computeWeeklyHours, inclusiveWageBreakdown, WEEKS_PER_MONTH } from "./payroll";
@@ -176,24 +177,39 @@ export function resolveNonCompetePay(args: {
   return { value: normalizeNonCompetePay(candidate, true), error: null };
 }
 
-/* ───────────── 위탁(강의위탁계약서) — 매출 × 보상금 비율 ───────────── */
+/* ───────────── 완전비율제 — 매출 × 보상금 비율 ───────────── */
 //
-// 위탁계약은 월 지급 총액이 없고 **매출(수강료 입금액) × 비율**이 보수의 전부다. 그래서 보상금도
-// 금액이 아니라 **비율**로 정하고, 용역수수료(ratioPercent)와 같은 매출에 곱해 **수수료와 별도로**
-// 지급한다(예: 수수료 40% + 보상금 3% → 매출의 43%). 근로계약처럼 총액 안에서 떼는 구조가 아니다
-// (2026-11 결정 — 비율은 계약마다 정한다). 사업소득 3.3% 원천징수는 보상금에도 함께 걸린다.
+// 완전비율제는 월 지급 총액이 없고 **매출(수강료 입금액) × 비율**이 보수의 전부다. 그래서 보상금도
+// 금액이 아니라 **비율**로 정하고, 수수료·비율급(ratioPercent)과 같은 매출에 곱해 **그것과 별도로**
+// 지급한다(예: 40% + 보상금 3% → 매출의 43%). 월급제처럼 총액 안에서 떼는 구조가 아니다
+// (2026-11 결정 — 비율은 계약마다 정한다). 계약 형태에 따라 갈래가 둘이다.
+//  · **위탁**(강의위탁계약서 제5조·제7조) — 사업소득 3.3% 원천징수가 보상금에도 함께 걸린다.
+//  · **비율제 근로계약**(근로계약서 제4조·제8조, lib/ratio-employee.ts) — 근로소득(4대보험·근로소득세).
+//    **근로소득 상한과 무관하게 이 회사가 지급한다** — 상한은 비율급에만 걸리고(연장수당·식대와 같은 이치),
+//    경업금지 약정의 당사자가 이 회사라 별도 사업장이 줄 돈이 아니다. 통상시급의 분자에도 넣는다
+//    (월급제 보상금과 같은 원칙 — 임금으로 판단될 때 덜 준 것이 되지 않게).
 
 /**
- * 보상금 비율을 둘 수 있는 계약인가 — 강의위탁계약서(**위탁** 완전비율제)만.
- * 비율제 **근로계약**(`ratioEmployee`)은 근로계약서를 쓰고 이 조항이 없다(lib/ratio-employee.ts).
+ * 보상금 비율을 둘 수 있는 계약인가 — **완전비율제 전부**(강의위탁계약서와 비율급 근로계약서).
+ * 2026-11 까지는 위탁만이었다. 비율제 근로계약이 생기며(v1.57) 그쪽도 같은 비율로 넣게 열었다(v1.58).
  */
-export function nonCompeteRatioApplies(c: { payScheme?: string | null; ratioEmployee?: boolean | null }): boolean {
-  return c.payScheme === "RATIO" && c.ratioEmployee !== true;
+export function nonCompeteRatioApplies(c: { payScheme?: string | null }): boolean {
+  return c.payScheme === "RATIO";
 }
 
-/** 위탁계약은 **새 계약마다** 보상금 비율이 필수다(부서와 무관 — 강의위탁계약서 전부) */
-export function nonCompeteRatioRequired(c: { payScheme?: string | null; ratioEmployee?: boolean | null }): boolean {
-  return nonCompeteRatioApplies(c);
+/**
+ * 새 계약에 보상금 비율이 **반드시** 있어야 하는가.
+ *  · 위탁 — 언제나(부서 무관). 강의위탁계약서에는 경업금지 조항(제7조)이 원래 들어 있어서다.
+ *  · 비율제 근로계약 — **교수부만**. 월급제 근로계약서와 같은 규칙(`nonCompeteRequired`)이다 —
+ *    근로계약서에는 보상금이 있을 때만 경업금지 조항(제8조)이 들어가고, 그것을 반드시 넣는 부서가 교수부다.
+ */
+export function nonCompeteRatioRequired(
+  c: { payScheme?: string | null; ratioEmployee?: boolean | null },
+  department?: string | null
+): boolean {
+  if (!nonCompeteRatioApplies(c)) return false;
+  if (c.ratioEmployee !== true) return true;
+  return (department ?? "").includes(NON_COMPETE_REQUIRED_DEPT);
 }
 
 /** 0.03 → "3%", 0.025 → "2.5%" — 계약서·명세서·화면이 같은 표기를 쓴다 */
@@ -202,10 +218,15 @@ export function ratioPctLabel(r: number): string {
 }
 
 /**
- * 입력 검사 — 0% 이상 100% 미만, 그리고 **위탁 비율과 합쳐 100% 이하**(매출보다 많이 줄 수는 없다).
+ * 입력 검사 — 0% 이상 100% 미만, 그리고 **위탁·임금 비율과 합쳐 100% 이하**(매출보다 많이 줄 수는 없다).
  * 값은 비율(0.03)로 받는다 — 화면은 %로 받아 100 으로 나눠 보낸다(위탁 비율과 같다).
+ * `worker` 는 문구만 가른다(비율제 근로계약의 비율은 '임금 비율').
  */
-export function nonCompeteRatioError(ratio: unknown, ratioPercent?: number | null): string | null {
+export function nonCompeteRatioError(
+  ratio: unknown,
+  ratioPercent?: number | null,
+  worker = false
+): string | null {
   if (ratio === "" || ratio == null) return null;
   const r = Number(ratio);
   if (!Number.isFinite(r) || r < 0 || r >= 1)
@@ -213,7 +234,7 @@ export function nonCompeteRatioError(ratio: unknown, ratioPercent?: number | nul
   if (r === 0) return null;
   const fee = Number(ratioPercent) || 0;
   if (fee + r > 1 + 1e-9)
-    return `위탁 비율(${ratioPctLabel(fee)})과 경업금지 보상금 비율(${ratioPctLabel(r)})을 합치면 매출의 100%를 넘습니다.`;
+    return `${worker ? "임금" : "위탁"} 비율(${ratioPctLabel(fee)})과 경업금지 보상금 비율(${ratioPctLabel(r)})을 합치면 매출의 100%를 넘습니다.`;
   return null;
 }
 
@@ -225,19 +246,23 @@ export function normalizeNonCompeteRatio(v: unknown, applies: boolean): number |
   return Math.round(r * 10000) / 10000;
 }
 
-/** 계약 저장(API) 때 보상금 비율을 정하고 검사한다 — 신규 계약·조건 수정·직원 등록이 같은 규칙 */
+/**
+ * 계약 저장(API) 때 보상금 비율을 정하고 검사한다 — 신규 계약·조건 수정·직원 등록이 같은 규칙.
+ * 완전비율제가 아니면 남은 값을 지운다(급여형태를 바꾸면 사라진다). 위탁 ↔ 근로를 바꿔도 값은 살아 있다 —
+ * 두 갈래 모두 같은 '매출 × 비율' 이고 서식(조항 번호·과세)만 다르다.
+ */
 export function resolveNonCompeteRatio(args: {
   raw: unknown;
   fallback: number | null | undefined;
   payScheme: string;
   ratioPercent: number | null | undefined;
-  /** 비율제 근로계약이면 위탁 조항이 없으므로 값을 지운다 */
+  /** 비율제 근로계약 — 오류 문구만 가른다('임금 비율') */
   ratioEmployee?: boolean | null;
 }): { value: number | null; error: string | null } {
-  const applies = nonCompeteRatioApplies({ payScheme: args.payScheme, ratioEmployee: args.ratioEmployee });
+  const applies = nonCompeteRatioApplies({ payScheme: args.payScheme });
   if (!applies) return { value: null, error: null };
   const candidate = args.raw === undefined ? args.fallback : args.raw;
-  const error = nonCompeteRatioError(candidate, args.ratioPercent);
+  const error = nonCompeteRatioError(candidate, args.ratioPercent, args.ratioEmployee === true);
   if (error) return { value: null, error };
   return { value: normalizeNonCompeteRatio(candidate, true), error: null };
 }
@@ -253,6 +278,16 @@ export function nonCompeteRatioPreview(ratioPercent: number, ncr: number, revenu
 export const NON_COMPETE_RATIO_REQUIRED_MESSAGE =
   `강의위탁계약서에는 「경업금지 보상금」 비율을 적어야 합니다 — 수강료 입금액(매출) 중 보상금으로 지급할 비율(%)을 넣어 주세요. ` +
   `(이미 서명한 옛 계약을 옮겨 적는 경우처럼 보상금을 두지 않을 때는 「이번 계약에는 경업금지 보상금을 두지 않음」을 체크하세요.)`;
+
+/** 교수부 비율제 근로계약인데 보상금 비율이 없을 때의 안내 */
+export const NON_COMPETE_RATIO_WORKER_REQUIRED_MESSAGE =
+  `교수부 근로계약서(비율급)에는 경업금지 조항과 함께 「경업금지 보상금」 비율을 적어야 합니다 — 수강료 입금액(매출) 중 보상금으로 지급할 비율(%)을 넣어 주세요. ` +
+  `(이미 서명한 옛 계약을 옮겨 적는 경우처럼 보상금을 두지 않을 때는 「이번 계약에는 경업금지 보상금을 두지 않음」을 체크하세요.)`;
+
+/** 보상금 비율이 빠졌을 때 띄울 안내 — 위탁·비율제 근로계약이 갈린다 */
+export function nonCompeteRatioRequiredMessage(ratioEmployee?: boolean | null): string {
+  return ratioEmployee === true ? NON_COMPETE_RATIO_WORKER_REQUIRED_MESSAGE : NON_COMPETE_RATIO_REQUIRED_MESSAGE;
+}
 
 /** 교수부인데 보상금이 없을 때의 안내 — API 400 과 화면이 같은 문구를 쓴다 */
 export const NON_COMPETE_REQUIRED_MESSAGE =

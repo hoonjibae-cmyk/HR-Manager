@@ -127,7 +127,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     });
     if (nc.error) return NextResponse.json({ error: nc.error }, { status: 400 });
     if (nc.value !== (cur.nonCompetePay ?? null)) data.nonCompetePay = nc.value;
-    // 위탁 보상금 비율 — 위탁 비율을 올려 합이 100% 를 넘으면 거르고, 위탁이 아니게 바꾸면 지운다
+    // 보상금 비율(완전비율제) — 위탁·임금 비율을 올려 합이 100% 를 넘으면 거르고, 완전비율제가 아니게 바꾸면 지운다
     const ncr = resolveNonCompeteRatio({
       raw: "nonCompeteRatio" in body ? body.nonCompeteRatio : undefined,
       fallback: cur.nonCompeteRatio,

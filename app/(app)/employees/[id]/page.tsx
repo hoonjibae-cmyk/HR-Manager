@@ -28,6 +28,7 @@ import ContractIssueNotice from "@/components/ContractIssueNotice";
 import AttachmentBox from "@/components/AttachmentBox";
 import EmployeeDeleteButton from "@/components/EmployeeDeleteButton";
 import { nonCompeteRequired, nonCompeteRatioRequired, ratioPctLabel } from "@/lib/non-compete";
+import { bizPayerMissing } from "@/lib/ratio-employee";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,13 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
 
   const { summary, comp } = await leaveSummaryFor(id);
   const sched = parseSchedule(emp.schedule);
+  // 별도 사업장 — 근로소득 상한을 둔 비율제 근로계약은 계약서 발급 때 그 사업장 명의의 용역위탁계약서가
+  // 함께 나가고, 정보가 비면 발급이 막힌다. 계약 카드에서 미리 알린다(로고·인감 같은 큰 값은 읽지 않는다)
+  const bizPayer = await prisma.company.findFirst({
+    where: { id: 1 },
+    select: { bizPayerName: true, bizPayerBizNo: true, bizPayerCeo: true, bizPayerAddress: true },
+  });
+  const bizMissing = bizPayerMissing(bizPayer);
 
   // 보수조건은 계약이 정한다 — 카드는 '오늘 시점 지배 계약' 을 비추는 읽기 전용 뷰
   const now = new Date();
@@ -112,7 +120,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
   // 교수부 근로계약(월급제·인센티브)인데 경업금지 보상금이 없는 계약 — 지금 적용 중이거나 발효 예정이고
   // **서명본 스캔이 아직 없는 것만** 짚는다. 서명이 끝난 계약에 보상금을 넣어 다시 뽑으면 서명본과 다른
   // 계약서가 되므로, 그런 계약은 그대로 두고 다음 갱신 때 넣는다(막지는 않는다).
-  // 위탁계약(강의위탁계약서)은 보상금 비율이 없는 계약을 같은 규칙으로 짚는다(부서 무관).
+  // 완전비율제는 보상금 비율이 없는 계약을 같은 규칙으로 짚는다 — 위탁은 부서 무관, 비율제 근로계약은 교수부만.
   const ncMissing = emp.contracts.filter((c) => {
     if (!(gov?.id === c.id || c.startDate > now) || c.files.length > 0) return false;
     const shape = {
@@ -120,7 +128,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
       isContractor: c.isContractor,
       ratioEmployee: c.ratioEmployee,
     };
-    if (nonCompeteRatioRequired(shape)) return !c.nonCompeteRatio;
+    if (nonCompeteRatioRequired(shape, emp.department)) return !c.nonCompeteRatio;
     return !c.nonCompetePay && nonCompeteRequired(emp.department, shape);
   });
 
@@ -217,7 +225,9 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                     <Row k="경업금지 보상금">
                       매출의 {ratioPctLabel(terms.nonCompeteRatio ?? 0)}
                       <span className="block text-[11px] text-slate-400 mt-0.5">
-                        용역수수료와 별도 지급 (위탁계약서 제5조·제7조)
+                        {ratioWorker
+                          ? "비율급과 별도 지급 (근로계약서 제8조 · 근로소득 — 근로소득 상한과 무관)"
+                          : "용역수수료와 별도 지급 (위탁계약서 제5조·제7조)"}
                       </span>
                     </Row>
                   )}
@@ -488,6 +498,17 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                     {(c.nonCompetePay ?? 0) > 0 && ` · 경업금지 보상금 ${wonUnit(c.nonCompetePay ?? 0)}`}
                     {(c.nonCompeteRatio ?? 0) > 0 && ` · 경업금지 보상금 매출의 ${ratioPctLabel(c.nonCompeteRatio ?? 0)}`}
                   </div>
+                  {c.templateKey === "RATIO" && c.ratioEmployee && (c.ratioWageCap ?? 0) > 0 && (
+                    <p
+                      className={`text-[11px] mt-1 leading-relaxed break-keep ${
+                        bizMissing.length ? "text-amber-700" : "text-slate-500"
+                      }`}
+                    >
+                      {bizMissing.length
+                        ? `별도 사업장 정보(${bizMissing.join("·")})가 비어 계약서를 발급할 수 없습니다 — 설정 → 회사 정보의 「별도 사업장」을 먼저 채우세요.`
+                        : `계약서 발급 때 별도 사업장(${bizPayer?.bizPayerName}) 명의의 용역위탁계약서와 그 사업장 앞 개인사업자 지위 확인서가 함께 나갑니다.`}
+                    </p>
+                  )}
                   <div className="mt-2 flex items-center gap-3">
                     <DocButton endpoint="/api/documents/contract" body={{ contractId: c.id }} label="계약서 발급" className="text-xs text-brand-600 font-semibold" />
                     <ContractEditForm

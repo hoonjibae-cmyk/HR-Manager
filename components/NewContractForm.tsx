@@ -11,7 +11,7 @@ import {
   nonCompeteRatioRequired,
   nonCompeteRatioError,
   NON_COMPETE_REQUIRED_MESSAGE,
-  NON_COMPETE_RATIO_REQUIRED_MESSAGE,
+  nonCompeteRatioRequiredMessage,
 } from "@/lib/non-compete";
 import FixedHoursFields from "./FixedHoursFields";
 import ContractorField from "./ContractorField";
@@ -121,12 +121,13 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
     fixedNightHours: f.fixedNightHours === "" ? null : Number(f.fixedNightHours),
     schedule: parseSchedule(emp.schedule ?? "[]"),
   };
-  // 위탁(강의위탁계약서) — 매출에 곱하는 보상금 비율. 새 위탁계약은 필수
-  const ncrApplies = nonCompeteRatioApplies({ payScheme: f.payScheme, ratioEmployee: ratioWorker });
-  const ncrRequired = nonCompeteRatioRequired({ payScheme: f.payScheme, ratioEmployee: ratioWorker });
+  // 완전비율제 — 매출에 곱하는 보상금 비율(위탁·비율제 근로계약 모두). 위탁은 언제나, 비율제 근로계약은
+  // 교수부만 필수(서버도 같은 함수로 다시 막는다)
+  const ncrApplies = nonCompeteRatioApplies({ payScheme: f.payScheme });
+  const ncrRequired = nonCompeteRatioRequired({ payScheme: f.payScheme, ratioEmployee: ratioWorker }, emp.department);
   const ratioFrac = f.ratioPercent === "" ? 0 : Number(f.ratioPercent) / 100;
   const ncrFrac = f.nonCompeteRatio === "" ? null : Number(f.nonCompeteRatio) / 100;
-  // 필수 항목이 비었는가 — 근로(교수부 보상금)와 위탁(보상금 비율) 중 이 계약에 해당하는 쪽
+  // 필수 항목이 비었는가 — 월급제(교수부 보상금 금액)와 완전비율제(보상금 비율) 중 이 계약에 해당하는 쪽
   const ncMissing =
     (ncApplies && ncRequired && !(Number(f.nonCompetePay) > 0)) ||
     (ncrApplies && ncrRequired && !(ncrFrac && ncrFrac > 0));
@@ -139,11 +140,11 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
       if (ncErr) return setErr(ncErr);
     }
     if (ncrApplies) {
-      const ncrErr = nonCompeteRatioError(ncrFrac, ratioFrac);
+      const ncrErr = nonCompeteRatioError(ncrFrac, ratioFrac, ratioWorker);
       if (ncrErr) return setErr(ncrErr);
     }
     if (ncMissing && !f.skipNonCompete)
-      return setErr(ncrApplies ? NON_COMPETE_RATIO_REQUIRED_MESSAGE : NON_COMPETE_REQUIRED_MESSAGE);
+      return setErr(ncrApplies ? nonCompeteRatioRequiredMessage(ratioWorker) : NON_COMPETE_REQUIRED_MESSAGE);
     setSaving(true);
     const res = await fetch("/api/contracts", {
       method: "POST",
@@ -174,7 +175,7 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
         fixedBaseHours: f.fixedBaseHours === "" ? null : Number(f.fixedBaseHours),
         fixedOtHours: f.fixedOtHours === "" ? null : Number(f.fixedOtHours),
         fixedNightHours: f.fixedNightHours === "" ? null : Number(f.fixedNightHours),
-        // 대상이 아닌 계약(시급제·위탁)이면 보내지 않는다 — 서버도 지운다
+        // 대상이 아닌 계약이면 보내지 않는다(금액은 월급제·인센티브 근로계약, 비율은 완전비율제) — 서버도 지운다
         nonCompetePay: ncApplies && f.nonCompetePay !== "" ? Number(f.nonCompetePay) : null,
         nonCompeteRatio: ncrApplies && ncrFrac != null ? ncrFrac : null,
         skipNonCompete: ncMissing ? !!f.skipNonCompete : false,
@@ -382,6 +383,8 @@ export default function NewContractForm({ emp }: { emp: EmpSnapshot }) {
           onChange={(v) => set("nonCompeteRatio", v)}
           required={ncrRequired}
           ratioPercent={ratioFrac}
+          worker={ratioWorker}
+          capped={ratioWorker && f.ratioWageCap !== ""}
           skip={f.skipNonCompete}
           onSkip={(v) => set("skipNonCompete", v)}
         />

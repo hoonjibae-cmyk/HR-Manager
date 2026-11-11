@@ -15,11 +15,21 @@
 // (대법원 2004다29736 — 계약 형식이 아니라 실질)에서 하나로 합쳐질 수 있다. 그러면 초과분도 근로소득·
 // 임금이 되어 4대보험·근로소득세 추징, 퇴직금(평균임금)·연차수당 차액이 생긴다. 별도 사업장의 계약은
 // **실제로 다른 용역**(사업장·업무·지휘감독이 다른 것)이어야 버틴다 — 화면과 CLAUDE.md 가 같은 말을 한다.
+//
+// 별도 사업장 명의의 **용역위탁계약서**는 근로계약서와 함께 나간다(v1.58, `bizPayerContractHtml` —
+// lib/documents.ts). 수수료 산식은 엔진과 같게(초과분) 적고, 용역 내용은 설정에서 실제 하는 일로 적게 한다
+// (`bizPayerService`). 서류가 실질을 만들어 주지는 않는다 — 위 한계는 그대로다.
 
 /** 근로소득 상한 기본값(월) — 2026-11 요청: 월 500만원에 해당하는 금액만 4대보험 */
 export const DEFAULT_RATIO_WAGE_CAP = 5_000_000;
 /** 상한 입력의 상한 — 자릿수 오타(0 하나 더)를 잡는 정도 */
 export const RATIO_WAGE_CAP_MAX = 100_000_000;
+
+/**
+ * 별도 사업장 용역위탁계약서의 「위탁 용역」 기본 문구 — 설정에서 비워 두면 쓴다.
+ * 실제로 그 사업장을 위해 하는 일을 적어야 한다(같은 강의를 둘로 나눈 것이면 이 구조는 버티지 못한다).
+ */
+export const DEFAULT_BIZ_PAYER_SERVICE = "강의 및 이에 부수하는 교육 콘텐츠(교재·수업자료) 개발 용역";
 
 /** 화면·문서가 함께 쓰는 짧은 경고 — 상한을 켤 때 */
 export const RATIO_SPLIT_RISK_NOTE =
@@ -136,6 +146,8 @@ export interface BizPayerSource {
   bizPayerAddress?: string | null;
   bizPayerPhone?: string | null;
   bizPayerAlias?: string | null;
+  /** 용역위탁계약서의 「위탁 용역」 — 비우면 DEFAULT_BIZ_PAYER_SERVICE */
+  bizPayerService?: string | null;
 }
 
 export interface BizPayer {
@@ -146,6 +158,8 @@ export interface BizPayer {
   phone: string;
   /** 은행 이체 적요 앞에 붙는 약칭 — 비우면 상호 */
   alias: string;
+  /** 용역위탁계약서의 「위탁 용역」 — 빈 문자열이면 문서가 기본 문구를 쓴다 */
+  service: string;
 }
 
 const BIZ_PAYER_REQUIRED: Array<[keyof BizPayerSource, string]> = [
@@ -171,6 +185,7 @@ export function bizPayerOf(c: BizPayerSource | null | undefined): BizPayer | nul
     address: t(c.bizPayerAddress),
     phone: t(c.bizPayerPhone),
     alias: t(c.bizPayerAlias) || t(c.bizPayerName),
+    service: t(c.bizPayerService),
   };
 }
 
@@ -178,6 +193,6 @@ export function bizPayerOf(c: BizPayerSource | null | undefined): BizPayer | nul
 export function bizPayerMissingMessage(missing: string[]): string {
   return (
     `근로소득 상한을 넘은 비율급은 별도 사업장이 사업소득으로 지급합니다 — 설정 → 회사 정보의 ` +
-    `「별도 사업장(사업소득 지급처)」에서 빈 항목(${missing.join("·")})을 채워야 사업소득 지급명세서·이체 파일을 만들 수 있습니다.`
+    `「별도 사업장(사업소득 지급처)」에서 빈 항목(${missing.join("·")})을 채워야 그 사업장의 용역위탁계약서·사업소득 지급명세서·이체 파일을 만들 수 있습니다.`
   );
 }

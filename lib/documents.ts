@@ -12,6 +12,7 @@ import {
   NON_COMPETE_RETURN_DAYS,
   ratioPctLabel,
 } from "./non-compete";
+import { bizPayerMissingMessage, DEFAULT_BIZ_PAYER_SERVICE } from "./ratio-employee";
 
 /**
  * 부서가 정하는 서류 정책 — 어떤 서류를 발급할지.
@@ -41,6 +42,24 @@ export interface DocCompany {
    * 비어 있으면 '별도 사업자' 로만 적는다. lib/ratio-employee.ts
    */
   bizPayerName?: string | null;
+  /**
+   * 별도 사업장 — 필수 항목(상호·사업자등록번호·대표자·주소)이 다 있을 때만. 근로소득 상한을 둔
+   * 비율제 근로계약의 계약서 세트에 이 사업장 명의의 **용역위탁계약서**가 함께 나간다(`contractGroups`).
+   */
+  bizPayer?: DocBizPayer | null;
+  /** 별도 사업장 정보 중 비어 있는 필수 항목(라벨) — 위탁계약서를 못 만들 때 안내에 쓴다 */
+  bizPayerMissing?: string[];
+}
+
+/** 별도 사업장(사업소득 지급처) — lib/ratio-employee.ts 의 BizPayer 와 같은 모양 */
+export interface DocBizPayer {
+  name: string;
+  bizNo: string;
+  ceo: string;
+  address: string;
+  phone: string;
+  /** 위탁 용역 내용(설정 화면) — 비우면 기본 문구(DEFAULT_BIZ_PAYER_SERVICE) */
+  service?: string | null;
 }
 export interface DocEmployee {
   name: string;
@@ -110,8 +129,9 @@ export interface DocContract {
    */
   nonCompetePay?: number | null;
   /**
-   * 경업금지 보상금 비율(0.03 = 3%) — 강의위탁계약서(완전비율제) 전용. 값이 있으면 제5조에 보상금 비율을,
-   * 제7조에 전액 반환·별도 법적 조치를 덧붙인다. 없으면 원문 그대로다.
+   * 경업금지 보상금 비율(0.03 = 3%) — 완전비율제. 값이 있을 때만 조항이 붙고, 없으면 예전 그대로다.
+   *  · 강의위탁계약서: 제5조에 보상금 비율, 제7조에 전액 반환·별도 법적 조치
+   *  · 비율급 근로계약서: 제4조에 보상금 한 줄, 제8조 「경업금지 및 경업금지 보상금」(월급제와 같은 틀)
    */
   nonCompeteRatio?: number | null;
 }
@@ -164,7 +184,9 @@ function companyHead(c: DocCompany, tag?: string): string {
   return `<div class="company-head">
     <div class="cbrand">${logoImg(c)}
       <div><div class="cname">${esc(c.name)}</div>
-        <div class="cmeta">대표 ${esc(c.ceo)} · 사업자등록번호 ${esc(c.bizNo)}<br/>${esc(c.address)} · ${esc(c.phone)}</div>
+        <div class="cmeta">대표 ${esc(c.ceo)} · 사업자등록번호 ${esc(c.bizNo)}<br/>${esc(c.address)}${
+          c.phone ? ` · ${esc(c.phone)}` : ""
+        }</div>
       </div>
     </div>
     ${tag ? `<div class="doc-tag">${esc(tag)}</div>` : ""}
@@ -189,11 +211,15 @@ function sigField(
   return `<div class="f"><span class="lbl">${esc(label)}</span><span class="fill">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>${mark}</div>`;
 }
 
-/** 계약 당사자 서명 박스 (갑/을 나란히) — 원문 양식 필드 순서 */
-function signDuo(c: DocCompany, e: DocEmployee, partyB: string): string {
+/**
+ * 계약 당사자 서명 박스 (갑/을 나란히) — 원문 양식 필드 순서.
+ * `partyA` 는 갑의 지위 — 기본 '사용자'. 별도 사업장 용역위탁계약서는 '위탁자' 를 준다
+ * (위탁계약서에 '사용자' 라고 적으면 갑이 스스로 근로관계의 사용자임을 적는 셈이 된다).
+ */
+function signDuo(c: DocCompany, e: DocEmployee, partyB: string, partyA = "사용자"): string {
   return `<div class="sign-area"><div class="sign-duo">
       <div>
-        <div class="sign-party">"갑" (사용자)</div>
+        <div class="sign-party">"갑" (${esc(partyA)})</div>
         <div class="sign-box"><div class="sign-grid one">
           ${sigField("회사명", c.name)}
           ${sigField("주소지", c.address)}
@@ -299,6 +325,23 @@ function hoursText(h: number): string {
   return `${s}시간`;
 }
 
+/**
+ * 근로계약서 제8조 「경업금지 및 경업금지 보상금」 — 보상금이 있을 때만 들어간다.
+ *  · 범위(퇴직 후 6개월 · 반경 2km · 원생/학부모/강사 유인 금지)는 보안서약서 제3항과 같은 값이다.
+ *  · 반환(③)은 '이행하지 않은 의무의 대가를 돌려받는 것' 으로 적는다 — 위약금·손해배상액의
+ *    예정으로 읽히면 근로기준법 §20(위약 예정의 금지)에 걸린다. 실손해 배상·금지 청구는 별도로 남긴다(④).
+ *  · `payLine` 은 ② 지급 문구(월급제 금액 / 비율급 비율), `basis` 는 ⑤ 의 '보상금의 금액·비율'.
+ */
+function nonCompeteArticleHtml(payLine: string, basis: "금액" | "비율"): string {
+  return `<div class="clause"><h3>제 8조 (경업금지 및 경업금지 보상금)</h3>
+    <p class="sub">① "을"은 재직 중은 물론 근로계약 종료일로부터 <b>${NON_COMPETE_MONTHS}개월간</b> "갑"의 사업장으로부터 반경 <b>${NON_COMPETE_RADIUS_KM}km</b> 이내에서 "갑"과 동일한 직종(학원·교습소 등 교습업)에 취업하거나 이를 경영(개설·운영)하여서는 아니 되며, 같은 기간 동안 장소와 관계없이 "갑"의 원생·학부모 또는 강사를 유인하여 본인 또는 제3자의 이익을 취득하여서는 아니 된다.</p>
+    <p class="sub">② ${payLine}</p>
+    <p class="sub">③ "을"이 제①항을 위반한 경우 "을"은 그때까지 지급받은 경업금지 보상금 <b>전액</b>을 "갑"의 서면 청구일로부터 ${NON_COMPETE_RETURN_DAYS}일 이내에 "갑"에게 반환하여야 한다.</p>
+    <p class="sub">④ 제③항의 반환은 이행되지 않은 의무에 대하여 지급된 대가를 돌려받는 것으로서 위약금이나 손해배상액의 예정이 아니며, "갑"은 이와 별도로 "을"의 위반으로 발생한 손해의 배상 청구, 위반행위의 금지 청구(가처분 포함) 등 관계 법령에 따른 민·형사상 법적 조치를 취할 수 있다.</p>
+    <div class="avoid"><p class="sub">⑤ "을"은 본 조의 경업금지 기간·지역·범위와 보상금의 ${basis} 및 반환 의무에 관하여 충분히 설명을 듣고 이해하였으며, 이에 동의한다.</p>
+    ${inlineSign("동 의 자")}</div></div>`;
+}
+
 /* ============================ 근로/위탁 계약서 ============================ */
 export function contractHtml(args: {
   employee: DocEmployee;
@@ -386,6 +429,9 @@ export function contractHtml(args: {
   // 경업금지 보상금 — 월급제·인센티브 **근로**계약만(시급제는 떼어 낼 월 총액이 없고, 위탁은 서식이 따로다).
   // 값이 있을 때만 제4조에 따로 적고 제8조(경업금지 및 경업금지 보상금)를 넣는다 — 없으면 계약서는 예전 그대로다.
   let nonCompetePaid = 0;
+  // 비율급 근로계약의 보상금 **비율** — 금액 대신 매출에 곱하는 비율이고 비율급과 별도로 준다(v1.58).
+  // 제4조에 한 줄, 제8조는 월급제와 같은 틀(② 지급 문구만 다르다). 없으면 예전 그대로다.
+  let nonCompeteRate = 0;
 
   // 제4조 — 임금
   let wageClause = "";
@@ -403,6 +449,7 @@ export function contractHtml(args: {
     const guarantee = ct.ratioMinGuarantee && ct.ratioMinGuarantee > 0 ? ct.ratioMinGuarantee : 0;
     const cap = ct.ratioWageCap && ct.ratioWageCap > 0 ? ct.ratioWageCap : 0;
     const payer = (c.bizPayerName ?? "").trim();
+    nonCompeteRate = ct.nonCompeteRatio && ct.nonCompeteRatio > 0 ? ct.nonCompeteRatio : 0;
     const items: string[] = [
       `"을"의 임금은 매월 초일부터 말일까지 "을"이 담당한 원생의 수강료(가) 입금액에 <b>${pct}%</b>를 곱하여 산정하는 비율급(성과급)으로 한다.`,
       (guarantee
@@ -426,6 +473,17 @@ export function contractHtml(args: {
         `제①항에 따라 산정한 금액 중 <b>월 ${wonUnit(cap)}</b>을 넘는 부분은 이 계약에 따른 임금에 포함하지 아니하며, "을"과 별도 사업자${
           payer ? `(<b>${esc(payer)}</b>)` : ""
         } 사이의 계약에 따라 그 사업자가 지급한다. 4대보험료와 근로소득세는 이 계약에 따른 임금에 대하여만 공제한다.`
+      );
+    // 경업금지 보상금(비율) — 비율급과 **별도로** 같은 매출에 곱한다. 상한은 비율급에만 걸리므로 보상금은
+    // 상한과 무관하게 갑이 주고 근로소득으로 공제한다고 함께 적는다(⑤ 의 '임금에 대하여만' 과 엇갈려 읽히지 않게).
+    if (nonCompeteRate)
+      items.push(
+        `"갑"은 제①항의 임금과 별도로, 제8조에 따른 경업금지 의무의 대가로 매월 제①항의 수강료 입금액에 <b>${ratioPctLabel(
+          nonCompeteRate
+        )}</b>를 곱한 금액을 <b>경업금지 보상금</b>으로 지급한다.` +
+          (cap
+            ? ` 경업금지 보상금은 제${CIRC[items.length - 1]}항의 상한과 관계없이 "갑"이 지급하며, 4대보험료와 근로소득세 공제 대상에 포함한다.`
+            : "")
       );
     items.push(
       `위 급여는 제2, 3조에 따라 책정된 임금이며, 이에 관한 사항이 변경 시 변경된 업무, 직책, 근무장소 및 근로시간 등에 따라 급여가 변경됨에 동의한다.`,
@@ -558,22 +616,24 @@ export function contractHtml(args: {
   }
 
   // 제8조 — 경업금지 및 경업금지 보상금 (보상금이 있을 때만. 그 뒤 기타사항이 제9조로 밀린다)
-  //  · 범위(퇴직 후 6개월 · 반경 2km · 원생/학부모/강사 유인 금지)는 보안서약서 제3항과 같은 값이다.
-  //  · 반환(③)은 '이행하지 않은 의무의 대가를 돌려받는 것' 으로 적는다 — 위약금·손해배상액의
-  //    예정으로 읽히면 근로기준법 §20(위약 예정의 금지)에 걸린다. 실손해 배상·금지 청구는 별도로 남긴다(④).
+  //  · 월급제·인센티브는 금액(총액 안에서 구분한 몫), 비율급은 비율(비율급과 별도) — ② 의 지급 문구만 갈린다.
   const nonCompeteClause =
     nonCompetePaid > 0
-      ? `<div class="clause"><h3>제 8조 (경업금지 및 경업금지 보상금)</h3>
-    <p class="sub">① "을"은 재직 중은 물론 근로계약 종료일로부터 <b>${NON_COMPETE_MONTHS}개월간</b> "갑"의 사업장으로부터 반경 <b>${NON_COMPETE_RADIUS_KM}km</b> 이내에서 "갑"과 동일한 직종(학원·교습소 등 교습업)에 취업하거나 이를 경영(개설·운영)하여서는 아니 되며, 같은 기간 동안 장소와 관계없이 "갑"의 원생·학부모 또는 강사를 유인하여 본인 또는 제3자의 이익을 취득하여서는 아니 된다.</p>
-    <p class="sub">② "갑"은 제①항의 의무에 대한 대가로 "을"에게 매월 <b>경업금지 보상금 ${wonUnit(
-      nonCompetePaid
-    )}</b>을 제4조의 임금 항목과 구분하여 임금 지급일에 함께 지급한다. 근무 기간이 1개월에 미치지 못하는 달은 일할 계산한다.</p>
-    <p class="sub">③ "을"이 제①항을 위반한 경우 "을"은 그때까지 지급받은 경업금지 보상금 <b>전액</b>을 "갑"의 서면 청구일로부터 ${NON_COMPETE_RETURN_DAYS}일 이내에 "갑"에게 반환하여야 한다.</p>
-    <p class="sub">④ 제③항의 반환은 이행되지 않은 의무에 대하여 지급된 대가를 돌려받는 것으로서 위약금이나 손해배상액의 예정이 아니며, "갑"은 이와 별도로 "을"의 위반으로 발생한 손해의 배상 청구, 위반행위의 금지 청구(가처분 포함) 등 관계 법령에 따른 민·형사상 법적 조치를 취할 수 있다.</p>
-    <div class="avoid"><p class="sub">⑤ "을"은 본 조의 경업금지 기간·지역·범위와 보상금의 금액 및 반환 의무에 관하여 충분히 설명을 듣고 이해하였으며, 이에 동의한다.</p>
-    ${inlineSign("동 의 자")}</div></div>`
-      : "";
-  const etcNo = nonCompetePaid > 0 ? 9 : 8;
+      ? nonCompeteArticleHtml(
+          `"갑"은 제①항의 의무에 대한 대가로 "을"에게 매월 <b>경업금지 보상금 ${wonUnit(
+            nonCompetePaid
+          )}</b>을 제4조의 임금 항목과 구분하여 임금 지급일에 함께 지급한다. 근무 기간이 1개월에 미치지 못하는 달은 일할 계산한다.`,
+          "금액"
+        )
+      : nonCompeteRate > 0
+        ? nonCompeteArticleHtml(
+            `"갑"은 제①항의 의무에 대한 대가로 "을"에게 매월 제4조 제①항의 수강료 입금액에 <b>${ratioPctLabel(
+              nonCompeteRate
+            )}</b>를 곱한 금액을 <b>경업금지 보상금</b>으로 제4조의 임금과 구분하여 임금 지급일에 함께 지급한다.`,
+            "비율"
+          )
+        : "";
+  const etcNo = nonCompeteClause ? 9 : 8;
 
   // 제5조 — 휴일 (시급제는 주휴 요건을 '실근로 15시간 초과' 기준으로 표기)
   const holidayNo1 = isHourly
@@ -751,6 +811,105 @@ function ratioContractHtml(args: {
   </div></div>`;
 }
 
+/* ============ 별도 사업장 용역위탁계약서 — 근로소득 상한을 둔 비율제 근로계약의 짝 ============ */
+/**
+ * 근로소득 상한(`ratioWageCap`)을 둔 비율제 근로계약에서 **상한을 넘는 비율급을 지급하는 근거**.
+ * 근로계약서 제4조가 「월 X원을 넘는 부분은 "을"과 별도 사업자(B) 사이의 계약에 따라 그 사업자가 지급한다」고
+ * 적으므로, 그 '계약' 이 이 서류다(2026-11 요청 — 세무대리인 의견대로 사업장을 둘로 나눈다).
+ *
+ *  · **수수료 산식은 급여 엔진과 한 글자도 어긋나지 않게 적는다** — 「수강료 입금액 × N% 중 월 X원을 초과하는
+ *    금액」. 실제로 주는 돈과 계약서가 다르면 지급 근거가 없는 돈이 된다(`splitRatioPay`, lib/payroll.ts).
+ *  · **용역 내용은 설정에서 정한다**(`Company.bizPayerService`) — 이 구조가 버티는지는 별도 사업장의 용역이
+ *    **실제로 다른 일**(업무·지휘감독·장소)인가에 달려 있어서, 실제 하는 일을 적게 한다. 비우면 기본 문구.
+ *  · 근로자성 표지를 스스로 남기지 않는다 — 서명란의 갑은 '사용자' 가 아니라 '위탁자', 지휘·감독을 받지
+ *    않는다는 것과 근로자가 아니라는 것을 적는다(적었다고 실질이 바뀌지는 않는다 — 실제로 그래야 한다).
+ *  · **경업금지·위약금 조항을 두지 않는다** — 경업금지는 근로계약서(제8조)의 몫이고, 같은 사람에게 위탁계약으로
+ *    위약금을 또 걸면 두 계약이 하나로 판단될 때 근로기준법 §20(위약 예정 금지)에 걸린다. 기밀유지만 둔다.
+ *  · 이 회사의 인감·로고를 쓰지 않는다(당사자가 다르다). 간인도 찍지 않는다(contractGroups).
+ */
+export function bizPayerContractHtml(args: {
+  employee: DocEmployee;
+  contract: DocContract;
+  /** 이 회사 — 지급일(payday)만 빌린다. 머리글·서명란은 별도 사업장으로 그린다 */
+  company: DocCompany;
+  payer: DocBizPayer;
+  /** 발급(출력) 시각 — 작성일자 산정용. 생략하면 KST 오늘 */
+  printedAt?: Date;
+}): string {
+  const { employee: e, contract: ct, payer } = args;
+  const b = bizPayerDocCompany(payer);
+  const signDate = contractSignDate(ct.startDate, args.printedAt ?? kstNow());
+  const payday = args.company.payday ?? 7;
+  const pctNum = (ct.ratioPercent ?? 0) * 100;
+  const pct = pctNum % 1 === 0 ? pctNum.toFixed(0) : pctNum.toFixed(1);
+  const cap = ct.ratioWageCap && ct.ratioWageCap > 0 ? ct.ratioWageCap : 0;
+  const service = (payer.service ?? "").trim() || DEFAULT_BIZ_PAYER_SERVICE;
+  const endPart = ct.endDate ? `<b>${ymdKo(ct.endDate)}</b>` : blank(18);
+  const noticeDays = resignNoticeDays(e);
+
+  return `<div class="compact">${companyHead(b)}
+  <div class="doc-title">용역위탁계약서</div>
+  <p class="doc-sub">용역위탁계약서 (비율제 수수료 · 사업소득)</p>
+  <p><b>${esc(b.name)}</b> (이하 "갑"이라 한다) 과(와) <b>${esc(e.name)}</b> (이하 "을"이라 한다) 은(는) 다음과 같은 조건으로 용역 위탁 계약을 체결하고, 상호 신의의 원칙 하에 성실하게 이행, 준수할 것을 합의한다.</p>
+  <p style="text-align:center" class="muted">- 다&nbsp;&nbsp;음 -</p>
+
+  <div class="clause"><h3>제 1조 (위탁계약기간)</h3>
+    <p class="sub">① <b>${ymdKo(ct.startDate)}</b> 부터 ${endPart} 까지 용역 위탁 계약을 체결한 것으로 한다.</p>
+    <p class="sub">② "을"의 용역조건이 변경된 경우 새로이 위탁계약서를 체결하여 변경된 용역조건을 고지하기로 한다.</p>
+    <p class="sub">③ 상기 위탁 계약기간이 종료되는 경우 위탁 계약은 자동 종료되는 것으로 하며, 계약 종료일 1개월 내에 쌍방이 합의함으로써 추가 연장할 수 있다.</p>
+    <p class="sub">④ "갑" 또는 "을"이 제①항의 계약 기간 중 본 계약을 해지하려는 경우 해지성립일 <b>${noticeDays}일 전</b>에 서면으로 그 뜻을 상대방에게 통지하여야 한다.</p></div>
+
+  <div class="clause"><h3>제 2조 (용역내용)</h3>
+    <p class="sub">① "갑"은 "을"에게 다음의 용역을 위탁하고, "을"은 이를 신의와 성실로써 수행한다.</p>
+    <table class="kv"><tr><th>위탁 용역</th><td colspan="3"><b>${esc(service)}</b></td></tr></table>
+    <p class="sub">② 용역의 수행 방법·일정 및 장소는 "갑"과 "을"이 상호 협의하여 정하며, "을"은 "갑"의 지휘·감독을 받지 아니하고 자신의 판단과 책임으로 용역을 수행한다.</p>
+    <p class="sub">③ "을"은 "갑"으로부터 위탁받은 업무를 수행하는 독립된 사업자로서 "갑"에 대하여 근로기준법상 근로자의 지위에 있지 아니하며, "갑"의 취업규칙 및 인사·복무 관련 규정을 적용받지 아니한다.</p></div>
+
+  <div class="clause"><h3>제 3조 (용역수수료)</h3>
+    <p class="sub">① "갑"이 "을"에게 지급하는 용역수수료는 매월 1일부터 말일까지 "을"이 담당한 원생의 수강료(가) 입금액에 <b>${pct}%</b>를 곱한 금액 중 <b>월 ${wonUnit(
+      cap
+    )}을 초과하는 금액</b>으로 한다. 그 금액이 월 ${wonUnit(cap)} 이하인 달에는 용역수수료가 발생하지 아니한다.</p>
+    <p class="sub">② "갑"은 매월 1일부터 말일까지의 용역수수료를 다음 달 ${payday}일에 사업소득세(3.0%)와 지방소득세(0.3%)를 공제한 후 "을"에게 지급하고, 수수료 산정 내역을 함께 교부한다.</p>
+    <p class="sub">③ "을"은 독립된 자격으로 용역을 제공하는 것이므로 본 계약에 따른 용역수수료 외에 수당, 퇴직금 등을 "갑"에게 요구할 수 없으며, "갑" 또한 이를 제공할 의무가 없다.</p>
+    <p class="footnote">(가) : 수강료는 D.C를 통해 공제된 금액 기준이며, D.C의 경우 쌍둥이 및 세자녀 5%, 직원 30% 할인을 기본 원칙으로 하며, 그 외 할인은 사전에 미리 협의한다. 카드수수료는 별도로 공제하지 아니한다.</p></div>
+
+  <div class="clause"><h3>제 4조 (기밀유지)</h3>
+    <p class="sub">① "을"은 계약 기간 중은 물론 계약 종료 후에도 용역 수행 중 알게 된 "갑"의 업무상 비밀과 개인정보(원생·학부모 정보, 상담 내용, 본 계약의 내용 및 수수료 등)를 누설하거나 용역 외의 목적으로 이용하여서는 아니 된다.</p>
+    <p class="sub">② "을"이 제①항을 위반하여 "갑"에게 손해를 끼친 경우 "갑"은 그 손해의 배상을 청구할 수 있다.</p></div>
+
+  <div class="clause"><h3>제 5조 (계약해지)</h3>
+    <p class="sub">① "갑" 또는 "을"은 상대방이 본 계약을 위반하고 상당한 기간을 정한 서면 시정 요구에도 이를 시정하지 아니한 경우 본 계약을 해지할 수 있다.</p>
+    <p class="sub">② 본 계약이 해지되거나 종료된 경우 해지·종료일이 속한 달의 용역수수료는 제3조에 따라 정산하여 지급한다.</p></div>
+
+  <div class="clause"><h3>제 6조 (기타사항)</h3>
+    <p class="sub">① 본 계약에서 정하지 아니한 사항은 「민법」 등 관계 법령과 일반 상관례에 따른다.</p>
+    <p class="sub">② 본 계약에 관한 분쟁은 상호 협의하여 해결하되, 협의가 이루어지지 아니하는 경우 "갑"의 소재지를 관할하는 법원을 관할 법원으로 한다.</p></div>
+
+  <div class="doc-foot">
+    <p style="text-align:center">"갑"과 "을"은 상기와 같이 용역위탁계약을 체결하고, 계약서 2부를 작성하여 각각 서명 날인 후 각 1부씩 보관한다.</p>
+    <div class="date-center">${ymdKo(signDate)}</div>
+    ${signDuo(b, e, "수탁자", "위탁자")}
+    ${handoverConfirm()}
+  </div></div>`;
+}
+
+/** 별도 사업장을 문서 머리글·서명란용 회사 모양으로 — 이 회사의 로고·인감은 싣지 않는다 */
+function bizPayerDocCompany(p: DocBizPayer): DocCompany {
+  return { name: p.name, ceo: p.ceo, bizNo: p.bizNo, phone: p.phone, address: p.address, logo: null, stamp: null };
+}
+
+/**
+ * 계약서 세트에 별도 사업장 용역위탁계약서가 함께 나가야 하는가 — **근로소득 상한을 둔 비율제 근로계약**.
+ * 상한이 없으면 비율급 전액이 이 회사의 임금이라 별도 사업장이 줄 돈이 없다.
+ */
+export function needsBizPayerContract(
+  contract: Pick<DocContract, "templateKey" | "ratioEmployee" | "ratioWageCap">,
+  employee?: Pick<DocEmployee, "payScheme"> | null
+): boolean {
+  const scheme = paySchemeOfTemplate(contract.templateKey) ?? employee?.payScheme;
+  return scheme === "RATIO" && contract.ratioEmployee === true && (contract.ratioWageCap ?? 0) > 0;
+}
+
 /* ================== 인센티브 산정 계약서 (강사) — 별지, 원문 전문 ================== */
 export function incentiveContractHtml(args: {
   employee: DocEmployee;
@@ -905,7 +1064,22 @@ export function contractGroups(args: {
       opts: { ...(bilateralOpts ?? {}), fitPages: 1 },
     });
 
-  // ② 확인서 — 을이 혼자 내는 서류라 갑의 서명이 없다. 이니셜란·쪽번호를 붙이지 않는다.
+  // ② 별도 사업장 용역위탁계약서 — 근로소득 상한을 둔 비율제 근로계약의 짝(상한을 넘는 비율급의 지급 근거).
+  //    당사자가 다른 별개의 계약이라 묶음을 따로 두고(쪽번호·이니셜란이 그 안에서만 매겨진다),
+  //    **이 회사 인감으로 간인을 찍지 않는다**(seamStamp 없음 — 남의 계약서에 우리 도장이 찍힌다).
+  //    별도 사업장 정보가 비면 **발급을 막는다** — 근로계약서가 '별도 사업자와의 계약' 을 가리키는데
+  //    그 계약서 없이 나가면 상한을 넘는 돈의 지급 근거가 빈다(명세서·이체 파일과 같은 규칙).
+  const bizContract = needsBizPayerContract(contract, employee);
+  if (bizContract) {
+    if (!company.bizPayer) throw new Error(bizPayerMissingMessage(company.bizPayerMissing ?? []));
+    groups.push({
+      bodies: [bizPayerContractHtml({ ...args, payer: company.bizPayer })],
+      // 한 장짜리 서식 — 별지 인센티브 계약서처럼 1장에 맞춰 줄인다(그대로 두면 서명란만 2쪽으로 밀렸다. 실측)
+      opts: { ...(bilateralOpts ?? {}), seamStamp: null, fitPages: 1 },
+    });
+  }
+
+  // ③ 확인서 — 을이 혼자 내는 서류라 갑의 서명이 없다. 이니셜란·쪽번호를 붙이지 않는다.
   const solo: string[] = [];
   // 비율제 근로계약(4대보험) — 근로자라 아래 두 확인서가 모두 맞지 않는다(유보금을 떼지 않고 퇴직급여를
   // 정식으로 쌓으며, 개인사업자가 아니다). 위탁 비율제는 지금까지와 같다.
@@ -916,6 +1090,12 @@ export function contractGroups(args: {
   // 개인사업자 지위 확인서 — 위탁계약(프리랜서). 완전비율제는 근로계약으로 맺지 않은 한 위탁이다.
   if (isContractorContract({ payScheme: scheme, isContractor: contract.isContractor, ratioEmployee: contract.ratioEmployee }))
     solo.push(confirmSoleProprietorHtml({ employee, company }));
+  // 별도 사업장 몫 — 그 사업장에 대한 개인사업자 지위 확인서(인적용역 사업소득 3.3% 의 근거). 이 회사와는
+  // 근로관계라 이 회사 앞으로는 내지 않는다.
+  if (bizContract && company.bizPayer)
+    solo.push(
+      confirmSoleProprietorHtml({ employee, company: bizPayerDocCompany(company.bizPayer), standalone: true })
+    );
   if (solo.length) groups.push({ bodies: solo });
 
   return groups;
@@ -1499,6 +1679,11 @@ export function confirmSoleProprietorHtml(args: {
   employee: DocEmployee;
   company: DocCompany;
   date?: Date;
+  /**
+   * 별도 사업장 앞으로 내는 확인서 — 그 사업장에 '입사' 하는 것이 아니라 용역만 맡으므로
+   * 「입사함에 있어서」 를 「수행함에 있어서」 로 적는다. 기본(위탁 강사)은 원문 그대로다.
+   */
+  standalone?: boolean;
 }): string {
   const { employee: e, company: c } = args;
   const date = args.date ?? new Date();
@@ -1511,7 +1696,9 @@ export function confirmSoleProprietorHtml(args: {
     <tr><th>연락처</th><td>${esc(e.phone ?? "")}</td></tr>
   </table>
 
-  <p style="margin-top:12px">상기 본인은 위탁 용역을 수행하기 위하여 입사함에 있어서, 본인 명의의 사업자등록증을 작성하여 제출하여야 하나, <u>인적용역을 제공하는 개인사업자로서 사업자등록증 발급이 면제되고, 부가가치세 신고 및 납부의 의무 역시 면제되는 "강사" 서비스 분야에 종사</u>하므로 별도의 사업자등록증 발급 없이 본 위탁 용역을 수행할 수 있기에 본 확인서를 제출합니다.</p>
+  <p style="margin-top:12px">상기 본인은 위탁 용역을 ${
+    args.standalone ? "수행함에 있어서" : "수행하기 위하여 입사함에 있어서"
+  }, 본인 명의의 사업자등록증을 작성하여 제출하여야 하나, <u>인적용역을 제공하는 개인사업자로서 사업자등록증 발급이 면제되고, 부가가치세 신고 및 납부의 의무 역시 면제되는 "강사" 서비스 분야에 종사</u>하므로 별도의 사업자등록증 발급 없이 본 위탁 용역을 수행할 수 있기에 본 확인서를 제출합니다.</p>
   <p>본 확인서를 제출하는 이유는 본인의 진실한 의사에 따라 위탁계약을 체결하기 위함입니다. 위탁계약 체결 시, 향후 <b>${esc(c.name)}</b> 와 관계하여 <b>근로기준법상 발생되는 각종 법정수당 및 퇴직금을 지급받을 수 없다</b>는 사실을 분명하게 인지하였습니다.</p>
 
   ${pledgeSignFoot(e, c, date, "확인자")}`;
