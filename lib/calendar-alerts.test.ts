@@ -56,8 +56,11 @@ describe("calendar alert content", () => {
       htmlLink: "https://www.google.com/calendar/event?eid=test",
     }, null);
     const expected = "일정: 영어시험 · 일시: 2026년 12월 9일 (종일) 등록자: 홍길동";
-    expect(msg.text).toBe(expected);
-    expect(msg.blocks).toEqual([{ type: "section", text: { type: "plain_text", text: expected, emoji: false } }]);
+    expect(msg.text).toBe(`새 일정 등록\n${expected}`);
+    expect(msg.blocks).toEqual([
+      { type: "header", text: { type: "plain_text", text: "📅 새 일정 등록", emoji: true } },
+      { type: "section", text: { type: "plain_text", text: expected, emoji: false } },
+    ]);
     expect(msg.unfurl_links).toBe(false);
     expect(msg.unfurl_media).toBe(false);
   });
@@ -74,7 +77,8 @@ describe("calendar alert content", () => {
     const msg = buildCalendarAlert(target, "created", { ...event, recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10"] }, null);
     expect(msg.text).toContain("일시: 매주 화요일 오후 2시~오후 3시, 총 10회 반복 (시작: 2026년 10월 27일");
     expect(msg.text).not.toContain("캘린더:");
-    expect(msg.blocks).toHaveLength(1);
+    expect(msg.blocks).toHaveLength(2);
+    expect(msg.blocks[0]).toMatchObject({ type: "header", text: { text: "📅 새 일정 등록" } });
   });
   it("leaves other alert types and the administrators' calendar unchanged", () => {
     for (const [calendar, kind] of [
@@ -86,7 +90,8 @@ describe("calendar alert content", () => {
       expect(msg.text).toContain("장소: 회의실");
       expect(msg.text).toContain("내용: 회의 내용");
       expect(msg.blocks).toHaveLength(3);
-      expect(msg.blocks[0]).toMatchObject({ type: "header" });
+      const label = kind === "created" ? "새 일정 등록" : kind === "cancelled" ? "일정 취소" : "일정 변경";
+      expect(msg.blocks[0]).toMatchObject({ type: "header", text: { text: `📅 ${label}` } });
       expect(msg.blocks[2]).toMatchObject({ type: "context" });
     }
   });
@@ -122,7 +127,7 @@ describe("calendar alert content", () => {
   it("never turns event-provided Slack mentions into active markup", () => {
     const msg = buildCalendarAlert(target, "created", { ...event, summary: "<!channel> <@U123>", description: "<b>내용</b>" }, null);
     expect(msg.text).not.toContain("<!channel>");
-    expect(msg.blocks[0]).toMatchObject({ text: { type: "plain_text" } });
+    expect(msg.blocks[1]).toMatchObject({ text: { type: "plain_text" } });
   });
   it("uses distinct durable delivery IDs for the same event across real revisions", () => {
     expect(alertId(target.calendarId, event.id, "v1")).not.toBe(alertId(target.calendarId, event.id, "v2"));

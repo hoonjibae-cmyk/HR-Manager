@@ -208,9 +208,10 @@ export function buildCalendarAlert(target: CalendarAlertTarget, kind: "created" 
       .find((value) => value && !value.includes("@")) || "확인 불가";
     const body = cut(`일정: ${cut(event.summary || "(제목 없음)")} · 일시: ${when} 등록자: ${cut(compactName, 250)}`, 2900);
     const blocks: object[] = [
+      { type: "header", text: { type: "plain_text", text: `📅 ${label}`, emoji: true } },
       { type: "section", text: { type: "plain_text", text: body, emoji: false } },
     ];
-    return { text: escapeSlack(body), blocks, unfurl_links: false, unfurl_media: false };
+    return { text: escapeSlack(`${label}\n${body}`), blocks, unfurl_links: false, unfurl_media: false };
   }
   const who = name && creator.email ? `${name} (${creator.email})` : name || creator.email || "확인 불가 (구글에서 등록자 정보를 제공하지 않음)";
   const lines = [`캘린더: ${target.name}`, `일정: ${cut(event.summary || "(제목 없음)")}`];
