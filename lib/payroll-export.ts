@@ -46,6 +46,11 @@ export interface ExportPayrollRecord {
   positionP: number;
   mealP: number;
   carP: number;
+  /**
+   * 경업금지 보상금 — 세전급여 안에 들어 있다(열을 따로 두지 않는다). **비고에 금액을 적는다** — 보상금의
+   * 세무 처리(과세·비과세)는 세무대리인이 정하는데, 금액이 시트에 없으면 따로 물어봐야 처리할 수 있다.
+   */
+  nonCompeteP?: number | null;
   incentiveP: number;
   bonusP: number;
   unusedLeaveP: number;
@@ -175,6 +180,10 @@ export function buildExportRow(r: ExportPayrollRecord, payDate: string, status =
   // (기본급·주휴·직책수당·식대·차량유지비 + **포괄임금 약정분**이 여기 뭉쳐 들어간다.
   //  약정분은 계약된 월 급여의 일부이므로 오버타임이 아니라 급여 쪽에 있어야 맞다 — 원래 시트가 그렇다)
   const basePay = gross - incentive - overtimePay - unusedLeavePay - bonus;
+  // 경업금지 보상금 — 세전급여에 들어 있는 금액을 비고에 밝힌다(보상금은 언제나 이 회사가 지급하므로 본표 몫이다).
+  // 세무 처리를 어떻게 할지는 세무대리인의 몫이라, 시트는 '얼마가 보상금인지' 만 적고 과세 여부는 적지 않는다.
+  const nonCompete = Math.max(Math.round(r.nonCompeteP ?? 0), 0);
+  const ncNote = nonCompete > 0 ? ` · 경업금지 보상금 ${nonCompete.toLocaleString("ko-KR")}원 포함` : "";
   return {
     name: `${r.employee.name}선생님`,
     payDate,
@@ -191,11 +200,11 @@ export function buildExportRow(r: ExportPayrollRecord, payDate: string, status =
     expense: r.expenseD || 0,
     otherDeduct: r.otherD || 0,
     note:
-      r.incomeType === "FREELANCE"
+      (r.incomeType === "FREELANCE"
         ? "3.3% 적용"
         : split.biz
         ? "4대보험(근로소득) · 상한 초과분 별도 시트"
-        : "4대보험(근로소득)",
+        : "4대보험(근로소득)") + ncNote,
     id: r.employee.rrn || "",
     status,
   };
@@ -415,11 +424,17 @@ export function buildPayrollExportWorkbook(args: {
   for (let r = totalRow + 1; r < aoa.length; r++)
     put(r, 0, { font: { sz: 10, bold: true, color: { rgb: RED } } });
 
+  // 기타(비고) 칸 — 경업금지 보상금 금액이 붙으면 길어진다. 가장 긴 비고에 맞춰 넓힌다(한글은 두 칸으로 센다).
+  // 좁은 채로 두면 옆 칸(ID)에 가려 보상금 금액이 안 보인다. 보상금이 없는 달은 예전 폭(15) 그대로다.
+  const noteWidth = (t: string) => Array.from(t).reduce((n, ch) => n + (ch.charCodeAt(0) > 0x2e7f ? 2 : 1), 0);
+  const noteWch = rows.some((r) => r.note.includes("경업금지 보상금"))
+    ? Math.min(Math.max(15, ...rows.map((r) => noteWidth(r.note) + 2)), 70)
+    : 15;
   ws["!cols"] = [
     { wch: 14 }, // 이름
     { wch: 10 }, // 지급일
     ...Array.from({ length: lastNumCol - firstNumCol + 1 }, () => ({ wch: 13 })),
-    { wch: 15 }, // 기타
+    { wch: noteWch }, // 기타
     { wch: 17 }, // ID
     { wch: 17 }, // 재직 상태 (퇴직 + 날짜)
   ];

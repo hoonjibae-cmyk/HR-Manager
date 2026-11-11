@@ -10,6 +10,7 @@ import {
   certCareerHtml,
   certReleaseHtml,
   wageCapOf,
+  ratioNonTaxInsideOf,
   type DocPayroll,
 } from "./documents-pay";
 import { getCompany, empToDoc, contractToDoc } from "./repo";
@@ -205,6 +206,8 @@ export async function genPayslip(payrollId: number) {
         wageCap: ratioWorker ? wageCapOf(pr)?.cap ?? (monthEmp as any).ratioWageCap ?? null : null,
         bizIncome: ratioWorker ? pr.bizIncomeP ?? 0 : null,
         wageCapWithNonCompete: ratioWorker ? wageCapOf(pr)?.withNonCompete ?? false : false,
+        // 식대·차량유지비(비과세)가 비율급 안에 든 달 — 명세서의 '비율급' 줄이 그만큼 적은 이유를 내역서가 밝힌다
+        nonTaxInside: ratioWorker ? ratioNonTaxInsideOf(pr) : null,
         // 배분율은 계약이 진실이다 — 명단에 적힌 율은 대조용으로만 넘긴다
         percent: isRatio ? monthEmp.ratioPercent : monthEmp.incRevenuePercent,
         sheetPercent: roster.find((r) => r.sharePercent != null)?.sharePercent ?? null,

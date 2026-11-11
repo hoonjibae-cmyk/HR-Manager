@@ -46,8 +46,10 @@ export interface EmployeePayInput {
   isContractor?: boolean | null;
   baseWage: number; // 월급제=월기본급, 시급제=시급
   positionAllow: number;
-  mealAllow: number; // 비과세
-  carAllow: number; // 비과세
+  // 식대·차량유지비(비과세) — 월급제·인센티브·**비율제 근로계약**은 총액(비율급) 안에 포함된 금액이고
+  // (떼어 비과세로 구분할 뿐 얹지 않는다), 시급제·위탁(완전비율제)은 별도 가산이다
+  mealAllow: number;
+  carAllow: number;
   nonTaxTotal?: number; // 기타 비과세
   dependents: number; // 부양가족수(본인포함)
   schedule: ScheduleDay[];
@@ -71,7 +73,7 @@ export interface EmployeePayInput {
   /**
    * 경업금지 보상금 비율(0.03 = 3%) — **완전비율제**(위탁·비율제 근로계약). 수수료·비율급과 같은 매출에
    * 곱해 그것과 **별도로** 더해 지급한다. 위탁이면 사업소득 3.3% 가 함께 걸리고, 비율제 근로자면
-   * 근로소득(4대보험·근로소득세)이며 근로소득 상한 안에 비율급과 함께 센다. lib/non-compete.ts
+   * 근로소득 상한 안에 비율급과 함께 센다(자동 공제 계산은 과세 급여에 넣는다). lib/non-compete.ts
    */
   nonCompeteRatio?: number | null;
   // 비율제
@@ -194,6 +196,11 @@ export interface PayrollResult {
   monthlyStdHours: number; // 월 기본급 환산시간 (소정+주휴)*4.345
 
   // 지급
+  /**
+   * 기본급 자리 — 월급제·인센티브는 총액에서 비과세·약정수당·보상금을 뗀 잔액, 시급제는 시급 × 시간,
+   * 위탁(완전비율제)은 수수료 전액. **비율제 근로계약은 비율급에서 식대·차량유지비(비과세)를 뗀 나머지**다
+   * (별도 사업장 몫 `bizIncomeP` 는 이 안에 들어 있다) — 비율급 전체는 `ratioPayTotal`.
+   */
   baseP: number;
   extraP: number; // 추가근로수당(법내연장, ×1.0)
   overtimeP: number;
@@ -201,9 +208,19 @@ export interface PayrollResult {
   holidayP: number;
   weeklyHolidayP: number;
   positionP: number;
+  /** 식대(비과세) — 월급제·인센티브·비율제 근로계약은 총액(비율급) **안에서** 뗀 몫, 시급제·위탁은 별도 가산 */
   mealP: number;
+  /** 차량유지비(비과세) — 식대와 같은 규칙 */
   carP: number;
-  /** 경업금지 보상금 — 총액에서 떼어 낸 몫(그만큼 baseP 가 줄었다). 과세 */
+  /**
+   * 비율제 근로자의 그 달 **비율급 전체**(근로계약서 제4조 ① 산식 금액 또는 §47 보장급) — 식대·차량유지비와
+   * 별도 사업장 몫을 가르기 전의 금액이고 `baseP + mealP + carP` 와 같다. 비율제 근로자가 아니면 null.
+   */
+  ratioPayTotal: number | null;
+  /**
+   * 경업금지 보상금 — 월급제는 총액에서 떼어 낸 몫(그만큼 baseP 가 줄었다), 완전비율제는 매출 × 비율(별도 가산).
+   * 자동 공제 계산에서는 과세 급여에 넣는다(아래 `taxableGross`) — 세무 처리는 세무대리인 지정값(수동 공제)에 따른다.
+   */
   nonCompeteP: number;
   incentiveP: number;
   bonusP: number;
@@ -255,11 +272,12 @@ export function floor10(x: number): number {
  * **비율급을 근로소득(상한까지)과 사업소득(넘는 부분)으로 가른다** — 비율제 근로자 전용.
  *
  * 상한이 없거나(null·0 이하) 비율급이 상한 이하면 전부 근로소득이다.
- * `sharedWithin` 은 **상한 안에 함께 세는 다른 근로소득** — 경업금지 보상금이다(2026-11 결정: 보상금까지
+ * `sharedWithin` 은 **상한 안에 함께 세는 이 회사의 다른 지급액** — 경업금지 보상금이다(2026-11 결정: 보상금까지
  * 합쳐 상한으로 묶는다). 상한은 비율급 + 보상금의 합에 걸리고, 넘는 만큼 **비율급에서** 빼 별도 사업장으로
  * 보낸다 — 보상금은 경업금지 약정의 당사자인 이 회사가 주는 돈이라 옮길 수 없다. 그래서 별도 사업장 몫은
  * 비율급을 넘지 않는다(보상금만으로 상한을 넘는 극단에서도 보상금은 그대로 이 회사 몫).
- * 연차수당·연장수당·상여·정액 수당처럼 근로자라서 받는 돈은 상한과 무관하게 근로소득이라 여기 넣지 않는다.
+ * 연차수당·연장수당·상여·직책수당처럼 근로자라서 받는 돈은 상한과 무관하게 근로소득이라 여기 넣지 않는다.
+ * 식대·차량유지비(비과세)는 비율급 **안에** 있어 따로 세지 않는다 — 가른 뒤 이 회사 몫(`wage`)에서 뗀다.
  */
 export function splitRatioPay(
   ratioPay: number,
@@ -633,6 +651,10 @@ export function computePayroll(
   });
   // 경업금지 보상금 — 근로계약은 총액 안에서 뗀 몫(여기), 위탁(완전비율제)은 매출 × 비율(아래 RATIO 분기)
   let nonCompeteP = isMonthlyScheme ? inclusive.nonCompetePay : 0;
+  // 비율제 근로계약 — 식대·차량유지비(비과세)는 비율급 **안에서** 뗀다(아래 RATIO 분기). 그 밖은 null.
+  let ratioMealP: number | null = null;
+  let ratioCarP: number | null = null;
+  let ratioPayTotal: number | null = null;
 
   // --- 통상시급 ---
   let hourlyWage = 0;
@@ -708,7 +730,7 @@ export function computePayroll(
     // 경업금지 보상금 — 같은 매출에 보상금 비율을 곱해 수수료·비율급과 **별도로** 더한다.
     // 최저보장은 수수료·비율급에만 걸린다 — 보상금은 언제나 매출 × 비율이다.
     //  · 위탁: 강의위탁계약서 제5조·제7조(사업소득 3.3% 가 함께 걸린다).
-    //  · 비율제 근로계약: 근로계약서 제4조·제8조. 근로소득이고 **근로소득 상한 안에 함께 센다**(아래).
+    //  · 비율제 근로계약: 근로계약서 제4조·제8조. **근로소득 상한 안에 함께 센다**(아래).
     //    경업금지 약정의 당사자가 이 회사라 보상금 자체는 언제나 이 회사가 준다.
     const ncr = emp.nonCompeteRatio ?? 0;
     if (ncr > 0) {
@@ -716,7 +738,7 @@ export function computePayroll(
       notes.push(
         `경업금지 보상금: 매출 ${rev.toLocaleString()}원 × ${(ncr * 100).toFixed(1)}% = ${nonCompeteP.toLocaleString()}원 ` +
           (ratioWorker
-            ? `(비율급과 별도 · 근로계약서 제8조 · 근로소득 — 근로소득 상한은 비율급과 합쳐 잰다)`
+            ? `(비율급과 별도 · 근로계약서 제8조 — 근로소득 상한은 비율급과 합쳐 잰다)`
             : `(용역수수료와 별도 · 강의위탁계약서 제5조·제7조)`)
       );
     }
@@ -729,17 +751,43 @@ export function computePayroll(
       //    다른 사업자에게 넘길 수 없다). 그래서 baseP 가 아니라 fee 를 가른다.
       const split = insured ? splitRatioPay(fee, emp.ratioWageCap, nonCompeteP) : { wage: fee, biz: 0 };
       bizIncomeP = split.biz;
+      // 그 달 비율급 전체(① 산식 금액 또는 §47 보장급) — 아래에서 식대·차량유지비를 떼기 전의 금액
+      const ratioTotal = baseP;
+      // 이 회사가 주는 비율급 — 별도 사업장 몫을 뺀 나머지(보장급으로 올려 준 몫 포함)
+      const ownWage = Math.max(ratioTotal - split.biz, 0);
+      ratioPayTotal = ratioTotal;
       if (split.biz > 0)
         notes.push(
-          `근로소득 상한 ${Math.round(emp.ratioWageCap ?? 0).toLocaleString()}원 — 비율급 ${baseP.toLocaleString()}원` +
+          `근로소득 상한 ${Math.round(emp.ratioWageCap ?? 0).toLocaleString()}원 — 비율급 ${ratioTotal.toLocaleString()}원` +
             (nonCompeteP > 0 ? `과 경업금지 보상금 ${nonCompeteP.toLocaleString()}원의 합계` : "") +
-            ` 중 ${(baseP - split.biz + nonCompeteP).toLocaleString()}원은 근로소득(4대보험·근로소득세), ` +
+            ` 중 ${(ownWage + nonCompeteP).toLocaleString()}원은 이 회사가 지급하고, ` +
             `넘는 ${split.biz.toLocaleString()}원은 비율급에서 빼 별도 사업장이 지급하는 사업소득(3.3%)으로 나눴습니다.`
+        );
+      // 식대·차량유지비(비과세) — 비율급 **안에** 있다(2026-11 정정. 근로계약서 제4조 「제①항의 임금에는 식대가
+      // 포함되어 있다」). 월급제가 월 급여 총액에서 떼는 것과 같다: 비율급에서 떼어 비과세로 구분할 뿐 얹지 않으므로
+      // 지급액 계는 그대로이고 과세 대상만 준다. 그 전에는 비율급 위에 얹어 계약보다 식대만큼 더 지급했다.
+      //  · **이 회사가 주는 몫 안에서만** 뗀다 — 별도 사업장 몫은 사업소득이라 식대(근로소득 비과세)가 설 자리가 없다.
+      //  · 이 회사 몫이 식대보다 적은 달은 그 몫만큼만 잡는다(비율급보다 많은 식대는 없다).
+      const wantMeal = Math.max(round0(emp.mealAllow || 0), 0);
+      const wantCar = Math.max(round0(emp.carAllow || 0), 0);
+      ratioMealP = Math.min(wantMeal, ownWage);
+      ratioCarP = Math.min(wantCar, ownWage - ratioMealP);
+      baseP = ratioTotal - ratioMealP - ratioCarP;
+      if (ratioMealP + ratioCarP > 0)
+        notes.push(
+          `비율급 ${ratioTotal.toLocaleString()}원에 비과세 ${(ratioMealP + ratioCarP).toLocaleString()}원(식대·차량유지비)이 ` +
+            `포함되어 있습니다 — 근로계약서 제4조. 지급액 계는 그대로이고 과세 대상만 줄어듭니다.`
+        );
+      if (ratioMealP + ratioCarP < wantMeal + wantCar)
+        notes.push(
+          `⚠️ 이 회사가 지급하는 비율급(${ownWage.toLocaleString()}원)이 계약의 식대·차량유지비(${(
+            wantMeal + wantCar
+          ).toLocaleString()}원)보다 적어 비과세분을 ${(ratioMealP + ratioCarP).toLocaleString()}원만 잡았습니다.`
         );
       // 통상시급 — 도급(비율)제 임금은 '그 달 임금 총액 ÷ 총 근로시간'(근로기준법 시행령 §6②6).
       // 비율급에 주휴일 임금이 포함된 것으로 약정하므로(근로계약서 제4조) 월급제와 같은 월 환산시간
       // (소정+주휴)×4.345 로 나눈다. 별도 사업장 몫은 이 회사의 임금이 아니라 분자에서 뺀다.
-      // 식대·차량유지비(정액)는 월급제가 총액 안에 두고 나누는 것과 같게 분자에 넣는다.
+      // 식대·차량유지비는 이 회사 몫 비율급(ownWage) 안에 이미 들어 있다 — 월급제가 총액으로 나누는 것과 같다.
       // 경업금지 보상금도 넣는다 — 월급제가 보상금을 통상시급에서 빼지 않는 것과 같은 원칙이다(임금으로
       // 판단되면 뺀 만큼이 연장·휴일·야간·연차수당 체불이 된다. 덜 주는 쪽으로 틀리지 않게).
       let hours = monthlyStdHours;
@@ -750,7 +798,7 @@ export function computePayroll(
             "직원 정보에 근로시간표를 채우면 계약 소정근로시간 기준으로 다시 계산됩니다."
         );
       }
-      const wageBase = baseP - split.biz + nonCompeteP + (emp.mealAllow || 0) + (emp.carAllow || 0);
+      const wageBase = ownWage + nonCompeteP;
       hourlyWage = wageBase > 0 ? round0(wageBase / hours) : 0;
       notes.push(
         `통상시급: 그 달 임금 ${wageBase.toLocaleString()}원${nonCompeteP > 0 ? "(경업금지 보상금 포함)" : ""} ÷ ` +
@@ -869,10 +917,11 @@ export function computePayroll(
 
   // --- 수당 (월 정액 수당은 일할 적용) ---
   // 식대·차량유지비는 월급제/인센티브에서는 기본급에서 이미 빼 두었으므로 여기서 더해도
-  // 합계는 계약 총액 그대로다. 시급제·비율제는 기본급 개념이 달라 별도 가산으로 둔다.
+  // 합계는 계약 총액 그대로다. **비율제 근로계약도 같다** — 위 RATIO 분기에서 비율급에서 떼어 두었다
+  // (ratioMealP·ratioCarP). 시급제·위탁(완전비율제)은 기본급 개념이 달라 별도 가산으로 둔다.
   const positionP = round0((emp.positionAllow || 0) * prorate);
-  const mealP = round0((emp.mealAllow || 0) * prorate);
-  const carP = round0((emp.carAllow || 0) * prorate);
+  const mealP = ratioMealP ?? round0((emp.mealAllow || 0) * prorate);
+  const carP = ratioCarP ?? round0((emp.carAllow || 0) * prorate);
   const bonusP = month.bonus ?? 0;
 
   // --- 연차미사용수당 = 1일 통상임금(통상시급 × 1일 소정근로시간) × 미사용일수 ---
@@ -898,7 +947,10 @@ export function computePayroll(
     bonusP +
     unusedLeaveP;
 
-  // 비과세 총액 (식대 + 차량유지비 + 기타) — 경업금지 보상금은 과세(근로소득)라 여기 넣지 않는다
+  // 비과세 총액 (식대 + 차량유지비 + 기타). **경업금지 보상금은 여기 넣지 않는다** — 자동 공제 계산(AUTO)은
+  // 보상금을 과세 급여로 보고 4대보험·소득세를 잰다(소득세법 §12 3호의 비과세 근로소득은 열거된 항목뿐이라
+  // 덜 떼는 쪽으로 틀리지 않게). 세무대리인이 다르게 처리하기로 했으면 수동 공제(MANUAL — 4대보험 직원의
+  // 기본값)로 그 지정값을 넣는다. 세무 시트의 비고가 그 달 보상금 금액을 따로 적어 준다(payroll-export).
   const nonTax = mealP + carP + (emp.nonTaxTotal ?? 0);
   const taxableGross = Math.max(gross - nonTax, 0);
 
@@ -993,6 +1045,7 @@ export function computePayroll(
     positionP,
     mealP,
     carP,
+    ratioPayTotal,
     nonCompeteP,
     incentiveP,
     bonusP,

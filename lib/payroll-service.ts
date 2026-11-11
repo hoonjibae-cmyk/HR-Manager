@@ -665,6 +665,10 @@ export async function runPayrollMonth(
           r.bizIncomeP > 0
             ? { cap: payInput.ratioWageCap ?? null, withNonCompete: (r.nonCompeteP ?? 0) > 0 }
             : null,
+        // 비율제 근로계약의 그 달 비율급 전체(식대·차량유지비와 별도 사업장 몫을 가르기 전) — 기록의 baseP 는
+        // 비과세분을 뗀 나머지라, 명세서가 '이 달 비율급 X원' 을 적을 때 이 값을 쓴다. **이 값이 있는 기록은
+        // 식대가 비율급 안에 든 기록**이다(v1.58.2 부터. 그 전 기록은 식대를 비율급 위에 얹었다 — ratioPayTotalOf)
+        ratioPay: r.ratioPayTotal != null ? { total: r.ratioPayTotal } : null,
         // 시간기록표 근거 — 명세서의 체류/휴게/순 근로/연차 구분 표기용
         timesheet: mInput.timesheet ?? null,
         // 시급제 휴일근로 근거(날짜별) — 명세서가 어느 날 몇 시간에 가산이 붙었는지 적는다

@@ -254,6 +254,32 @@ describe("열 관계 — 세무사가 이 표로 신고하므로 반드시 맞�
   });
 });
 
+describe("비고 — 경업금지 보상금 금액(v1.58.2)", () => {
+  // 보상금은 세전급여 안에 들어 있고 열이 따로 없다 — 세무대리인이 어떻게 처리하든 금액을 알아야 한다
+  it("보상금이 있으면 비고에 금액을 적는다 — 과세 여부는 적지 않는다", () => {
+    const r = buildExportRow(
+      rec({ name: "가상강사", incomeType: "EMPLOYEE", nonCompeteP: 300_000, gross: 3_500_000, net: 3_500_000 }),
+      "-"
+    );
+    expect(r.note).toBe("4대보험(근로소득) · 경업금지 보상금 300,000원 포함");
+    expect(r.note).not.toContain("과세");
+    // 열 관계는 그대로 — 보상금은 세전급여에 들어 있다
+    expect(r.basePay).toBe(3_500_000);
+    expect(r.grossTotal).toBe(3_500_000);
+    expect(reconcileRow(r)).toBe(0);
+  });
+  it("위탁(3.3%)도 같은 자리에 적는다", () => {
+    const r = buildExportRow(rec({ name: "가상위탁", nonCompeteP: 150_000, gross: 2_150_000, net: 2_150_000 }), "-");
+    expect(r.note).toBe("3.3% 적용 · 경업금지 보상금 150,000원 포함");
+  });
+  it("보상금이 없으면(옛 기록 포함) 비고는 예전 그대로다", () => {
+    expect(buildExportRow(rec({ name: "가", incomeType: "EMPLOYEE", gross: 1, net: 1 }), "-").note).toBe("4대보험(근로소득)");
+    expect(buildExportRow(rec({ name: "나", gross: 1, net: 1 }), "-").note).toBe("3.3% 적용");
+    expect(buildExportRow(rec({ name: "다", nonCompeteP: 0, gross: 1, net: 1 }), "-").note).toBe("3.3% 적용");
+    expect(buildExportRow(rec({ name: "라", nonCompeteP: null, gross: 1, net: 1 }), "-").note).toBe("3.3% 적용");
+  });
+});
+
 describe("워크북 출력", () => {
   const records = [
     rec({

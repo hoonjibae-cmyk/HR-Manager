@@ -30,8 +30,40 @@ export const RATIO_WAGE_CAP_MAX = 100_000_000;
 /**
  * 별도 사업장 용역위탁계약서의 「위탁 용역」 기본 문구 — 설정에서 비워 두면 쓴다.
  * 실제로 그 사업장을 위해 하는 일을 적어야 한다(같은 강의를 둘로 나눈 것이면 이 구조는 버티지 못한다).
+ * **'강의' 를 적지 않는다**(2026-11 요청 — 그 전 문구는 「강의 및 이에 부수하는 …」) — 강의는 근로계약의
+ * 업무라, 위탁 용역에도 강의를 적으면 같은 일을 두 계약으로 나눈 것이라고 계약서가 스스로 적는 셈이 된다.
  */
-export const DEFAULT_BIZ_PAYER_SERVICE = "강의 및 이에 부수하는 교육 콘텐츠(교재·수업자료) 개발 용역";
+export const DEFAULT_BIZ_PAYER_SERVICE = "교육 콘텐츠(교재·수업자료) 개발 용역";
+
+/**
+ * 비율제 근로계약의 식대(비과세) 기본값 — 4대보험 직원은 식대 20만원을 급여 **안에** 두는 것이 이 회사의
+ * 기본 규칙이다(월급제 폼이 4대보험으로 바꿀 때 채우는 값과 같다).
+ */
+export const DEFAULT_RATIO_MEAL_ALLOW = 200_000;
+
+/**
+ * 완전비율제 폼에서 **계약 형태(위탁 ↔ 근로)를 바꿀 때 함께 옮기는 값** — 신규 계약·조건 수정·직원 등록이
+ * 같은 규칙을 쓴다(폼마다 따로 두면 한 곳만 식대가 남거나 빠진다).
+ *
+ *  · 근로계약: 4대보험(근로소득)으로 맞추고, 식대(비과세)가 비어 있으면 기본 20만원을 채운다. 식대·차량유지비는
+ *    비율급 **안에** 든 금액이다(얹지 않는다 — 급여 엔진·근로계약서 제4조). 화면에 칸이 있어 고칠 수 있다.
+ *  · 위탁: 사업소득으로 맞추고 식대·차량유지비를 비운다 — 위탁 화면에는 칸이 없어, 남겨 두면 보이지 않는 값이
+ *    수수료 위에 얹힌다(위탁은 식대가 별도 가산이다).
+ */
+export function ratioFormSwitch(
+  toEmployee: boolean,
+  cur: { mealAllow?: unknown; carAllow?: unknown }
+): { ratioEmployee: boolean; incomeType: "EMPLOYEE" | "FREELANCE"; mealAllow: number; carAllow: number } {
+  if (!toEmployee) return { ratioEmployee: false, incomeType: "FREELANCE", mealAllow: 0, carAllow: 0 };
+  const meal = Number(cur.mealAllow);
+  const car = Number(cur.carAllow);
+  return {
+    ratioEmployee: true,
+    incomeType: "EMPLOYEE",
+    mealAllow: Number.isFinite(meal) && meal > 0 ? Math.round(meal) : DEFAULT_RATIO_MEAL_ALLOW,
+    carAllow: Number.isFinite(car) && car > 0 ? Math.round(car) : 0,
+  };
+}
 
 /** 화면·문서가 함께 쓰는 짧은 경고 — 상한을 켤 때 */
 export const RATIO_SPLIT_RISK_NOTE =

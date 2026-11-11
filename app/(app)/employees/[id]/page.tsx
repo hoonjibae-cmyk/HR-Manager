@@ -228,7 +228,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                       매출의 {ratioPctLabel(terms.nonCompeteRatio ?? 0)}
                       <span className="block text-[11px] text-slate-400 mt-0.5">
                         {ratioWorker
-                          ? "비율급과 별도 지급 (근로계약서 제8조 · 근로소득 — 근로소득 상한은 비율급과 합쳐 잰다)"
+                          ? "비율급과 별도 지급 (근로계약서 제8조 — 근로소득 상한은 비율급과 합쳐 잰다)"
                           : "용역수수료와 별도 지급 (위탁계약서 제5조·제7조)"}
                       </span>
                     </Row>
@@ -256,14 +256,24 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                   </span>
                 </Row>
               )}
+              {/* 식대·차량유지비 — 월급제·비율제 근로계약은 총액(비율급) 안에 든 금액이라 └ 로 달고,
+                  시급제·위탁은 별도 가산이라 그대로 적는다 */}
               {terms.mealAllow > 0 && (
-                <Row k={isMonthlyScheme ? "└ 식대(비과세)" : "식대(비과세)"}>
+                <Row k={isMonthlyScheme || ratioWorker ? "└ 식대(비과세)" : "식대(비과세)"}>
                   <span className="text-slate-500">{wonUnit(terms.mealAllow)}</span>
+                  {ratioWorker && (
+                    <span className="block text-[11px] text-slate-400 mt-0.5">
+                      비율급에 포함 — 더해 주는 돈이 아니라 그만큼을 비과세로 구분 (근로계약서 제4조)
+                    </span>
+                  )}
                 </Row>
               )}
               {terms.carAllow > 0 && (
-                <Row k={isMonthlyScheme ? "└ 차량유지비(비과세)" : "차량유지비(비과세)"}>
+                <Row k={isMonthlyScheme || ratioWorker ? "└ 차량유지비(비과세)" : "차량유지비(비과세)"}>
                   <span className="text-slate-500">{wonUnit(terms.carAllow)}</span>
+                  {ratioWorker && (
+                    <span className="block text-[11px] text-slate-400 mt-0.5">비율급에 포함</span>
+                  )}
                 </Row>
               )}
               {terms.positionAllow > 0 && (
@@ -488,7 +498,9 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                     {c.templateKey === "RATIO" && c.ratioEmployee && (
                       <span className="pill bg-emerald-50 text-emerald-700 ml-1">4대보험</span>
                     )}
-                    {c.mealAllow > 0 && ` · 식대 ${wonUnit(c.mealAllow)}`}
+                    {/* 비율제 근로계약의 식대는 비율급 안에 든 금액이다 — '포함' 이라고 적어 얹는 돈으로 읽히지 않게 */}
+                    {c.mealAllow > 0 &&
+                      ` · 식대 ${wonUnit(c.mealAllow)}${c.templateKey === "RATIO" && c.ratioEmployee ? "(비율급에 포함)" : ""}`}
                     {c.positionAllow > 0 && ` · 직책 ${wonUnit(c.positionAllow)}`}
                     {(c.fixedOtHours || c.fixedNightHours) && (
                       <span className="text-slate-400">

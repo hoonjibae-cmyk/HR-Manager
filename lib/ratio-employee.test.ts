@@ -22,6 +22,8 @@ import {
   recordSplit,
   bizPayerMissing,
   bizPayerOf,
+  ratioFormSwitch,
+  DEFAULT_RATIO_MEAL_ALLOW,
 } from "./ratio-employee";
 import {
   nonCompeteRatioApplies,
@@ -235,7 +237,7 @@ describe("computePayroll — 비율제 근로자", () => {
     expect(r.hourlyWage).toBe(Math.round(6_000_000 / MONTH_HOURS));
   });
 
-  it("경업금지 보상금 비율 — 비율급과 별도로 매출 × 비율, 근로소득이고 상한은 비율급과 합쳐 잰다(v1.58.1)", () => {
+  it("경업금지 보상금 비율 — 비율급과 별도로 매출 × 비율, 상한은 비율급과 합쳐 잰다(v1.58.1)", () => {
     const r = computePayroll(
       ratioEmp({ nonCompeteRatio: 0.03 }),
       { classRevenue: 15_000_000, extraHours: 10 },
@@ -251,7 +253,8 @@ describe("computePayroll — 비율제 근로자", () => {
     expect(r.hourlyWage).toBe(hw);
     expect(r.extraP).toBe(10 * hw);
     expect(r.gross).toBe(6_000_000 + 450_000 + 10 * hw);
-    // 4대보험 기준 = 상한 500만 + 상한 밖 근로소득(연장수당)
+    // 4대보험 기준(자동 공제 계산) = 상한 500만 + 상한 밖 근로소득(연장수당).
+    // 자동 계산은 보상금을 과세 급여에 넣는다 — 세무대리인이 다르게 처리하면 수동 공제로 그 지정값을 넣는다
     expect(r.wageTaxable).toBe(5_000_000 + 10 * hw);
     expect(r.healthD).toBe(floor10(r.wageTaxable * DEFAULT_RATES_2025.health));
     expect(r.employmentD).toBe(floor10(r.wageTaxable * DEFAULT_RATES_2025.employment));
@@ -260,8 +263,120 @@ describe("computePayroll — 비율제 근로자", () => {
     expect(r.bizLocalTaxD).toBe(4_350);
     expect(r.net).toBe(r.gross - r.totalDeduct);
     expect(r.notes.some((n) => n.includes("근로계약서 제8조") && n.includes("비율급과 합쳐"))).toBe(true);
-    expect(r.notes.some((n) => n.includes("경업금지 보상금 450,000원의 합계 중 5,000,000원은 근로소득"))).toBe(true);
+    expect(r.notes.some((n) => n.includes("경업금지 보상금 450,000원의 합계 중 5,000,000원은 이 회사가 지급하고"))).toBe(true);
     expect(r.notes.some((n) => n.includes("경업금지 보상금 포함"))).toBe(true);
+    // 산정 근거는 보상금의 과세 여부를 단정하지 않는다(v1.58.2 — 세무 처리는 세무대리인의 몫)
+    expect(r.notes.some((n) => n.includes("경업금지 보상금") && n.includes("근로소득(4대보험"))).toBe(false);
+    // 비율급 전체(가르기 전)를 따로 돌려준다 — 식대가 없으면 baseP 와 같다
+    expect(r.ratioPayTotal).toBe(6_000_000);
+  });
+
+  /* ── 식대·차량유지비(비과세)는 비율급 '안에' 있다(v1.58.2) ──
+   * 근로계약서 제4조 「제①항의 임금에는 식대(비과세) 월 20만원이 포함되어 있다」. 월급제가 월 급여 총액에서
+   * 떼는 것과 같다 — 얹지 않으므로 지급액 계는 그대로이고 과세 대상만 준다. 그 전에는 비율급 위에 얹어
+   * 계약보다 식대만큼 더 지급했다. */
+  it("식대는 비율급에서 떼어 비과세로 구분할 뿐 얹지 않는다 — 지급액 계는 식대가 없을 때와 같다", () => {
+    const month = { classRevenue: 10_000_000 };
+    const plain = computePayroll(ratioEmp({ ratioWageCap: null }), month, DEFAULT_RATES_2025, taxTable);
+    const meal = computePayroll(
+      ratioEmp({ ratioWageCap: null, mealAllow: 200_000, carAllow: 100_000 }),
+      month,
+      DEFAULT_RATES_2025,
+      taxTable
+    );
+    expect(meal.ratioPayTotal).toBe(4_000_000); // 1,000만 × 40%
+    expect(meal.mealP).toBe(200_000);
+    expect(meal.carP).toBe(100_000);
+    expect(meal.baseP).toBe(3_700_000); // 비율급 − 식대 − 차량유지비
+    expect(meal.baseP + meal.mealP + meal.carP).toBe(meal.ratioPayTotal);
+    // 지급액 계는 그대로 — 식대만큼 더 주지 않는다
+    expect(meal.gross).toBe(4_000_000);
+    expect(meal.gross).toBe(plain.gross);
+    // 과세 대상(4대보험·근로소득세 기준)만 비과세분만큼 준다
+    expect(meal.taxableGross).toBe(3_700_000);
+    expect(meal.wageTaxable).toBe(plain.wageTaxable - 300_000);
+    expect(meal.healthD).toBe(floor10(3_700_000 * DEFAULT_RATES_2025.health));
+    // 통상시급은 식대를 포함한 임금 전체 기준 — 식대를 다시 더하지 않는다(월급제가 총액으로 나누는 것과 같다)
+    expect(meal.hourlyWage).toBe(Math.round(4_000_000 / MONTH_HOURS));
+    expect(meal.hourlyWage).toBe(plain.hourlyWage);
+    expect(meal.notes.some((n) => n.includes("비율급 4,000,000원에 비과세 300,000원(식대·차량유지비)이 포함"))).toBe(true);
+  });
+
+  it("상한이 있으면 식대는 이 회사가 주는 몫 안에서 뗀다 — 상한 500만 = 비율급 435만 + 식대 20만 + 보상금 45만", () => {
+    const r = computePayroll(
+      ratioEmp({ nonCompeteRatio: 0.03, mealAllow: 200_000 }),
+      { classRevenue: 15_000_000 },
+      DEFAULT_RATES_2025,
+      taxTable
+    );
+    expect(r.ratioPayTotal).toBe(6_000_000);
+    expect(r.nonCompeteP).toBe(450_000);
+    expect(r.bizIncomeP).toBe(1_450_000); // 식대와 무관 — 600만 + 45만 − 500만
+    expect(r.mealP).toBe(200_000);
+    expect(r.baseP).toBe(5_800_000); // 600만 − 식대 20만 (별도 사업장 몫 145만 포함)
+    // 이 회사가 주는 돈 = 비율급 근로분 435만 + 식대 20만 + 보상금 45만 = 상한 500만
+    expect(r.baseP - r.bizIncomeP + r.mealP + r.nonCompeteP).toBe(5_000_000);
+    expect(r.gross).toBe(6_450_000); // 식대가 없을 때와 같다
+    // 자동 공제 계산의 기준 = 500만 − 비과세 식대 20만
+    expect(r.wageTaxable).toBe(4_800_000);
+    expect(r.hourlyWage).toBe(Math.round(5_000_000 / MONTH_HOURS));
+    expect(r.net).toBe(r.gross - r.totalDeduct);
+  });
+
+  it("보장급(§47)으로 올려 준 달도 식대는 그 안에 있다", () => {
+    const r = computePayroll(
+      ratioEmp({ ratioMinGuarantee: 6_000_000, mealAllow: 200_000 }),
+      { classRevenue: 10_000_000 },
+      DEFAULT_RATES_2025,
+      taxTable
+    );
+    expect(r.ratioPayTotal).toBe(6_000_000); // 산식 400만 → 보장급 600만
+    expect(r.bizIncomeP).toBe(0);
+    expect(r.baseP).toBe(5_800_000);
+    expect(r.mealP).toBe(200_000);
+    expect(r.gross).toBe(6_000_000);
+  });
+
+  it("이 회사가 주는 비율급이 식대보다 적은 달은 그 몫만큼만 비과세로 잡는다 — 비율급보다 많은 식대는 없다", () => {
+    // 매출 30만 × 40% = 12만 < 식대 20만
+    const low = computePayroll(
+      ratioEmp({ ratioWageCap: null, mealAllow: 200_000, carAllow: 100_000 }),
+      { classRevenue: 300_000 },
+      DEFAULT_RATES_2025,
+      taxTable
+    );
+    expect(low.ratioPayTotal).toBe(120_000);
+    expect(low.mealP).toBe(120_000);
+    expect(low.carP).toBe(0);
+    expect(low.baseP).toBe(0);
+    expect(low.gross).toBe(120_000);
+    expect(low.notes.some((n) => n.startsWith("⚠️ 이 회사가 지급하는 비율급(120,000원)"))).toBe(true);
+    // 보상금만으로 상한을 넘는 극단 — 비율급 전부가 별도 사업장 몫이라 식대를 뗄 자리가 없다
+    // (별도 사업장 몫은 사업소득이라 근로소득 비과세인 식대가 설 수 없다)
+    const edge = computePayroll(
+      ratioEmp({ nonCompeteRatio: 0.03, mealAllow: 200_000 }),
+      { classRevenue: 200_000_000 },
+      DEFAULT_RATES_2025,
+      taxTable
+    );
+    expect(edge.nonCompeteP).toBe(6_000_000); // 상한 500만보다 많다
+    expect(edge.bizIncomeP).toBe(80_000_000); // 비율급 전부
+    expect(edge.mealP).toBe(0);
+    expect(edge.baseP).toBe(80_000_000);
+    expect(edge.ratioPayTotal).toBe(80_000_000);
+  });
+
+  it("위탁(완전비율제)은 그대로다 — 식대는 수수료 위에 별도 가산이고 비율급 전체 값은 없다", () => {
+    const r = computePayroll(
+      ratioEmp({ ratioEmployee: false, incomeType: "FREELANCE", ratioWageCap: null, mealAllow: 200_000 }),
+      { classRevenue: 10_000_000 },
+      DEFAULT_RATES_2025,
+      taxTable
+    );
+    expect(r.baseP).toBe(4_000_000);
+    expect(r.mealP).toBe(200_000);
+    expect(r.gross).toBe(4_200_000);
+    expect(r.ratioPayTotal).toBeNull();
   });
 
   it("보장급(§47)으로 올려 준 몫은 상한과 무관하게 이 회사의 임금 — 상한은 ① 산식 금액에만 건다", () => {
@@ -386,6 +501,34 @@ describe("recordSplit — 지급처별로 가르기", () => {
       biz: null,
     });
     expect(recordSplit({ gross: 100, totalDeduct: 10, net: 90, bizIncomeP: 0, bizTaxD: 0 }).biz).toBeNull();
+  });
+});
+
+describe("ratioFormSwitch — 폼에서 계약 형태(위탁 ↔ 근로)를 바꿀 때 함께 옮기는 값(v1.58.2)", () => {
+  it("근로계약으로 바꾸면 4대보험 + 식대 기본 20만원(비율급 안에 든 금액)", () => {
+    expect(ratioFormSwitch(true, { mealAllow: 0, carAllow: 0 })).toEqual({
+      ratioEmployee: true,
+      incomeType: "EMPLOYEE",
+      mealAllow: DEFAULT_RATIO_MEAL_ALLOW,
+      carAllow: 0,
+    });
+    expect(DEFAULT_RATIO_MEAL_ALLOW).toBe(200_000);
+    // 폼 값은 문자열로 오기도 한다 — 빈칸도 기본값으로
+    expect(ratioFormSwitch(true, { mealAllow: "", carAllow: "" }).mealAllow).toBe(200_000);
+  });
+  it("이미 적어 둔 식대·차량유지비는 덮지 않는다", () => {
+    expect(ratioFormSwitch(true, { mealAllow: "150000", carAllow: 100_000 })).toMatchObject({
+      mealAllow: 150_000,
+      carAllow: 100_000,
+    });
+  });
+  it("위탁으로 바꾸면 사업소득 + 식대·차량유지비를 비운다 — 칸이 없는 값이 수수료 위에 얹히지 않게", () => {
+    expect(ratioFormSwitch(false, { mealAllow: 200_000, carAllow: 100_000 })).toEqual({
+      ratioEmployee: false,
+      incomeType: "FREELANCE",
+      mealAllow: 0,
+      carAllow: 0,
+    });
   });
 });
 

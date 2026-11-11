@@ -14,6 +14,7 @@ import {
 import FixedHoursFields from "./FixedHoursFields";
 import ContractorField from "./ContractorField";
 import RatioContractField from "./RatioContractField";
+import { ratioFormSwitch } from "@/lib/ratio-employee";
 import NonCompeteField from "./NonCompeteField";
 import NonCompeteRatioField from "./NonCompeteRatioField";
 import { probationMonthOptions, probationOptionLabel } from "@/lib/probation";
@@ -319,8 +320,13 @@ export default function ContractEditForm({
         <RatioContractField
           employee={!!f.ratioEmployee}
           cap={f.ratioWageCap}
-          onEmployee={(v) => setF((p: any) => ({ ...p, ratioEmployee: v, incomeType: v ? "EMPLOYEE" : "FREELANCE" }))}
+          // 근로계약이면 4대보험(근로소득) + 식대(비과세·비율급에 포함) 기본값, 위탁이면 사업소득 + 식대 비움
+          onEmployee={(v) => setF((p: any) => ({ ...p, ...ratioFormSwitch(v, p) }))}
           onCap={(v) => set("ratioWageCap", v)}
+          meal={f.mealAllow}
+          car={f.carAllow}
+          onMeal={(v) => set("mealAllow", v)}
+          onCar={(v) => set("carAllow", v)}
         />
       ) : (
         <ContractorField

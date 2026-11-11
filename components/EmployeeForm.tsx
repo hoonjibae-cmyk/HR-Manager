@@ -22,6 +22,7 @@ import {
 import NonCompeteField from "./NonCompeteField";
 import NonCompeteRatioField from "./NonCompeteRatioField";
 import RatioContractField from "./RatioContractField";
+import { ratioFormSwitch } from "@/lib/ratio-employee";
 
 const DAYS: ScheduleDay["day"][] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -162,8 +163,12 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           ...f,
           leaveEligible,
           ratioPercent: f.ratioPercent !== "" ? Number(f.ratioPercent) / 100 : null,
-          // 완전비율제 화면에는 식대·수당 칸이 없다 — 숨은 기본값(식대 20만)이 비율급 위에 얹히지 않게 비운다
-          ...(f.payScheme === "RATIO" ? { mealAllow: 0, carAllow: 0, positionAllow: 0 } : {}),
+          // 완전비율제 화면에는 직책수당 칸이 없고, 위탁에는 식대·차량유지비 칸도 없다 — 숨은 기본값(식대 20만)이
+          // 수수료 위에 얹히지 않게 비운다. 비율제 근로계약의 식대·차량유지비는 화면에 칸이 있어 그대로 보낸다
+          // (비율급 안에 든 금액 — RatioContractField)
+          ...(f.payScheme === "RATIO"
+            ? { positionAllow: 0, ...(ratioWorker ? {} : { mealAllow: 0, carAllow: 0 }) }
+            : {}),
           incomeType: ratioWorker ? "EMPLOYEE" : f.incomeType,
           isContractor: f.payScheme === "RATIO" ? !ratioWorker : undefined,
           ratioEmployee: ratioWorker,
@@ -432,8 +437,13 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
             <RatioContractField
               employee={ratioWorker}
               cap={f.ratioWageCap}
-              onEmployee={(v) => setF((p: any) => ({ ...p, ratioEmployee: v, incomeType: v ? "EMPLOYEE" : "FREELANCE" }))}
+              // 근로계약이면 4대보험(근로소득) + 식대(비과세·비율급에 포함) 기본값, 위탁이면 사업소득 + 식대 비움
+              onEmployee={(v) => setF((p: any) => ({ ...p, ...ratioFormSwitch(v, p) }))}
               onCap={(v) => set("ratioWageCap", v)}
+              meal={f.mealAllow}
+              car={f.carAllow}
+              onMeal={(v) => set("mealAllow", v)}
+              onCar={(v) => set("carAllow", v)}
             />
           </div>
         )}

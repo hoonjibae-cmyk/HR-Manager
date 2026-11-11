@@ -19,7 +19,15 @@ import {
   type DocContract,
   type DocEmployee,
 } from "./documents";
-import { payslipHtml, bizIncomeSlipHtml, revenueDetailHtml, wageCapOf, type DocPayroll } from "./documents-pay";
+import {
+  payslipHtml,
+  bizIncomeSlipHtml,
+  revenueDetailHtml,
+  wageCapOf,
+  ratioPayTotalOf,
+  ratioNonTaxInsideOf,
+  type DocPayroll,
+} from "./documents-pay";
 import { computePayroll, DEFAULT_RATES_2025, type EmployeePayInput } from "./payroll";
 import { buildExportRow, buildBizExportRow, reconcileRow, buildPayrollExportWorkbook, type ExportPayrollRecord } from "./payroll-export";
 import { buildTransferRows, type TransferPayrollRecord } from "./bank-transfer";
@@ -120,9 +128,28 @@ describe("근로계약서 — 비율급 근로계약", () => {
     expect(h).not.toContain("별도 사업자");
   });
 
-  it("정액 수당이 있으면 비율급과 별도로 적는다(없으면 그 줄이 없다)", () => {
-    expect(html({ mealAllow: 200_000 })).toContain("제①항의 임금과 별도로 매월 식대(비과세) 200,000원을 지급한다");
-    expect(html()).not.toContain("제①항의 임금과 별도로 매월");
+  it("식대·차량유지비(비과세)는 제①항의 임금 '안에' 든 금액으로 적는다 — 별도로 지급한다고 적지 않는다(v1.58.2)", () => {
+    const h = html({ mealAllow: 200_000 });
+    expect(h).toContain("④ 제①항의 임금에는 식대(비과세) 월 200,000원이 포함되어 있다.");
+    // '별도로' 라고 적으면 갑이 비율급 위에 식대를 더 주기로 약속한 계약서가 된다
+    expect(h).not.toContain("제①항의 임금과 별도로 매월");
+    expect(h).not.toContain("식대(비과세) 200,000원을 지급한다");
+    // 차량유지비도 같은 줄에 함께 적는다
+    expect(html({ mealAllow: 200_000, carAllow: 100_000 })).toContain(
+      "④ 제①항의 임금에는 식대(비과세) 월 200,000원 · 차량유지비(비과세) 월 100,000원이 포함되어 있다."
+    );
+    // 없으면 그 줄이 없다
+    expect(html()).not.toContain("포함되어 있다. ⑤");
+    expect(html()).not.toContain("식대(비과세)");
+  });
+
+  it("직책수당만 비율급과 별도로 얹는다 — 식대와 한 항에 나란히 적되 문장을 가른다", () => {
+    expect(html({ positionAllow: 300_000 })).toContain(
+      "④ \"갑\"은 제①항의 임금과 별도로 매월 직책수당 300,000원을 지급한다."
+    );
+    expect(html({ mealAllow: 200_000, positionAllow: 300_000 })).toContain(
+      "④ 제①항의 임금에는 식대(비과세) 월 200,000원이 포함되어 있다. \"갑\"은 제①항의 임금과 별도로 매월 직책수당 300,000원을 지급한다. ⑤"
+    );
   });
 
   it("보장급이 있으면 §47 로 적는다", () => {
@@ -177,9 +204,12 @@ describe("근로계약서(비율급) — 경업금지 보상금 비율(v1.58)", 
     expect(h).toContain(
       "⑤ 제①항에 따라 산정한 금액과 제④항의 경업금지 보상금을 합한 금액이 월 5,000,000원을 넘는 경우 그 넘는 부분은 제①항의 금액에서 빼어 이 계약에 따른 임금에 포함하지 아니하며, \"을\"과 별도 사업자(가상아카데미) 사이의 계약에 따라 그 사업자가 지급한다."
     );
-    expect(h).toContain("4대보험료와 근로소득세는 이 계약에 따른 임금과 경업금지 보상금에 대하여만 공제한다.");
+    // 공제 문장에는 보상금을 적지 않는다(v1.58.2) — 보상금에서 4대보험·근로소득세를 뗀다고 계약서가 못박지 않게.
+    // 보상금이 없는 계약과 같은 문장이다
+    expect(h).toContain("그 사업자가 지급한다. 4대보험료와 근로소득세는 이 계약에 따른 임금에 대하여만 공제한다. ⑥");
+    expect(h).not.toContain("임금과 경업금지 보상금에 대하여만 공제");
     expect(h).not.toContain("상한과 관계없이");
-    // 정액 수당이 끼면 보상금 항이 ⑤ 로 밀리고, 상한 조항이 가리키는 번호도 함께 밀린다
+    // 식대 항이 끼면 보상금 항이 ⑤ 로 밀리고, 상한 조항이 가리키는 번호도 함께 밀린다
     const m = html({ nonCompeteRatio: 0.03, mealAllow: 200_000 });
     expect(m).toContain("⑤ \"갑\"은 제①항의 임금과 별도로, 제8조에 따른");
     expect(m).toContain("⑥ 제①항에 따라 산정한 금액과 제⑤항의 경업금지 보상금을 합한 금액이");
@@ -426,6 +456,9 @@ describe("명세서 — 지급처별로 가른다", () => {
     expect(h).toContain("근로계약서 제8조의 경업금지 의무에 대한 대가로 비율급과 별도로 지급");
     expect(h).toContain("수강료 입금액 15,000,000원 × 3% = 450,000원");
     expect(h).toContain("근로소득 상한은 비율급과 이 보상금을 합친 금액에 걸리고");
+    // 보상금이 과세인지 비과세인지는 명세서가 단정하지 않는다(v1.58.2 — 세무 처리는 세무대리인 지정값에 따른다)
+    expect(h).not.toContain("근로소득으로 과세되고");
+    expect(h).not.toContain("4대보험 산정에 포함됩니다");
     expect(h).toContain(
       "이 달 비율급 6,000,000원과 경업금지 보상금 450,000원의 합계 중 근로소득 상한 5,000,000원을 넘는 1,450,000원은 비율급에서 빼어 이 명세서의 임금이 아니며"
     );
@@ -507,6 +540,123 @@ describe("명세서 — 지급처별로 가른다", () => {
     expect(h).toContain("임금명세서의 비율급(근로계약서 제4조) 산출 근거");
     expect(h).toContain("1,000,000원은 별도 사업장");
     expect(h).not.toContain("위탁계약이므로");
+  });
+});
+
+/* ───────────── 식대(비과세)는 비율급 안에 (v1.58.2) ───────────── */
+
+describe("식대(비과세)는 비율급 안에 든 금액 — 명세서·내역서·세무 시트·퇴직급여(v1.58.2)", () => {
+  // 매출 1,500만 × 40% = 비율급 600만, 보상금 3% = 45만, 상한 500만, 식대 20만
+  const rr = computePayroll(
+    { ...payInput, mealAllow: 200_000, nonCompeteRatio: 0.03 },
+    { classRevenue: 15_000_000 },
+    DEFAULT_RATES_2025,
+    []
+  );
+  // 급여 산정(payroll-service)이 남기는 근거 그대로
+  const pr: DocPayroll = {
+    ...payroll,
+    ...rr,
+    breakdown: JSON.stringify({
+      nonCompete: { ratio: 0.03, revenue: 15_000_000 },
+      wageCap: { cap: 5_000_000, withNonCompete: true },
+      ratioPay: { total: rr.ratioPayTotal },
+    }),
+  };
+
+  it("임금명세서 — 비율급(근로소득분) 435만 + 식대 20만 + 보상금 45만 = 지급액 계 500만(상한 그대로)", () => {
+    const html = payslipHtml({ employee: emp(), payroll: pr, company, bizPayer: payer });
+    const c = cells(html);
+    expect(c).toContain("비율급(근로소득분) 4,350,000");
+    expect(c).toContain("식대(비과세) 200,000");
+    expect(c).toContain("경업금지 보상금 450,000");
+    expect(c).toContain("지급액 계 5,000,000"); // 식대만큼 늘지 않는다
+    const h = text(html);
+    expect(h).toContain(
+      "식대(비과세) 200,000원은 근로계약서 제4조에 따라 비율급에 포함된 금액입니다 — 비과세 항목이라 나누어 적었을 뿐 따로 더해 지급하는 돈이 아니며"
+    );
+    // 상한 각주의 '이 달 비율급' 은 식대를 뗀 나머지(baseP 580만)가 아니라 비율급 전체(600만)다
+    expect(h).toContain(
+      "이 달 비율급 6,000,000원과 경업금지 보상금 450,000원의 합계 중 근로소득 상한 5,000,000원을 넘는 1,450,000원은 비율급에서 빼어"
+    );
+    expect(h).not.toContain("이 달 비율급 5,800,000원");
+  });
+
+  it("ratioPayTotalOf — 새 기록은 산정이 남긴 비율급 전체, 옛 기록(근거 없음)은 baseP 가 곧 전체", () => {
+    expect(pr.baseP).toBe(5_800_000);
+    expect(ratioPayTotalOf(pr)).toBe(6_000_000);
+    expect(ratioPayTotalOf({ baseP: 6_000_000, breakdown: "{}" })).toBe(6_000_000);
+    expect(ratioPayTotalOf({ baseP: 6_000_000, breakdown: null })).toBe(6_000_000);
+    expect(ratioPayTotalOf({ baseP: 6_000_000, breakdown: "깨진 값" })).toBe(6_000_000);
+    // 상한 근거(breakdown.wageCap)가 없는 새 기록도 비율급 전체에서 되짚는다(식대를 뗀 baseP 가 아니라)
+    expect(
+      wageCapOf({ ...pr, breakdown: JSON.stringify({ ratioPay: { total: 6_000_000 } }) })
+    ).toEqual({ cap: 6_000_000 - 1_450_000, withNonCompete: false });
+  });
+
+  it("식대를 비율급 위에 얹던 옛 기록에는 '포함된 금액' 각주를 적지 않는다 — 그때는 실제로 더해 지급했다", () => {
+    const old: DocPayroll = { ...pr, breakdown: JSON.stringify({ wageCap: { cap: 5_000_000, withNonCompete: true } }) };
+    expect(text(payslipHtml({ employee: emp(), payroll: old, company, bizPayer: payer }))).not.toContain(
+      "비율급에 포함된 금액입니다"
+    );
+    expect(ratioNonTaxInsideOf(old)).toBe(0);
+    expect(ratioNonTaxInsideOf(pr)).toBe(200_000);
+  });
+
+  it("산정 내역서 — 이 비율급에 식대가 포함되어 있어 명세서에는 나누어 적는다고 밝힌다", () => {
+    const base = {
+      employee: emp(),
+      company,
+      year: 2026,
+      month: 10,
+      students: [{ seq: 1, status: "ENROLLED", name: "가상학생", revenue: 15_000_000 } as any],
+      percent: 0.4,
+      kind: "WAGE" as const,
+      wageCap: 5_000_000,
+      bizIncome: rr.bizIncomeP,
+      wageCapWithNonCompete: true,
+    };
+    const withMeal = text(revenueDetailHtml({ ...base, nonTaxInside: ratioNonTaxInsideOf(pr) }));
+    expect(withMeal).toContain(
+      "이 비율급에는 식대 등 비과세 200,000원이 포함되어 있어, 임금명세서에는 그만큼을 비과세 항목으로 나누어 적습니다."
+    );
+    expect(text(revenueDetailHtml(base))).not.toContain("식대 등 비과세");
+  });
+
+  it("세무 시트 — 총계는 상한 500만 그대로이고, 비고에 그 달 보상금 금액을 적는다", () => {
+    const row = buildExportRow(
+      {
+        ...(rr as any),
+        incomeType: "EMPLOYEE",
+        payScheme: "RATIO",
+        extraHours: 0,
+        overtimeHours: 0,
+        nightHours: 0,
+        holidayHours: 0,
+        holidayOverHours: 0,
+        parkingD: 0,
+        expenseD: 0,
+        employee: { name: "가상강사", empNo: "E900", rrn: "900101-1234567" },
+      },
+      "11월 07일"
+    );
+    expect(row.grossTotal).toBe(5_000_000);
+    expect(row.basePay).toBe(5_000_000);
+    expect(reconcileRow(row)).toBe(0);
+    // 과세 여부는 적지 않고 '얼마가 보상금인지' 만 적는다 — 처리는 세무대리인의 몫
+    expect(row.note).toBe("4대보험(근로소득) · 상한 초과분 별도 시트 · 경업금지 보상금 450,000원 포함");
+    // 보상금이 없는 달은 비고가 예전 그대로다
+    expect(buildExportRow(exportRec(), "11월 07일").note).toBe("4대보험(근로소득) · 상한 초과분 별도 시트");
+  });
+
+  it("퇴직급여 산정기준 — 식대를 넣든 빼든 비율급을 두 번 세지 않는다", () => {
+    const items = { ...(rr as any), extraHours: 0, overtimeHours: 0, nightHours: 0, holidayHours: 0, holidayOverHours: 0 };
+    const b = severanceBase(items);
+    // 이 회사가 주는 임금 = 비율급 근로분 435만 + 식대 20만 + 보상금 45만 = 500만
+    expect(b.base).toBe(5_000_000);
+    expect(b.included).toContainEqual(["기본급", 4_350_000]);
+    expect(b.included).toContainEqual(["식대", 200_000]);
+    expect(b.excluded.some(([label, amt]) => label.includes("별도 사업장") && amt === 1_450_000)).toBe(true);
   });
 });
 

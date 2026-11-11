@@ -94,6 +94,39 @@ function head(c: DocCompany, extra = ""): string {
 }
 
 /**
+ * 비율제 근로계약 기록의 **그 달 비율급 전체**(근로계약서 제4조 ① 산식 금액 또는 §47 보장급 — 식대·차량유지비와
+ * 별도 사업장 몫을 가르기 전).
+ *
+ * v1.58.2 부터 식대·차량유지비(비과세)는 비율급 **안에서** 떼므로 기록의 `baseP` 는 그만큼 준 나머지이고,
+ * 전체는 산정이 남긴 `breakdown.ratioPay.total` 에 있다. 그 값이 없는 옛 기록은 식대를 비율급 위에 얹던
+ * 때의 것이라 `baseP` 가 곧 비율급 전체다.
+ */
+export function ratioPayTotalOf(p: Pick<DocPayroll, "baseP" | "breakdown">): number {
+  try {
+    const t = p.breakdown ? JSON.parse(p.breakdown)?.ratioPay?.total : null;
+    if (typeof t === "number" && Number.isFinite(t)) return t;
+  } catch {}
+  return p.baseP;
+}
+
+/** 식대·차량유지비가 비율급 **안에** 든 기록인가(v1.58.2 부터의 비율제 근로계약 기록) — 명세서 각주가 갈린다 */
+function ratioNonTaxInside(p: Pick<DocPayroll, "breakdown">): boolean {
+  try {
+    return typeof (p.breakdown ? JSON.parse(p.breakdown)?.ratioPay?.total : null) === "number";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 비율급 **안에서** 비과세로 구분해 실은 식대·차량유지비의 합 — 산정 내역서가 「이 비율급에는 식대가 포함되어
+ * 있다」고 적는 데 쓴다. 식대를 비율급 위에 얹던 옛 기록이나 비과세분이 없는 달은 0.
+ */
+export function ratioNonTaxInsideOf(p: Pick<DocPayroll, "mealP" | "carP" | "breakdown">): number {
+  return ratioNonTaxInside(p) ? Math.max((p.mealP || 0) + (p.carP || 0), 0) : 0;
+}
+
+/**
  * 그 달 근로소득 상한의 기준 — 급여 산정이 남긴 값(`breakdown.wageCap`)을 쓴다(나중에 계약이 바뀌어도 그 달
  * 기준이 남는다). 그 값이 없는 옛 기록(v1.58.0 이전 — 상한이 비율급에만 걸렸다)은 비율급 − 별도 사업장 몫으로 되짚는다.
  * 별도 사업장 몫이 없는 달은 null.
@@ -110,7 +143,7 @@ export function wageCapOf(
     wc = null;
   }
   if (wc && typeof wc.cap === "number" && wc.cap > 0) return { cap: wc.cap, withNonCompete: wc.withNonCompete === true };
-  return { cap: p.baseP - biz, withNonCompete: false };
+  return { cap: ratioPayTotalOf(p) - biz, withNonCompete: false };
 }
 
 /** 시급제 휴일근로 날짜별 근거 — 산정 때 저장한 breakdown.holidayWork 를 그대로 편다 */
@@ -481,15 +514,31 @@ export function payslipHtml(args: {
         : ""
     }
     ${(() => {
+      // 식대·차량유지비(비과세)는 비율급 **안에** 든 금액이다(근로계약서 제4조) — 항목을 나눠 적었을 뿐 얹어 주는
+      // 돈이 아니라는 것을 밝힌다. 안 적으면 '비율급' 줄이 매출 × 비율과 달라 보인다.
+      // 식대를 비율급 위에 얹던 옛 기록(v1.58.1 이하)에는 적지 않는다 — 그때는 실제로 더해 지급했다.
+      if (!ratioWorker || !ratioNonTaxInside(p)) return "";
+      const parts = [
+        p.mealP ? `식대(비과세) ${won(p.mealP)}원` : "",
+        p.carP ? `차량유지비(비과세) ${won(p.carP)}원` : "",
+      ].filter(Boolean);
+      if (!parts.length) return "";
+      return `<div class="small">· ${parts.join(" · ")}은 근로계약서 제4조에 따라 비율급에 <b>포함된</b> 금액입니다 — 비과세 항목이라 나누어 적었을 뿐 따로 더해 지급하는 돈이 아니며, 위 ${esc(
+        baseLabel
+      )}과 합한 금액이 이 달 이 회사가 지급하는 비율급입니다.</div>`;
+    })()}
+    ${(() => {
       if (!bizPart) return "";
       // 상한은 비율급(과, 보상금이 있으면 보상금을 합친 금액)에 걸리고 넘는 만큼 비율급에서 빠진다 — 그 달 기준을 그대로 적는다
-      const wc = wageCapOf(p) ?? { cap: p.baseP - bizPart, withNonCompete: false };
+      // 비율급 전체 — 기록의 baseP 는 식대·차량유지비를 뗀 나머지라 산정이 남긴 전체 금액을 쓴다
+      const ratioTotal = ratioPayTotalOf(p);
+      const wc = wageCapOf(p) ?? { cap: ratioTotal - bizPart, withNonCompete: false };
       const ncp = p.nonCompeteP ?? 0;
       const payerTxt = args.bizPayer ? `(${esc(args.bizPayer.name)})` : "";
       const basis =
         wc.withNonCompete && ncp > 0
-          ? `이 달 비율급 ${won(p.baseP)}원과 경업금지 보상금 ${won(ncp)}원의 합계 중`
-          : `이 달 비율급 ${won(p.baseP)}원 중`;
+          ? `이 달 비율급 ${won(ratioTotal)}원과 경업금지 보상금 ${won(ncp)}원의 합계 중`
+          : `이 달 비율급 ${won(ratioTotal)}원 중`;
       return `<div class="small">· ${basis} 근로소득 상한 <b>${won(wc.cap)}원</b>을 넘는 <b>${won(bizPart)}원</b>은${
         wc.withNonCompete && ncp > 0 ? " 비율급에서 빼어" : ""
       } 이 명세서의 임금이 아니며, 별도 사업장${payerTxt}이 사업소득으로 지급합니다 — 함께 첨부한 「사업소득 지급명세서」를 보세요.</div>`;
@@ -530,8 +579,10 @@ export function payslipHtml(args: {
     ${(() => {
       if (!p.nonCompeteP) return "";
       // 완전비율제는 매출 × 비율로 수수료·비율급과 **별도로** 주는 돈이다 — 위탁은 강의위탁계약서 제5조·제7조
-      // (사업소득 3.3%), 비율제 근로자는 근로계약서 제8조(근로소득 — 상한은 비율급과 합쳐 잰다). 월급제는 월 급여 총액
+      // (사업소득 3.3%), 비율제 근로자는 근로계약서 제8조(상한은 비율급과 합쳐 잰다). 월급제는 월 급여 총액
       // 안에서 기본급과 구분한 몫이다(근로계약서 제8조).
+      // **근로계약의 보상금이 과세인지 비과세인지는 적지 않는다**(2026-11) — 세무 처리는 세무대리인이 정하고
+      // 공제 금액은 그 지정값(수동 공제)에 따른다. 명세서가 '과세' 라고 못박으면 그 처리와 어긋난 문서가 된다.
       if (p.payScheme === "RATIO") {
         const nc = bd?.nonCompete;
         const formula =
@@ -539,14 +590,14 @@ export function payslipHtml(args: {
             ? ` — 수강료 입금액 ${won(nc.revenue)}원 × ${ratioPctLabel(nc.ratio)} = <b>${won(p.nonCompeteP)}원</b>`
             : "";
         if (p.ratioEmployee)
-          return `<div class="small">· 경업금지 보상금: 근로계약서 제8조의 경업금지 의무에 대한 대가로 비율급과 별도로 지급하는 금액입니다${formula}. 근로소득으로 과세되고 4대보험 산정에 포함됩니다${
+          return `<div class="small">· 경업금지 보상금: 근로계약서 제8조의 경업금지 의무에 대한 대가로 비율급과 별도로 지급하는 금액입니다${formula}.${
             (p.bizIncomeP ?? 0) > 0
-              ? " — 근로소득 상한은 비율급과 이 보상금을 합친 금액에 걸리고, 넘는 만큼은 비율급에서 빠져 별도 사업장이 지급합니다(보상금은 이 회사가 지급)"
+              ? " 근로소득 상한은 비율급과 이 보상금을 합친 금액에 걸리고, 넘는 만큼은 비율급에서 빠져 별도 사업장이 지급합니다(보상금은 이 회사가 지급)."
               : ""
-          }. 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 조).</div>`;
+          } 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 조).</div>`;
         return `<div class="small">· 경업금지 보상금: 강의위탁계약서 제5조·제7조에 따라 경업금지 의무의 대가로 용역수수료와 별도로 지급하는 금액입니다${formula}. 수수료와 함께 사업소득세(3.3%)를 원천징수하며, 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 계약서 제7조).</div>`;
       }
-      return `<div class="small">· 경업금지 보상금: 근로계약서 제8조의 경업금지 의무에 대한 대가로, 월 급여 총액 중 기본급과 구분해 지급하는 금액입니다(과세). 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 조).</div>`;
+      return `<div class="small">· 경업금지 보상금: 근로계약서 제8조의 경업금지 의무에 대한 대가로, 월 급여 총액 중 기본급과 구분해 지급하는 금액입니다. 경업금지 의무를 위반하면 지급받은 보상금 전액을 반환해야 합니다(같은 조).</div>`;
     })()}
     ${p.retentionD ? `<div class="small">· 퇴직유보금: 인센티브 원천액의 8.3%(1/12)로, 확인서에 따라 별도 통장으로 송금·적립됩니다.</div>` : ""}
     ${
@@ -587,7 +638,7 @@ export function bizIncomeSlipHtml(args: {
   const payDate = args.payDate ?? new Date();
   // 그 달 실제로 가른 상한 — 보상금이 있으면 비율급과 보상금의 합에 걸렸다(근로계약서 제4조)
   const wc = wageCapOf(p);
-  const cap = wc?.cap ?? p.baseP - biz.gross;
+  const cap = wc?.cap ?? ratioPayTotalOf(p) - biz.gross;
   const withNc = !!wc?.withNonCompete && (p.nonCompeteP ?? 0) > 0;
   const basisTxt = withNc ? "비율급과 경업금지 보상금의 합계" : "비율급";
   const head2 = head({ name: payer.name, ceo: payer.ceo, bizNo: payer.bizNo, address: payer.address, phone: payer.phone }, `<div class="small">지급일: ${ymdKo(payDate)}</div><div class="badge">사업소득(3.3%)</div>`);
@@ -865,6 +916,8 @@ export function revenueDetailHtml(args: {
   bizIncome?: number | null;
   /** 상한이 비율급과 경업금지 보상금의 합에 걸렸는가 */
   wageCapWithNonCompete?: boolean;
+  /** 비율급 안에서 비과세로 구분해 실은 식대·차량유지비 — 임금명세서의 '비율급' 줄이 이만큼 적은 이유를 적는다 (WAGE) */
+  nonTaxInside?: number | null;
   monthlyPay?: number | null; // 월급여 (인센티브 계약자 교차확인용)
   retention?: number | null; // 퇴직유보금
   /** 명단에 적혀 있던 배분율 — 계약과 다르면 경고를 적는다 */
@@ -954,6 +1007,12 @@ export function revenueDetailHtml(args: {
                   args.wageCapWithNonCompete ? " — 경업금지 보상금과 합친 금액 기준" : ""
                 })을 넘는 <b>${won(overCap)}원</b>은 별도 사업장의 「사업소득 지급명세서」에 실립니다.`
               : ""
+          }${
+            // 식대·차량유지비(비과세)는 이 비율급 안에 든 금액이다 — 명세서는 그만큼을 따로 적으므로 두 문서의
+            // '비율급' 숫자가 왜 다른지 여기서 밝힌다
+            (args.nonTaxInside ?? 0) > 0
+              ? ` 이 비율급에는 식대 등 비과세 <b>${won(args.nonTaxInside!)}원</b>이 포함되어 있어, 임금명세서에는 그만큼을 비과세 항목으로 나누어 적습니다.`
+              : ""
           }</div>`
         : `<div class="small">· 본 내역서는 급여명세서의 <b>인센티브</b> 항목 산출 근거로 첨부됩니다.</div>`
     }
@@ -984,6 +1043,8 @@ export function rosterDetailHtml(args: {
   bizIncome?: number | null;
   /** 상한이 비율급과 경업금지 보상금의 합에 걸렸는가 — WAGE */
   wageCapWithNonCompete?: boolean;
+  /** 비율급 안에서 비과세로 구분해 실은 식대·차량유지비 — WAGE */
+  nonTaxInside?: number | null;
   /** 매출 기준 — 계약상 배분율 */
   percent?: number | null;
   sheetPercent?: number | null;
@@ -1007,6 +1068,7 @@ export function rosterDetailHtml(args: {
       wageCap: args.wageCap ?? null,
       bizIncome: args.bizIncome ?? null,
       wageCapWithNonCompete: args.wageCapWithNonCompete ?? false,
+      nonTaxInside: args.nonTaxInside ?? null,
       sheetPercent: args.sheetPercent ?? null,
       monthlyPay: args.monthlyPay ?? null,
       retention: args.retention ?? null,
