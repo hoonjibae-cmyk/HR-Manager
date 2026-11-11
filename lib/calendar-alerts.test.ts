@@ -44,9 +44,51 @@ describe("calendar alert content", () => {
     expect(formatRecurrence(sample)).toContain("America/Los_Angeles 현지시간 기준");
   });
   it("includes the creator rather than mislabeling the calendar organizer", () => {
-    expect(buildCalendarAlert(target, "created", event, null).text).toContain("등록자: 홍길동 (teacher@example.com)");
-    expect(buildCalendarAlert(target, "created", { ...event, creator: { email: "teacher@example.com" } }, null, "홍길동").text).toContain("등록자: 홍길동 (teacher@example.com)");
+    expect(buildCalendarAlert(target, "updated", event, null).text).toContain("등록자: 홍길동 (teacher@example.com)");
+    expect(buildCalendarAlert(target, "updated", { ...event, creator: { email: "teacher@example.com" } }, null, "홍길동").text).toContain("등록자: 홍길동 (teacher@example.com)");
     expect(buildCalendarAlert(target, "created", { ...event, creator: {} }, null).text).toContain("등록자: 확인 불가");
+  });
+  it("matches the requested compact academic-calendar registration format exactly", () => {
+    const msg = buildCalendarAlert(target, "created", {
+      ...event, summary: "영어시험",
+      start: { date: "2026-12-09" }, end: { date: "2026-12-10" },
+      creator: { displayName: "홍길동", email: "creator@example.com" },
+      htmlLink: "https://www.google.com/calendar/event?eid=test",
+    }, null);
+    const expected = "일정: 영어시험 · 일시: 2026년 12월 9일 (종일) 등록자: 홍길동";
+    expect(msg.text).toBe(expected);
+    expect(msg.blocks).toEqual([{ type: "section", text: { type: "plain_text", text: expected, emoji: false } }]);
+    expect(msg.unfurl_links).toBe(false);
+    expect(msg.unfurl_media).toBe(false);
+  });
+  it("uses the HR-resolved name without exposing an email fallback", () => {
+    const emailOnly = { ...event, creator: { email: "teacher@example.com" } };
+    expect(buildCalendarAlert(target, "created", emailOnly, null, "홍길동").text).toContain("등록자: 홍길동");
+    expect(buildCalendarAlert(target, "created", emailOnly, null).text).toContain("등록자: 확인 불가");
+    expect(buildCalendarAlert(target, "created", { ...emailOnly, creator: { ...emailOnly.creator, displayName: "teacher@example.com" } }, null, "홍길동").text).toContain("등록자: 홍길동");
+    for (const name of [undefined, "teacher@example.com"]) {
+      expect(JSON.stringify(buildCalendarAlert(target, "created", emailOnly, null, name))).not.toContain("teacher@example.com");
+    }
+  });
+  it("preserves recurrence and the start date within the compact time field", () => {
+    const msg = buildCalendarAlert(target, "created", { ...event, recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10"] }, null);
+    expect(msg.text).toContain("일시: 매주 화요일 오후 2시~오후 3시, 총 10회 반복 (시작: 2026년 10월 27일");
+    expect(msg.text).not.toContain("캘린더:");
+    expect(msg.blocks).toHaveLength(1);
+  });
+  it("leaves other alert types and the administrators' calendar unchanged", () => {
+    for (const [calendar, kind] of [
+      [target, "updated"], [target, "cancelled"], [CALENDAR_ALERT_TARGETS[1], "created"],
+    ] as const) {
+      const msg = buildCalendarAlert(calendar, kind, { ...event, htmlLink: "https://calendar.google.com/calendar/event?eid=test" }, null);
+      expect(msg.text).toContain(`캘린더: ${calendar.name}`);
+      expect(msg.text).toContain("등록자: 홍길동 (teacher@example.com)");
+      expect(msg.text).toContain("장소: 회의실");
+      expect(msg.text).toContain("내용: 회의 내용");
+      expect(msg.blocks).toHaveLength(3);
+      expect(msg.blocks[0]).toMatchObject({ type: "header" });
+      expect(msg.blocks[2]).toMatchObject({ type: "context" });
+    }
   });
   it("shows before/after values including cleared description and location", () => {
     const previous = normalizeAlertEvent(event);
@@ -80,7 +122,7 @@ describe("calendar alert content", () => {
   it("never turns event-provided Slack mentions into active markup", () => {
     const msg = buildCalendarAlert(target, "created", { ...event, summary: "<!channel> <@U123>", description: "<b>내용</b>" }, null);
     expect(msg.text).not.toContain("<!channel>");
-    expect(msg.blocks[1]).toMatchObject({ text: { type: "plain_text" } });
+    expect(msg.blocks[0]).toMatchObject({ text: { type: "plain_text" } });
   });
   it("uses distinct durable delivery IDs for the same event across real revisions", () => {
     expect(alertId(target.calendarId, event.id, "v1")).not.toBe(alertId(target.calendarId, event.id, "v2"));
