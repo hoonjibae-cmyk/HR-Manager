@@ -4,7 +4,7 @@ import { won, wonUnit, ymd, ymdKo, josa } from "./format";
 import { INCOME_TYPE_LABEL } from "./constants";
 import { logoImg, stampImg, type DocCompany, type DocEmployee } from "./documents";
 import { carryoverNotice, type CarryoverInfo } from "./leave-payout";
-import { ratioPctLabel } from "./non-compete";
+import { ratioPctLabel, nonCompeteNonTaxOf } from "./non-compete";
 import { recordSplit, type BizPayer } from "./ratio-employee";
 import {
   summarizeIncentive,
@@ -178,6 +178,10 @@ export function payslipHtml(args: {
   const split = recordSplit(p);
   const bizPart = split.biz?.gross ?? 0;
   const baseLabel = ratioWorker ? (bizPart ? "비율급(근로소득분)" : "비율급") : "기본급";
+  // 경업금지 보상금을 비과세로 처리해 산정한 달(회사 설정 스위치 — 그 달 산정이 남긴 표시)에는 식대처럼
+  // 「(비과세)」를 붙인다. 지금 설정이 아니라 **그 달 실제로 산정한 방식**이다 — 4대보험·근로소득세 기준에서
+  // 빠진 항목이 무엇인지 명세서만 보고 알 수 있어야 한다. 과세로 산정한 달은 예전 그대로 아무 표시도 없다
+  const ncLabel = nonCompeteNonTaxOf(p.breakdown) ? "경업금지 보상금(비과세)" : "경업금지 보상금";
 
   const payRows = (
     [
@@ -191,7 +195,7 @@ export function payslipHtml(args: {
       ["직책수당", p.positionP],
       ["식대(비과세)", p.mealP],
       ["차량유지비(비과세)", p.carP],
-      ["경업금지 보상금", p.nonCompeteP ?? 0],
+      [ncLabel, p.nonCompeteP ?? 0],
       ["인센티브", p.incentiveP],
       ["상여금", p.bonusP],
       ["연차미사용수당", p.unusedLeaveP],
@@ -581,8 +585,9 @@ export function payslipHtml(args: {
       // 완전비율제는 매출 × 비율로 수수료·비율급과 **별도로** 주는 돈이다 — 위탁은 강의위탁계약서 제5조·제7조
       // (사업소득 3.3%), 비율제 근로자는 근로계약서 제8조(상한은 비율급과 합쳐 잰다). 월급제는 월 급여 총액
       // 안에서 기본급과 구분한 몫이다(근로계약서 제8조).
-      // **근로계약의 보상금이 과세인지 비과세인지는 적지 않는다**(2026-11) — 세무 처리는 세무대리인이 정하고
-      // 공제 금액은 그 지정값(수동 공제)에 따른다. 명세서가 '과세' 라고 못박으면 그 처리와 어긋난 문서가 된다.
+      // **이 각주는 보상금이 과세인지 비과세인지 적지 않는다**(2026-11) — 세무 처리는 회사 설정 스위치
+      // (`Company.nonCompeteNonTax`)와 세무대리인 지정값이 정한다. 각주가 '과세' 라고 못박으면 그 처리와 어긋난
+      // 문서가 된다. 비과세로 처리해 산정한 달은 위 지급 항목의 라벨이 「경업금지 보상금(비과세)」로 알린다(ncLabel).
       if (p.payScheme === "RATIO") {
         const nc = bd?.nonCompete;
         const formula =

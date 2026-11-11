@@ -18,6 +18,7 @@ import {
   type SheetCleanupPlan,
 } from "./payroll-roster";
 import { logActivity } from "./activity";
+import { withNonCompeteNonTax } from "./non-compete";
 import { employeesWithMonthTerms } from "./contracts";
 
 export interface PayrollInputMap {
@@ -665,6 +666,10 @@ export async function runPayrollMonth(
           r.bizIncomeP > 0
             ? { cap: payInput.ratioWageCap ?? null, withNonCompete: (r.nonCompeteP ?? 0) > 0 }
             : null,
+        // 경업금지 보상금을 비과세로 처리해 산정한 달(회사 설정 — `rates.nonCompeteNonTax`) — 명세서가 그 줄을
+        // 「경업금지 보상금(비과세)」로, 세무 시트 비고가 「비과세 처리」로 적는다. 설정을 나중에 바꿔도 그 달
+        // 실제로 산정한 방식이 기록에 남는다(다시 산정하면 그때 설정을 따른다). 과세로 산정한 달은 적지 않는다
+        ...(r.nonCompeteNonTaxP > 0 ? { nonCompeteNonTax: true } : {}),
         // 비율제 근로계약의 그 달 비율급 전체(식대·차량유지비와 별도 사업장 몫을 가르기 전) — 기록의 baseP 는
         // 비과세분을 뗀 나머지라, 명세서가 '이 달 비율급 X원' 을 적을 때 이 값을 쓴다. **이 값이 있는 기록은
         // 식대가 비율급 안에 든 기록**이다(v1.58.2 부터. 그 전 기록은 식대를 비율급 위에 얹었다 — ratioPayTotalOf)
@@ -839,6 +844,7 @@ export async function updateDeductions(payrollId: number, patch: DeductionPatch)
   // AUTO 모드면 법정공제를 엔진으로 재산출 (저장된 월 입력값 사용)
   let auto = statutoryOf(rec);
   let retentionAuto = rec.retentionD;
+  let breakdownFixed: string | null | undefined = undefined; // undefined = 변경 없음
   if (deductMode === "AUTO") {
     const [rates, tax] = await Promise.all([getActiveRates(), getTaxTable()]);
     // 월중 계약 갱신이 있었던 달이면 동일한 가중 조건으로 재산출
@@ -866,6 +872,9 @@ export async function updateDeductions(payrollId: number, patch: DeductionPatch)
     );
     auto = statutoryOf(r);
     retentionAuto = r.retentionD;
+    // 방금 재산출한 방식(경업금지 보상금 비과세 처리 여부)을 기록의 표시에 맞춘다 — 일괄 산정 뒤에 설정을
+    // 바꾸고 이 행만 자동 계산으로 돌리면 공제는 새 방식인데 명세서 라벨은 옛 방식으로 남는다
+    breakdownFixed = withNonCompeteNonTax(rec.breakdown, r.nonCompeteNonTaxP > 0);
   }
 
   const num = (v: number | undefined, fallback: number) =>
@@ -912,6 +921,7 @@ export async function updateDeductions(payrollId: number, patch: DeductionPatch)
       deductMode,
       ...fin,
       ...(otherItemsJson !== undefined ? { otherItems: otherItemsJson } : {}),
+      ...(typeof breakdownFixed === "string" && breakdownFixed !== rec.breakdown ? { breakdown: breakdownFixed } : {}),
     },
   });
 }

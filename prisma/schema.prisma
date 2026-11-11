@@ -96,6 +96,11 @@ model Company {
   /// 별도 사업장 용역위탁계약서의 「위탁 용역」 — 그 사업장을 위해 실제로 하는 일. 비우면 기본 문구
   /// (lib/ratio-employee.ts DEFAULT_BIZ_PAYER_SERVICE)
   bizPayerService      String?
+  /// 경업금지 보상금을 **비과세로 처리**할지(2026-11 요청 — 회사가 복리후생비 성격으로 보기로 한 경우).
+  /// 켜면 근로계약(4대보험)의 보상금을 자동 공제 계산이 4대보험·근로소득세 기준에서 빼고, 명세서·세무 자료에
+  /// 비과세로 적는다. 위탁(3.3%)에는 닿지 않는다. **기본 꺼짐** — 소득세법 §12 3호의 비과세 근로소득은 열거된
+  /// 항목뿐이라 세무대리인 확인이 먼저다(틀리면 소득세·4대보험 추징). lib/non-compete.ts · lib/payroll.ts
+  nonCompeteNonTax     Boolean  @default(false)
   updatedAt            DateTime @updatedAt
 }
 

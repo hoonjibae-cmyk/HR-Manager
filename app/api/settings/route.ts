@@ -110,8 +110,16 @@ export async function PATCH(req: Request) {
             .filter((k) => k in data)
             .map((k) => [k, String(data[k] ?? "").trim() || null])
         ),
+        // 경업금지 보상금 비과세 처리(자동 공제 계산·명세서·세무 자료) — 보낸 때만 고친다. 참(true)일 때만 켠다
+        // (문자열 "false" 같은 값이 켜짐으로 읽히지 않게). lib/non-compete.ts
+        ...("nonCompeteNonTax" in data ? { nonCompeteNonTax: data.nonCompeteNonTax === true } : {}),
       },
-      create: { id: 1, ...data, payday: Number(data.payday) || 7 },
+      create: {
+        id: 1,
+        ...data,
+        payday: Number(data.payday) || 7,
+        ...("nonCompeteNonTax" in data ? { nonCompeteNonTax: data.nonCompeteNonTax === true } : {}),
+      },
     });
     return NextResponse.json(c);
   }

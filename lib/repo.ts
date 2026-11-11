@@ -68,10 +68,21 @@ export async function getCompany(): Promise<
   };
 }
 
+/**
+ * 법정공제 산정 기준 — 요율(`InsuranceRate`) + **경업금지 보상금 비과세 처리 방침**(`Company.nonCompeteNonTax`).
+ *
+ * 방침을 요율과 한 객체로 돌려주는 이유: 급여를 산정하는 자리가 셋(일괄 산정 `runPayrollMonth`, 공제 재산출
+ * `updateDeductions`, 미리보기 `previewPayroll`)이고 모두 이 함수의 결과를 엔진에 넘긴다 — 따로 읽게 두면
+ * 어느 한 자리만 스위치를 놓쳐 '자동 계산으로 바꿨더니 금액이 달라지는' 일이 생긴다.
+ */
 export async function getActiveRates(): Promise<InsuranceRates> {
-  const r =
-    (await prisma.insuranceRate.findFirst({ where: { isActive: true }, orderBy: { year: "desc" } })) ??
-    (await prisma.insuranceRate.findFirst({ orderBy: { year: "desc" } }));
+  const [active, company] = await Promise.all([
+    prisma.insuranceRate.findFirst({ where: { isActive: true }, orderBy: { year: "desc" } }),
+    prisma.company.findFirst({ where: { id: 1 }, select: { nonCompeteNonTax: true } }),
+  ]);
+  const r = active ?? (await prisma.insuranceRate.findFirst({ orderBy: { year: "desc" } }));
+  // 설정 행이 없으면 꺼진 것으로 본다(기본 — 과세 급여에 넣는다)
+  const nonCompeteNonTax = company?.nonCompeteNonTax === true;
   if (!r) {
     return {
       nationalPension: 0.045,
@@ -82,6 +93,7 @@ export async function getActiveRates(): Promise<InsuranceRates> {
       businessIncomeTax: 0.03,
       pensionBaseMin: 390000,
       pensionBaseMax: 6170000,
+      nonCompeteNonTax,
     };
   }
   return {
@@ -93,6 +105,7 @@ export async function getActiveRates(): Promise<InsuranceRates> {
     businessIncomeTax: r.businessIncomeTax,
     pensionBaseMin: r.pensionBaseMin,
     pensionBaseMax: r.pensionBaseMax,
+    nonCompeteNonTax,
   };
 }
 

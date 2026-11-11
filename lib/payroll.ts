@@ -16,6 +16,14 @@ export interface InsuranceRates {
   businessIncomeTax: number; // 0.03
   pensionBaseMin: number;
   pensionBaseMax: number;
+  /**
+   * **경업금지 보상금을 비과세로 처리**하는가 — 회사 설정(`Company.nonCompeteNonTax`, 설정 → 회사 정보).
+   * 요율은 아니지만 '법정공제를 어떻게 잴 것인가' 의 방침이라 요율과 함께 싣는다 — 급여를 산정하는 자리
+   * (일괄 산정·공제 재산출·미리보기)가 모두 이 객체를 받으므로 어느 한 자리도 빠지지 않는다(`getActiveRates`).
+   * 켜면 근로계약(4대보험)의 보상금을 식대처럼 비과세로 보고 4대보험·근로소득세 기준에서 뺀다.
+   * 위탁(3.3%)에는 닿지 않는다. 없거나 false 면 과세 급여에 넣는다(기본).
+   */
+  nonCompeteNonTax?: boolean;
 }
 
 export const DEFAULT_RATES_2025: InsuranceRates = {
@@ -219,9 +227,16 @@ export interface PayrollResult {
   ratioPayTotal: number | null;
   /**
    * 경업금지 보상금 — 월급제는 총액에서 떼어 낸 몫(그만큼 baseP 가 줄었다), 완전비율제는 매출 × 비율(별도 가산).
-   * 자동 공제 계산에서는 과세 급여에 넣는다(아래 `taxableGross`) — 세무 처리는 세무대리인 지정값(수동 공제)에 따른다.
+   * 자동 공제 계산에서는 과세 급여에 넣는다(아래 `taxableGross`) — 회사 설정으로 비과세 처리를 켜면 뺀다
+   * (`nonCompeteNonTaxP`).
    */
   nonCompeteP: number;
+  /**
+   * 이 산정에서 **비과세로 처리한 경업금지 보상금**(회사 설정 `rates.nonCompeteNonTax` 가 켜져 있고 4대보험에
+   * 드는 근로계약일 때 `nonCompeteP`, 아니면 0). 그만큼 4대보험·근로소득세 기준에서 빠졌다 — 명세서·세무
+   * 자료가 이 값을 보고 「비과세」로 적는다.
+   */
+  nonCompeteNonTaxP: number;
   incentiveP: number;
   bonusP: number;
   unusedLeaveP: number;
@@ -947,11 +962,19 @@ export function computePayroll(
     bonusP +
     unusedLeaveP;
 
-  // 비과세 총액 (식대 + 차량유지비 + 기타). **경업금지 보상금은 여기 넣지 않는다** — 자동 공제 계산(AUTO)은
-  // 보상금을 과세 급여로 보고 4대보험·소득세를 잰다(소득세법 §12 3호의 비과세 근로소득은 열거된 항목뿐이라
-  // 덜 떼는 쪽으로 틀리지 않게). 세무대리인이 다르게 처리하기로 했으면 수동 공제(MANUAL — 4대보험 직원의
-  // 기본값)로 그 지정값을 넣는다. 세무 시트의 비고가 그 달 보상금 금액을 따로 적어 준다(payroll-export).
-  const nonTax = mealP + carP + (emp.nonTaxTotal ?? 0);
+  // 비과세 총액 (식대 + 차량유지비 + 기타).
+  // **경업금지 보상금은 기본으로 여기 넣지 않는다** — 자동 공제 계산(AUTO)은 보상금을 과세 급여로 보고
+  // 4대보험·소득세를 잰다(소득세법 §12 3호의 비과세 근로소득은 열거된 항목뿐이라 덜 떼는 쪽으로 틀리지 않게).
+  // **회사 설정으로 비과세 처리를 켜면**(v1.59 — `rates.nonCompeteNonTax`) 식대처럼 넣는다. 4대보험에 드는
+  // 근로계약만이다 — 위탁·사업소득(3.3%)은 지급총액에 그대로 3.3% 가 걸려 비과세 근로소득이 설 자리가 없다.
+  // 통상시급·퇴직급여 산정기준·지급액 계는 그대로다(세무 처리만 달라진다).
+  const nonCompeteNonTaxP = rates.nonCompeteNonTax === true && insured ? Math.max(nonCompeteP, 0) : 0;
+  if (nonCompeteNonTaxP > 0)
+    notes.push(
+      `경업금지 보상금 ${nonCompeteNonTaxP.toLocaleString()}원을 비과세로 처리했습니다 — 회사 설정` +
+        `(4대보험·근로소득세 기준에서 제외). 세무대리인과 확인한 처리여야 합니다.`
+    );
+  const nonTax = mealP + carP + (emp.nonTaxTotal ?? 0) + nonCompeteNonTaxP;
   const taxableGross = Math.max(gross - nonTax, 0);
 
   // --- 공제 ---
@@ -1047,6 +1070,7 @@ export function computePayroll(
     carP,
     ratioPayTotal,
     nonCompeteP,
+    nonCompeteNonTaxP,
     incentiveP,
     bonusP,
     unusedLeaveP,

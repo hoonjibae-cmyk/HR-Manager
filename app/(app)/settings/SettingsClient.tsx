@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { DEFAULT_BIZ_PAYER_SERVICE } from "@/lib/ratio-employee";
+import { NON_COMPETE_NONTAX_RISK_NOTE } from "@/lib/non-compete";
 
 export default function SettingsClient() {
   const [data, setData] = useState<any>(null);
@@ -145,6 +146,8 @@ function CompanyCard({ company, onSave }: any) {
     bizPayerAddress: company?.bizPayerAddress ?? "",
     bizPayerAlias: company?.bizPayerAlias ?? "",
     bizPayerService: company?.bizPayerService ?? "",
+    // 경업금지 보상금 비과세 처리 — 자동 공제 계산·명세서·세무 자료가 따른다(lib/non-compete.ts). 기본 꺼짐
+    nonCompeteNonTax: company?.nonCompeteNonTax === true,
   });
   const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v }));
   // 필수 넷 중 일부만 찼으면 명세서·이체 파일을 만들 수 없다 — 빠진 것을 바로 보여 준다
@@ -207,6 +210,36 @@ function CompanyCard({ company, onSave }: any) {
             있습니다.
           </p>
         )}
+      </div>
+      <div className="mt-5 border-t border-slate-100 pt-4">
+        <h3 className="font-semibold text-slate-700 text-sm">경업금지 보상금 — 세무 처리</h3>
+        <label className="flex items-start gap-2 mt-2 cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5 w-4 h-4"
+            checked={!!f.nonCompeteNonTax}
+            onChange={(e) => set("nonCompeteNonTax", e.target.checked)}
+          />
+          <span className="text-sm text-slate-700 break-keep">
+            <b>경업금지 보상금을 비과세로 처리</b>
+            <span className="block text-xs text-slate-500 mt-0.5 leading-relaxed">
+              켜면 근로계약(월급제·월급+인센티브·비율제 근로계약)의 경업금지 보상금을 식대처럼 비과세로 보고,
+              공제 <b>자동 계산</b>이 4대보험·근로소득세 기준에서 뺍니다. 명세서에는 「경업금지 보상금(비과세)」로,
+              세무사무소 제출자료 비고에는 「비과세 처리」로 적힙니다. 위탁계약(3.3%)에는 적용되지 않습니다.
+            </span>
+          </span>
+        </label>
+        <ul className="text-xs text-slate-500 mt-2 ml-6 list-disc space-y-0.5 leading-relaxed break-keep">
+          <li>
+            세무사 지정값을 직접 넣는 <b>수동 공제</b> 직원은 공제 금액이 바뀌지 않습니다(표기만 바뀝니다) — 세무사에게
+            보상금을 빼고 계산해 달라고 따로 알려야 합니다.
+          </li>
+          <li>
+            이미 산정한 달은 <b>급여 일괄 산정</b>을 다시 눌러야 반영되고, 명세서를 발송한 달은 바뀌지 않습니다.
+          </li>
+          <li>지급액·통상시급·퇴직급여 산정기준은 그대로입니다. 달라지는 것은 세무 처리뿐입니다.</li>
+        </ul>
+        <p className="text-xs text-amber-700 mt-2 ml-6 leading-relaxed break-keep">⚠ {NON_COMPETE_NONTAX_RISK_NOTE}</p>
       </div>
       <div className="flex justify-end mt-4"><button className="btn-primary" onClick={() => onSave(f)}>저장</button></div>
     </div>

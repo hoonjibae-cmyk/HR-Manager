@@ -11,8 +11,10 @@ import {
   computePayroll,
   inclusiveWageBreakdown,
   blendWageTerms,
+  floor10,
   DEFAULT_RATES_2025,
   type EmployeePayInput,
+  type InsuranceRates,
   type TaxBracketRow,
 } from "./payroll";
 import type { ScheduleDay } from "./constants";
@@ -26,6 +28,9 @@ import {
   nonCompetePayError,
   nonCompetePreview,
   resolveNonCompetePay,
+  nonCompeteNonTaxOf,
+  withNonCompeteNonTax,
+  NON_COMPETE_NONTAX_RISK_NOTE,
 } from "./non-compete";
 import {
   contractHtml,
@@ -473,6 +478,17 @@ describe("급여명세서 — 보상금 줄과 각주", () => {
     expect(t).not.toContain("금액입니다(과세)");
   });
 
+  it("비과세로 처리해 산정한 달은 「경업금지 보상금(비과세)」 — 그 달 산정이 남긴 표시를 따른다(v1.59)", () => {
+    const flagged = { ...payroll, breakdown: JSON.stringify({ nonCompeteNonTax: true }) };
+    const t = spaced(payslipHtml({ employee: emp(), payroll: flagged, company }));
+    expect(t).toContain("경업금지 보상금(비과세) 300,000");
+    // 과세로 산정한 달(표시 없음)은 예전 그대로 — 아무 표시도 붙지 않는다
+    const plain = spaced(payslipHtml({ employee: emp(), payroll, company }));
+    expect(plain).toContain("경업금지 보상금 300,000");
+    expect(plain).not.toContain("경업금지 보상금(비과세)");
+    expect(spaced(payslipHtml({ employee: emp(), payroll: { ...payroll, breakdown: "{}" }, company }))).toBe(plain.replace(/\s+/g, " "));
+  });
+
   it("없으면 예전 명세서 그대로 ('임금 항목', 경업금지 언급 없음)", () => {
     const html = payslipHtml({ employee: emp(), payroll: { ...payroll, nonCompeteP: 0, baseP: 3_300_000 }, company });
     expect(html).toContain("임금 항목");
@@ -480,6 +496,148 @@ describe("급여명세서 — 보상금 줄과 각주", () => {
     // 옛 기록(필드 자체가 없음)도 같다
     const { nonCompeteP: _omit, ...legacy } = payroll;
     expect(payslipHtml({ employee: emp(), payroll: { ...legacy, baseP: 3_300_000 }, company })).toBe(html);
+  });
+});
+
+/* ───────────────────────── 비과세 처리 스위치 (v1.59) ───────────────────────── */
+
+describe("비과세 처리 스위치 — 회사 설정(rates.nonCompeteNonTax)", () => {
+  const ON: InsuranceRates = { ...DEFAULT_RATES_2025, nonCompeteNonTax: true };
+  const withNc: EmployeePayInput = { ...prof, nonCompetePay: 300_000 };
+  const off = computePayroll(withNc, {}, DEFAULT_RATES_2025, taxTable);
+  const on = computePayroll(withNc, {}, ON, taxTable);
+
+  it("꺼짐이 기본 — 없음·false 모두 보상금을 과세 급여에 넣는다(지금까지와 같다)", () => {
+    expect(off.nonCompeteNonTaxP).toBe(0);
+    expect(off.taxableGross).toBe(3_300_000); // 350만 − 식대 20만
+    expect(computePayroll(withNc, {}, { ...DEFAULT_RATES_2025, nonCompeteNonTax: false }, taxTable)).toEqual(off);
+  });
+
+  it("켜면 보상금을 식대처럼 비과세로 — 4대보험·근로소득세 기준에서 빠진다", () => {
+    expect(on.nonCompeteNonTaxP).toBe(300_000);
+    expect(on.taxableGross).toBe(3_000_000); // 350만 − 식대 20만 − 보상금 30만
+    expect(on.wageTaxable).toBe(3_000_000);
+    expect(on.pensionD).toBe(floor10(3_000_000 * DEFAULT_RATES_2025.nationalPension));
+    expect(on.healthD).toBe(floor10(3_000_000 * DEFAULT_RATES_2025.health));
+    expect(on.employmentD).toBe(floor10(3_000_000 * DEFAULT_RATES_2025.employment));
+    // 과세 급여가 300만인 사람(보상금 없이 총액 320만)과 법정공제가 같다
+    const same = computePayroll({ ...prof, baseWage: 3_200_000 }, {}, DEFAULT_RATES_2025, taxTable);
+    expect(same.taxableGross).toBe(3_000_000);
+    for (const k of ["pensionD", "healthD", "longTermD", "employmentD", "incomeTaxD", "localTaxD"] as const)
+      expect(on[k]).toBe(same[k]);
+    // 떼는 돈이 줄어 실수령이 는다
+    expect(on.totalDeduct).toBeLessThan(off.totalDeduct);
+    expect(on.net).toBe(on.gross - on.totalDeduct);
+  });
+
+  it("달라지는 것은 세무 처리뿐 — 지급액 계·기본급·보상금·통상시급은 그대로", () => {
+    for (const k of ["gross", "baseP", "nonCompeteP", "mealP", "hourlyWage", "overtimeP", "nightP"] as const)
+      expect(on[k]).toBe(off[k]);
+    // 통상시급이 그대로라 연장·연차수당도 같다
+    const m = { overtimeHours: 10, unusedLeaveDays: 2 };
+    const a = computePayroll(withNc, m, DEFAULT_RATES_2025, taxTable);
+    const b = computePayroll(withNc, m, ON, taxTable);
+    expect(b.overtimeP).toBe(a.overtimeP);
+    expect(b.unusedLeaveP).toBe(a.unusedLeaveP);
+    expect(b.gross).toBe(a.gross);
+  });
+
+  it("보상금이 없는 직원은 켜도 꺼도 같다", () => {
+    expect(computePayroll(prof, {}, ON, taxTable)).toEqual(computePayroll(prof, {}, DEFAULT_RATES_2025, taxTable));
+  });
+
+  it("위탁·사업소득(3.3%)에는 닿지 않는다 — 지급총액에 그대로 3.3%", () => {
+    // 위탁(완전비율제) — 수수료 40% + 보상금 3%
+    const tut: EmployeePayInput = {
+      ...prof,
+      payScheme: "RATIO",
+      incomeType: "FREELANCE",
+      baseWage: 0,
+      mealAllow: 0,
+      ratioPercent: 0.4,
+      nonCompeteRatio: 0.03,
+    };
+    const m = { classRevenue: 10_000_000 };
+    const a = computePayroll(tut, m, DEFAULT_RATES_2025, taxTable);
+    const b = computePayroll(tut, m, ON, taxTable);
+    expect(a.nonCompeteP).toBe(300_000);
+    expect(b).toEqual(a);
+    expect(b.nonCompeteNonTaxP).toBe(0);
+    expect(b.incomeTaxD).toBe(floor10(4_300_000 * 0.03));
+    // 세무구분이 사업소득인 월급제(위탁 아님)도 3.3% 라 닿지 않는다
+    const free: EmployeePayInput = { ...withNc, incomeType: "FREELANCE" };
+    expect(computePayroll(free, {}, ON, taxTable)).toEqual(computePayroll(free, {}, DEFAULT_RATES_2025, taxTable));
+  });
+
+  it("비율제 근로계약 — 상한 500만이면 자동 계산 기준이 500만 − 식대 20만 − 보상금 45만 = 435만", () => {
+    const ratio: EmployeePayInput = {
+      incomeType: "EMPLOYEE",
+      payScheme: "RATIO",
+      ratioEmployee: true,
+      ratioWageCap: 5_000_000,
+      baseWage: 0,
+      positionAllow: 0,
+      mealAllow: 200_000,
+      carAllow: 0,
+      dependents: 1,
+      schedule: instructor,
+      ratioPercent: 0.4,
+      nonCompeteRatio: 0.03,
+    };
+    const m = { classRevenue: 15_000_000 };
+    const a = computePayroll(ratio, m, DEFAULT_RATES_2025, taxTable);
+    const b = computePayroll(ratio, m, ON, taxTable);
+    expect(a.wageTaxable).toBe(4_800_000);
+    expect(b.wageTaxable).toBe(4_350_000);
+    expect(b.nonCompeteNonTaxP).toBe(450_000);
+    expect(b.healthD).toBe(floor10(4_350_000 * DEFAULT_RATES_2025.health));
+    // 상한 가르기·별도 사업장 몫·지급액은 그대로 — 상한은 여전히 비율급 + 보상금의 합에 걸린다
+    for (const k of ["gross", "baseP", "mealP", "nonCompeteP", "bizIncomeP", "bizTaxD", "bizLocalTaxD", "hourlyWage"] as const)
+      expect(b[k]).toBe(a[k]);
+    expect(b.bizIncomeP).toBe(1_450_000);
+  });
+
+  it("산정 근거에 비과세로 처리했다는 사실을 남긴다(꺼져 있으면 없다)", () => {
+    expect(on.notes.some((n) => n.includes("경업금지 보상금 300,000원을 비과세로 처리했습니다"))).toBe(true);
+    expect(off.notes.some((n) => n.includes("비과세로 처리했습니다"))).toBe(false);
+  });
+});
+
+describe("그 달 산정이 남긴 비과세 처리 표시 — nonCompeteNonTaxOf / withNonCompeteNonTax", () => {
+  it("표시가 있을 때만 참 — 없음·깨진 값·다른 형은 거짓", () => {
+    expect(nonCompeteNonTaxOf(JSON.stringify({ nonCompeteNonTax: true }))).toBe(true);
+    expect(nonCompeteNonTaxOf("{}")).toBe(false);
+    expect(nonCompeteNonTaxOf(null)).toBe(false);
+    expect(nonCompeteNonTaxOf(undefined)).toBe(false);
+    expect(nonCompeteNonTaxOf("깨진 값")).toBe(false);
+    expect(nonCompeteNonTaxOf(JSON.stringify({ nonCompeteNonTax: "true" }))).toBe(false);
+  });
+
+  it("표시만 고치고 다른 근거는 그대로 둔다", () => {
+    const base = JSON.stringify({ notes: ["가"], taxableGross: 3_300_000 });
+    const turnedOn = withNonCompeteNonTax(base, true)!;
+    expect(JSON.parse(turnedOn)).toEqual({ notes: ["가"], taxableGross: 3_300_000, nonCompeteNonTax: true });
+    expect(JSON.parse(withNonCompeteNonTax(turnedOn, false)!)).toEqual({ notes: ["가"], taxableGross: 3_300_000 });
+  });
+
+  it("바뀔 것이 없으면 받은 값을 그대로 돌려준다(쓸데없이 다시 쓰지 않는다)", () => {
+    const base = JSON.stringify({ notes: [] });
+    expect(withNonCompeteNonTax(base, false)).toBe(base);
+    const flagged = JSON.stringify({ nonCompeteNonTax: true });
+    expect(withNonCompeteNonTax(flagged, true)).toBe(flagged);
+    expect(withNonCompeteNonTax(null, false)).toBeNull();
+  });
+
+  it("근거가 비어 있으면 표시만 담아 만들고, 못 읽는 값은 건드리지 않는다", () => {
+    expect(withNonCompeteNonTax(null, true)).toBe('{"nonCompeteNonTax":true}');
+    expect(withNonCompeteNonTax("깨진 값", true)).toBe("깨진 값");
+    expect(withNonCompeteNonTax("[1,2]", true)).toBe("[1,2]");
+  });
+
+  it("설정 화면의 경고는 무엇을 떠안는지와 먼저 할 일을 함께 적는다", () => {
+    expect(NON_COMPETE_NONTAX_RISK_NOTE).toContain("열거된 항목");
+    expect(NON_COMPETE_NONTAX_RISK_NOTE).toContain("추징");
+    expect(NON_COMPETE_NONTAX_RISK_NOTE).toContain("세무대리인과 확인한 뒤");
   });
 });
 

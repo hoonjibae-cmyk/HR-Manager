@@ -268,6 +268,29 @@ describe("비고 — 경업금지 보상금 금액(v1.58.2)", () => {
     expect(r.grossTotal).toBe(3_500_000);
     expect(reconcileRow(r)).toBe(0);
   });
+  it("비과세로 처리해 산정한 달은 그 사실을 함께 적는다 — 세무대리인이 이 금액을 빼고 계산해야 한다(v1.59)", () => {
+    const r = buildExportRow(
+      rec({
+        name: "가상강사",
+        incomeType: "EMPLOYEE",
+        nonCompeteP: 300_000,
+        gross: 3_500_000,
+        net: 3_500_000,
+        breakdown: JSON.stringify({ nonCompeteNonTax: true }),
+      }),
+      "-"
+    );
+    expect(r.note).toBe("4대보험(근로소득) · 경업금지 보상금 300,000원 포함(비과세 처리)");
+    // 표시가 없거나 깨진 근거면 금액만 적는다(과세로 산정한 달)
+    for (const breakdown of ["{}", null, "깨진 값", undefined])
+      expect(
+        buildExportRow(
+          rec({ name: "가상강사", incomeType: "EMPLOYEE", nonCompeteP: 300_000, gross: 1, net: 1, breakdown }),
+          "-"
+        ).note
+      ).toBe("4대보험(근로소득) · 경업금지 보상금 300,000원 포함");
+  });
+
   it("위탁(3.3%)도 같은 자리에 적는다", () => {
     const r = buildExportRow(rec({ name: "가상위탁", nonCompeteP: 150_000, gross: 2_150_000, net: 2_150_000 }), "-");
     expect(r.note).toBe("3.3% 적용 · 경업금지 보상금 150,000원 포함");
