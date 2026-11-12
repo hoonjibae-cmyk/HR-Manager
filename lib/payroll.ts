@@ -82,7 +82,8 @@ export interface EmployeePayInput {
   /**
    * 경업금지 보상금 비율(0.03 = 3%) — **완전비율제**(위탁·비율제 근로계약). 수수료·비율급과 같은 매출에
    * 곱해 그것과 **별도로** 더해 지급한다. 위탁이면 사업소득 3.3% 가 함께 걸리고, 비율제 근로자면
-   * 근로소득 상한 안에 비율급과 함께 센다(자동 공제 계산은 과세 급여에 넣는다). lib/non-compete.ts
+   * 근로계약서 제4조의 상한 안에 비율급과 함께 세되 **통상시급에는 넣지 않는다**(자동 공제 계산은 회사 설정에
+   * 따라 과세 급여에 넣거나 뺀다 — `InsuranceRates.nonCompeteNonTax`). lib/non-compete.ts
    */
   nonCompeteRatio?: number | null;
   // 비율제
@@ -227,9 +228,9 @@ export interface PayrollResult {
    */
   ratioPayTotal: number | null;
   /**
-   * 비율제 근로자의 **통상시급 산정 근거** — `wage`(그 달 이 회사가 지급하는 금액: 이 회사 몫 비율급[식대·차량유지비
-   * 포함] + 경업금지 보상금. 근로소득 상한이 걸린 달은 상한액) ÷ `hours`(월 환산시간 = (소정+주휴)×4.345, 근로시간표가
-   * 비면 209). 근로계약서 제4조 ③ 이 적는 식이고, 명세서가 이 두 값을 그대로 적는다. 비율제 근로자가 아니면 null.
+   * 비율제 근로자의 **통상시급 산정 근거** — `wage`(그 달 이 회사가 지급하는 **임금**: 이 회사 몫 비율급[식대·차량유지비
+   * 포함]. **경업금지 보상금은 들어가지 않는다** — 근로의 대가가 아니다) ÷ `hours`(월 환산시간 = (소정+주휴)×4.345,
+   * 근로시간표가 비면 209). 근로계약서 제4조 ③ 이 적는 식이고, 명세서가 이 두 값을 그대로 적는다. 비율제 근로자가 아니면 null.
    */
   ratioHourlyBasis: { wage: number; hours: number } | null;
   /**
@@ -753,15 +754,16 @@ export function computePayroll(
     // 경업금지 보상금 — 같은 매출에 보상금 비율을 곱해 수수료·비율급과 **별도로** 더한다.
     // 최저보장은 수수료·비율급에만 걸린다 — 보상금은 언제나 매출 × 비율이다.
     //  · 위탁: 강의위탁계약서 제5조·제7조(사업소득 3.3% 가 함께 걸린다).
-    //  · 비율제 근로계약: 근로계약서 제4조·제8조. **근로소득 상한 안에 함께 센다**(아래).
+    //  · 비율제 근로계약: 근로계약서 제4조·제8조. **상한 안에 함께 센다**(아래).
     //    경업금지 약정의 당사자가 이 회사라 보상금 자체는 언제나 이 회사가 준다.
+    //    **통상시급에는 넣지 않는다**(아래 통상시급 — 보상금은 근로의 대가가 아니다).
     const ncr = emp.nonCompeteRatio ?? 0;
     if (ncr > 0) {
       nonCompeteP = round0(rev * ncr);
       notes.push(
         `경업금지 보상금: 매출 ${rev.toLocaleString()}원 × ${(ncr * 100).toFixed(1)}% = ${nonCompeteP.toLocaleString()}원 ` +
           (ratioWorker
-            ? `(비율급과 별도 · 근로계약서 제8조 — 근로소득 상한은 비율급과 합쳐 잰다)`
+            ? `(비율급과 별도 · 근로계약서 제8조 — 제4조의 상한은 비율급과 합쳐 재고, 통상시급에는 넣지 않는다)`
             : `(용역수수료와 별도 · 강의위탁계약서 제5조·제7조)`)
       );
     }
@@ -781,7 +783,10 @@ export function computePayroll(
       ratioPayTotal = ratioTotal;
       if (split.biz > 0)
         notes.push(
-          `근로소득 상한 ${Math.round(emp.ratioWageCap ?? 0).toLocaleString()}원 — 비율급 ${ratioTotal.toLocaleString()}원` +
+          // 보상금까지 합쳐 재는 상한은 '근로소득 상한' 이라고 적지 않는다 — 보상금을 근로소득으로 읽히게 한다
+          `${nonCompeteP > 0 ? "근로계약서 제4조의 상한" : "근로소득 상한"} ${Math.round(
+            emp.ratioWageCap ?? 0
+          ).toLocaleString()}원 — 비율급 ${ratioTotal.toLocaleString()}원` +
             (nonCompeteP > 0 ? `과 경업금지 보상금 ${nonCompeteP.toLocaleString()}원의 합계` : "") +
             ` 중 ${(ownWage + nonCompeteP).toLocaleString()}원은 이 회사가 지급하고, ` +
             `넘는 ${split.biz.toLocaleString()}원은 비율급에서 빼 별도 사업장이 지급하는 사업소득(3.3%)으로 나눴습니다.`
@@ -811,8 +816,13 @@ export function computePayroll(
       // 비율급에 주휴일 임금이 포함된 것으로 약정하므로(근로계약서 제4조) 월급제와 같은 월 환산시간
       // (소정+주휴)×4.345 로 나눈다. 별도 사업장 몫은 이 회사의 임금이 아니라 분자에서 뺀다.
       // 식대·차량유지비는 이 회사 몫 비율급(ownWage) 안에 이미 들어 있다 — 월급제가 총액으로 나누는 것과 같다.
-      // 경업금지 보상금도 넣는다 — 월급제가 보상금을 통상시급에서 빼지 않는 것과 같은 원칙이다(임금으로
-      // 판단되면 뺀 만큼이 연장·휴일·야간·연차수당 체불이 된다. 덜 주는 쪽으로 틀리지 않게).
+      //
+      // **경업금지 보상금은 넣지 않는다**(2026-11 결정 — v1.59.2. 그 전에는 넣었다). 보상금은 근로의 대가가 아니라
+      // 경업금지 의무의 대가라는 것이 이 계약의 입장이다(근로계약서 제4조 「임금과 별도로」·제8조). 통상시급에 넣으면
+      // 회사가 스스로 보상금을 임금(근로소득)으로 다루는 셈이라, 어떤 경우에도 근로소득의 모양으로 보이지 않게 한다.
+      // 그래서 상한이 걸린 달의 분자는 상한액이 아니라 **상한액 − 보상금**이다(500만 − 45만 = 455만).
+      //  ⚠ 뒤집어 보면: 보상금이 임금으로 판단되면 뺀 만큼이 연장·휴일·야간·연차수당의 차액이 된다(노무 자문 대목).
+      //  ⚠ 월급제(총액 안에서 뗀 보상금)는 여전히 기준급여 전체로 나눈다 — 그쪽은 `inclusiveWageBreakdown`.
       let hours = monthlyStdHours;
       if (hours <= 0) {
         hours = 209;
@@ -821,21 +831,18 @@ export function computePayroll(
             "직원 정보에 근로시간표를 채우면 계약 소정근로시간 기준으로 다시 계산됩니다."
         );
       }
-      // 분자는 **그 달 이 회사가 근로자에게 지급하는 금액 전부**다 — 이 회사 몫 비율급(식대 포함) + 경업금지 보상금.
-      // 상한이 걸린 달은 정확히 상한액(예: 500만원)이 된다. 근로계약서 제4조 ③ 이 같은 식을 적는다(2026-11).
-      const wageBase = ownWage + nonCompeteP;
+      // 분자 = 그 달 이 회사가 지급하는 **임금**(이 회사 몫 비율급 — 식대·차량유지비 포함). 근로계약서 제4조 ③ 과 같은 식.
+      const wageBase = ownWage;
       hourlyWage = wageBase > 0 ? round0(wageBase / hours) : 0;
       ratioHourlyBasis = { wage: wageBase, hours };
-      const included = [
-        ratioMealP > 0 ? "식대" : "",
-        ratioCarP > 0 ? "차량유지비" : "",
-        nonCompeteP > 0 ? "경업금지 보상금" : "",
-      ].filter(Boolean);
+      const included = [ratioMealP > 0 ? "식대" : "", ratioCarP > 0 ? "차량유지비" : ""].filter(Boolean);
       notes.push(
         `통상시급: 그 달 이 회사가 지급하는 임금 ${wageBase.toLocaleString()}원${
           included.length ? `(${included.join("·")} 포함)` : ""
         } ÷ ${hoursLabel(hours)}시간 = ${hourlyWage.toLocaleString()}원 ` +
-          `(근로계약서 제4조 · 근로기준법 시행령 §6②6. 연장·휴일·야간수당과 연차수당의 기준)`
+          `(근로계약서 제4조 · 근로기준법 시행령 §6②6. 연장·휴일·야간수당과 연차수당의 기준` +
+          (nonCompeteP > 0 ? ` — 경업금지 보상금은 근로의 대가가 아니라 넣지 않습니다` : "") +
+          `)`
       );
     }
   } else {

@@ -260,55 +260,59 @@ describe("근로계약서(비율급) — 경업금지 보상금 비율(v1.58)", 
   });
 });
 
-describe("근로계약서(비율급) 제4조 ③ — 통상시급의 기준은 그 달 갑이 지급하는 금액 전부(v1.59.1)", () => {
+describe("근로계약서(비율급) 제4조 ③ — 통상시급은 갑이 지급하는 임금 기준이고 경업금지 보상금은 넣지 않는다(v1.59.2)", () => {
   const html = (c: Partial<DocContract> = {}) => text(contractHtml({ employee: emp(), contract: ct(c), company }));
-  // ③ 은 세 문장이다 — 주휴 포함 · 초과근로는 통상시급으로 별도 · 통상시급의 식. 바뀌는 것은 식의 분자뿐이다.
+  // ③ 은 세 문장이다 — 주휴 포함 · 초과근로는 통상시급으로 별도 · 통상시급의 식. 바뀌는 것은 식의 분자와 끝맺음뿐이다.
   const HEAD =
     "③ 제①항의 임금에는 소정근로와 주휴일(제5조)에 대한 임금이 포함되어 있다. 소정근로시간을 넘는 연장·야간·휴일근로에 대하여는 " +
     "통상시급을 기준으로 근로기준법에 따른 수당을 별도 지급한다. 통상시급은 그 달 \"갑\"이 \"을\"에게 지급하는 ";
-  const TAIL = "을 월 소정근로시간(주휴시간 포함)으로 나누어 산정한다. ④";
-  const clause = (base: string) => HEAD + base + TAIL;
+  /** 보상금이 없는 계약 */
+  const plain = (base: string) => HEAD + base + "을 월 소정근로시간(주휴시간 포함)으로 나누어 산정한다. ④";
+  /** 보상금이 있는 계약 — 보상금 항(n)을 가리켜 「포함하지 아니한다」고 못박는다 */
+  const withNc = (base: string, n: string) =>
+    HEAD +
+    base +
+    `을 월 소정근로시간(주휴시간 포함)으로 나누어 산정하며, 제${n}항의 경업금지 보상금은 근로의 대가가 아니므로 통상시급의 산정에 포함하지 아니한다. ④`;
 
-  it("식대 + 보상금 + 상한 — 식대를 포함한 임금과 보상금의 합이고, 상한이 걸린 달은 500만원이다", () => {
+  it("식대 + 보상금 + 상한 — 식대를 포함한 임금이 기준이고, 보상금은 포함하지 않는다고 적는다", () => {
     const h = html({ mealAllow: 200_000, nonCompeteRatio: 0.03 });
-    expect(h).toContain(
-      clause("제①항의 임금(제④항의 식대를 포함한다)과 제⑤항의 경업금지 보상금을 합한 금액(제⑥항이 적용되는 달은 월 5,000,000원)")
-    );
+    expect(h).toContain(withNc("제①항의 임금(제④항의 식대를 포함한다)", "⑤"));
     // ③ 이 가리키는 번호가 실제로 그 항이다
     expect(h).toContain("④ 제①항의 임금에는 식대(비과세) 월 200,000원이 포함되어 있다.");
     expect(h).toContain("⑤ \"갑\"은 제①항의 임금과 별도로, 제8조에 따른 경업금지 의무의 대가로");
     expect(h).toContain("⑥ 제①항에 따라 산정한 금액과 제⑤항의 경업금지 보상금을 합한 금액이 월 5,000,000원을 넘는 경우");
-    // 예전 문구 — 「이 계약에 따른 임금」만 적으면 '임금과 별도' 인 보상금이 빠진 금액(455만)으로 읽힌다
+    // 보상금을 통상시급의 기준에 넣는 문구(v1.59.1)는 없다 — 임금(근로소득)의 모양으로 읽히지 않게
+    expect(h).not.toContain("경업금지 보상금을 합한 금액을 월 소정근로시간");
+    expect(h).not.toContain("경업금지 보상금을 합한 금액(제");
+    expect(h).not.toContain("적용되는 달은 월"); // 상한이 걸린 달의 기준은 상한액이 아니라 상한액 − 보상금이다
     expect(h).not.toContain("이 계약에 따른 임금 ÷");
-    expect(h).not.toContain("월 소정근로시간 환산");
   });
 
   it("항이 빠지면 가리키는 번호도 당겨진다", () => {
-    // 식대 없음 — 보상금 ④ · 상한 ⑤
-    expect(html({ nonCompeteRatio: 0.03 })).toContain(
-      clause("제①항의 임금과 제④항의 경업금지 보상금을 합한 금액(제⑤항이 적용되는 달은 월 5,000,000원)")
-    );
-    // 보상금 없음 — 식대 ④ · 상한 ⑤ (괄호 하나에 함께 적는다)
-    expect(html({ mealAllow: 200_000 })).toContain(
-      clause("제①항의 임금(제④항의 식대를 포함하며, 제⑤항이 적용되는 달은 월 5,000,000원)")
-    );
-    // 상한만 — 상한 ④
-    expect(html()).toContain(clause("제①항의 임금(제④항이 적용되는 달은 월 5,000,000원)"));
-    // 상한 없음 — 금액을 적을 것이 없다
+    // 식대 없음 — 보상금 ④
+    expect(html({ nonCompeteRatio: 0.03 })).toContain(withNc("제①항의 임금", "④"));
+    // 상한 없음 — 식대 ④ · 보상금 ⑤
     expect(html({ mealAllow: 200_000, nonCompeteRatio: 0.03, ratioWageCap: null })).toContain(
-      clause("제①항의 임금(제④항의 식대를 포함한다)과 제⑤항의 경업금지 보상금을 합한 금액")
+      withNc("제①항의 임금(제④항의 식대를 포함한다)", "⑤")
     );
-    // 아무것도 없으면 제①항의 임금 그대로
-    expect(html({ ratioWageCap: null })).toContain(clause("제①항의 임금"));
+    // 차량유지비도 함께 가리킨다
+    expect(html({ mealAllow: 200_000, carAllow: 100_000, positionAllow: 300_000, nonCompeteRatio: 0.03 })).toContain(
+      withNc("제①항의 임금(제④항의 식대·차량유지비를 포함한다)", "⑤")
+    );
   });
 
-  it("차량유지비도 함께 가리키고, 직책수당은 기준에 넣지 않는다(비율급과 별도로 얹는 돈 — 엔진과 같다)", () => {
-    expect(html({ mealAllow: 200_000, carAllow: 100_000, positionAllow: 300_000, nonCompeteRatio: 0.03 })).toContain(
-      clause("제①항의 임금(제④항의 식대·차량유지비를 포함한다)과 제⑤항의 경업금지 보상금을 합한 금액(제⑥항이 적용되는 달은 월 5,000,000원)")
-    );
-    // 직책수당만 있으면 ④ 는 직책수당 항이라 식대를 가리키지 않고, 상한은 ⑤ 다
+  it("보상금이 없는 계약은 보상금 문장이 없고, 상한이 걸린 달의 기준(상한액)을 적는다", () => {
+    // 식대 ④ · 상한 ⑤ (괄호 하나에 함께 적는다)
+    const h = html({ mealAllow: 200_000 });
+    expect(h).toContain(plain("제①항의 임금(제④항의 식대를 포함하며, 제⑤항이 적용되는 달은 월 5,000,000원)"));
+    expect(h).not.toContain("경업금지");
+    // 상한만 — 상한 ④
+    expect(html()).toContain(plain("제①항의 임금(제④항이 적용되는 달은 월 5,000,000원)"));
+    // 아무것도 없으면 제①항의 임금 그대로
+    expect(html({ ratioWageCap: null })).toContain(plain("제①항의 임금"));
+    // 직책수당만 있으면 ④ 는 직책수당 항이라 식대를 가리키지 않고, 상한은 ⑤ 다 — 직책수당은 기준에 넣지 않는다
     const p = html({ positionAllow: 300_000 });
-    expect(p).toContain(clause("제①항의 임금(제⑤항이 적용되는 달은 월 5,000,000원)"));
+    expect(p).toContain(plain("제①항의 임금(제⑤항이 적용되는 달은 월 5,000,000원)"));
     expect(p).toContain("④ \"갑\"은 제①항의 임금과 별도로 매월 직책수당 300,000원을 지급한다.");
     const r = computePayroll(
       { ...payInput, schedule: teacher, positionAllow: 300_000 },
@@ -320,51 +324,53 @@ describe("근로계약서(비율급) 제4조 ③ — 통상시급의 기준은 �
     expect(r.ratioHourlyBasis?.wage).toBe(5_000_000); // 직책수당 30만은 분자에 없다
   });
 
-  it("계약서가 적은 기준과 엔진이 나누는 금액이 같다 — 상한이 걸린 달은 정확히 상한액, 안 걸린 달은 실제 지급액", () => {
+  it("계약서가 적은 기준과 엔진이 나누는 금액이 같다 — 갑이 지급하는 제①항의 임금(식대 포함), 보상금은 없다", () => {
     const e = { ...payInput, schedule: teacher, mealAllow: 200_000, nonCompeteRatio: 0.03 };
-    // 상한이 걸리는 달(매출 × 43% > 500만 ⇔ 매출 > 11,627,907원) — 얼마를 벌든 기준은 500만원
+    // 상한이 걸리는 달(매출 × 43% > 500만) — 기준은 상한액이 아니라 **상한액 − 보상금**이다
     for (const revenue of [11_630_000, 15_000_000, 20_000_000, 33_333_333]) {
       const r = computePayroll(e, { classRevenue: revenue }, DEFAULT_RATES_2025, []);
       expect(r.bizIncomeP).toBeGreaterThan(0);
-      expect(r.ratioHourlyBasis?.wage).toBe(5_000_000);
+      expect(r.ratioHourlyBasis?.wage).toBe(5_000_000 - r.nonCompeteP);
+      // 그 금액은 명세서의 두 줄 — 비율급(근로소득분) + 식대 — 의 합이고, 보상금 줄은 들지 않는다
+      expect(r.ratioHourlyBasis?.wage).toBe(r.baseP - r.bizIncomeP + r.mealP);
       expect(r.ratioHourlyBasis?.hours).toBeCloseTo(195.525, 6);
-      expect(r.hourlyWage).toBe(25_572); // 5,000,000 ÷ 195.525
-      // 그 500만원은 명세서의 세 줄 — 비율급(근로소득분) + 식대 + 보상금 — 의 합이다
-      expect(r.baseP - r.bizIncomeP + r.mealP + r.nonCompeteP).toBe(5_000_000);
+      expect(r.hourlyWage).toBe(Math.round((5_000_000 - r.nonCompeteP) / 195.525));
     }
-    // 안 걸리는 달 — 매출 1,000만: 비율급 400만(식대 20만 포함) + 보상금 30만 = 430만
+    // 매출 1,500만 — 비율급 근로분 435만 + 식대 20만 = 455만 → 23,271원 (보상금 45만을 넣던 때는 500만 → 25,572원)
+    const mid = computePayroll(e, { classRevenue: 15_000_000 }, DEFAULT_RATES_2025, []);
+    expect(mid.ratioHourlyBasis?.wage).toBe(4_550_000);
+    expect(mid.hourlyWage).toBe(23_271);
+    // 안 걸리는 달 — 매출 1,000만: 비율급 400만(식대 20만 포함). 보상금 30만은 넣지 않는다
     const low = computePayroll(e, { classRevenue: 10_000_000 }, DEFAULT_RATES_2025, []);
     expect(low.bizIncomeP).toBe(0);
-    expect(low.ratioHourlyBasis?.wage).toBe(4_300_000);
-    expect(low.baseP + low.mealP + low.nonCompeteP).toBe(4_300_000);
-    expect(low.hourlyWage).toBe(Math.round(4_300_000 / 195.525));
+    expect(low.nonCompeteP).toBe(300_000);
+    expect(low.ratioHourlyBasis?.wage).toBe(4_000_000);
+    expect(low.baseP + low.mealP).toBe(4_000_000);
+    expect(low.hourlyWage).toBe(Math.round(4_000_000 / 195.525));
+    // 보상금이 없는 계약과 통상시급이 같다(같은 매출 · 상한이 안 걸린 달)
+    const noNc = computePayroll({ ...e, nonCompeteRatio: null }, { classRevenue: 10_000_000 }, DEFAULT_RATES_2025, []);
+    expect(low.hourlyWage).toBe(noNc.hourlyWage);
   });
 
-  it("보장급(§47)이 상한보다 높게 잡힌 계약에는 「상한 항이 적용되는 달은 월 X원」을 적지 않는다 — 그 말이 틀리는 달이 있다", () => {
-    // 상한 500만 · 40% + 3% → 상한이 걸리는 달의 산식 금액은 언제나 4,651,163원(= 500만 × 40 ÷ 43)보다 크다.
-    // 보장급이 그보다 높으면 '상한은 걸리는데 산식 금액이 보장급에 못 미치는 달' 이 생기고, 그 달은 보장급으로 올려 준
-    // 몫(언제나 이 회사의 임금)만큼 합계가 상한액을 넘는다.
-    const high = { mealAllow: 200_000, nonCompeteRatio: 0.03, ratioMinGuarantee: 4_800_000 };
-    const h = html(high);
-    expect(h).toContain(clause("제①항의 임금(제④항의 식대를 포함한다)과 제⑤항의 경업금지 보상금을 합한 금액"));
-    expect(h).not.toContain("적용되는 달은 월");
-    // 매출 1,180만 — 산식 472만 < 보장급 480만 · 보상금 35.4만 · 산식 + 보상금 507.4만 > 상한 → 별도 사업장 7.4만
-    const r = computePayroll(
-      { ...payInput, schedule: teacher, ...high },
-      { classRevenue: 11_800_000 },
-      DEFAULT_RATES_2025,
-      []
-    );
-    expect(r.bizIncomeP).toBe(74_000);
-    expect(r.ratioHourlyBasis?.wage).toBe(5_080_000); // 상한 500만 + 보장급으로 올려 준 8만
-    // 보장급이 그 임계 이하인 보통 계약은 금액을 적고, 엔진도 상한이 걸린 달에 정확히 그 금액을 낸다
-    const normal = { mealAllow: 200_000, nonCompeteRatio: 0.03, ratioMinGuarantee: 2_500_000 };
-    expect(html(normal)).toContain("(제⑥항이 적용되는 달은 월 5,000,000원)");
-    expect(
-      computePayroll({ ...payInput, schedule: teacher, ...normal }, { classRevenue: 15_000_000 }, DEFAULT_RATES_2025, [])
-        .ratioHourlyBasis?.wage
-    ).toBe(5_000_000);
-    // 보상금이 없으면 임계는 상한 그 자체다(보장급 ≤ 상한이면 적는다)
+  it("보상금이 없는 계약 — 「상한 항이 적용되는 달은 월 X원」은 그 말이 정확히 맞는 계약에만 적는다", () => {
+    // 상한이 걸린 달의 기준은 정확히 상한액이다
+    const e = { ...payInput, schedule: teacher, mealAllow: 200_000 };
+    for (const revenue of [12_600_000, 15_000_000, 30_000_000]) {
+      const r = computePayroll(e, { classRevenue: revenue }, DEFAULT_RATES_2025, []);
+      expect(r.bizIncomeP).toBeGreaterThan(0);
+      expect(r.ratioHourlyBasis?.wage).toBe(5_000_000);
+      expect(r.hourlyWage).toBe(25_572);
+    }
+    // 보장급(§47)이 상한보다 높게 잡힌 계약은 보장급으로 올려 준 몫(언제나 이 회사의 임금)만큼 합계가 상한을 넘는 달이
+    // 있다 — 그런 계약에는 금액을 적지 않는다. 매출 1,300만 — 산식 520만 > 상한 → 별도 사업장 20만, 보장급 550만
+    const high = { ratioMinGuarantee: 5_500_000 };
+    expect(html(high)).toContain(plain("제①항의 임금"));
+    expect(html(high)).not.toContain("적용되는 달은 월");
+    const r = computePayroll({ ...payInput, schedule: teacher, ...high }, { classRevenue: 13_000_000 }, DEFAULT_RATES_2025, []);
+    expect(r.bizIncomeP).toBe(200_000);
+    expect(r.ratioHourlyBasis?.wage).toBe(5_300_000); // 상한 500만 + 보장급으로 올려 준 30만
+    // 보장급이 상한 이하면 적는다(경계 포함)
+    expect(html({ ratioMinGuarantee: 2_500_000 })).toContain("(제④항이 적용되는 달은 월 5,000,000원)");
     expect(html({ ratioMinGuarantee: 5_000_000 })).toContain("(제④항이 적용되는 달은 월 5,000,000원)");
     expect(html({ ratioMinGuarantee: 5_000_001 })).not.toContain("적용되는 달은 월");
   });
@@ -615,12 +621,15 @@ describe("명세서 — 지급처별로 가른다", () => {
     const h = text(html);
     expect(h).toContain("근로계약서 제8조의 경업금지 의무에 대한 대가로 비율급과 별도로 지급");
     expect(h).toContain("수강료 입금액 15,000,000원 × 3% = 450,000원");
-    expect(h).toContain("근로소득 상한은 비율급과 이 보상금을 합친 금액에 걸리고");
+    // 보상금까지 합쳐 재는 상한을 '근로소득 상한' 이라고 부르지 않고, 통상시급에 넣지 않는다고 밝힌다(v1.59.2)
+    expect(h).toContain("근로계약서 제4조의 상한은 비율급과 이 보상금을 합친 금액에 걸리고");
+    expect(h).toContain("근로의 대가가 아니므로 통상시급(수당 산정 기준)에 포함하지 않습니다(근로계약서 제4조).");
+    expect(h).not.toContain("근로소득 상한");
     // 보상금이 과세인지 비과세인지는 명세서가 단정하지 않는다(v1.58.2 — 세무 처리는 세무대리인 지정값에 따른다)
     expect(h).not.toContain("근로소득으로 과세되고");
     expect(h).not.toContain("4대보험 산정에 포함됩니다");
     expect(h).toContain(
-      "이 달 비율급 6,000,000원과 경업금지 보상금 450,000원의 합계 중 근로소득 상한 5,000,000원을 넘는 1,450,000원은 비율급에서 빼어 이 명세서의 임금이 아니며"
+      "이 달 비율급 6,000,000원과 경업금지 보상금 450,000원의 합계 중 근로계약서 제4조의 상한 5,000,000원을 넘는 1,450,000원은 비율급에서 빼어 이 명세서의 임금이 아니며"
     );
     expect(h).not.toContain("강의위탁계약서");
     expect(h).not.toContain("상한과 관계없이");
@@ -641,7 +650,8 @@ describe("명세서 — 지급처별로 가른다", () => {
     const slip = cells(bizIncomeSlipHtml({ employee: emp(), payroll: pr, payer, company }));
     expect(slip).toContain("사업소득 1,450,000");
     expect(slip).toContain("비율급과 경업금지 보상금의 합계 중 월 5,000,000원을 넘는 부분(비율급에서 지급)");
-    expect(slip).toContain("근로소득 상한(월 5,000,000원 — 비율급과 경업금지 보상금의 합계 기준)을 넘는 비율급");
+    expect(slip).toContain("근로계약(제4조)에서 정한 상한(월 5,000,000원 — 비율급과 경업금지 보상금의 합계 기준)을 넘는 비율급");
+    expect(slip).not.toContain("근로소득 상한"); // 보상금까지 합쳐 재는 상한 — 보상금을 근로소득으로 적지 않는다
     const detail = text(
       revenueDetailHtml({
         employee: emp(),
@@ -656,7 +666,8 @@ describe("명세서 — 지급처별로 가른다", () => {
         wageCapWithNonCompete: true,
       })
     );
-    expect(detail).toContain("근로소득 상한(월 5,000,000원 — 경업금지 보상금과 합친 금액 기준)을 넘는 1,450,000원");
+    expect(detail).toContain("근로계약서 제4조의 상한(월 5,000,000원 — 경업금지 보상금과 합친 금액 기준)을 넘는 1,450,000원");
+    expect(detail).not.toContain("근로소득 상한");
   });
 
   it("옛 기록(상한 근거가 없는 breakdown)은 비율급 − 별도 사업장 몫으로 상한을 되짚는다", () => {
@@ -737,7 +748,7 @@ describe("식대(비과세)는 비율급 안에 든 금액 — 명세서·내역
     );
     // 상한 각주의 '이 달 비율급' 은 식대를 뗀 나머지(baseP 580만)가 아니라 비율급 전체(600만)다
     expect(h).toContain(
-      "이 달 비율급 6,000,000원과 경업금지 보상금 450,000원의 합계 중 근로소득 상한 5,000,000원을 넘는 1,450,000원은 비율급에서 빼어"
+      "이 달 비율급 6,000,000원과 경업금지 보상금 450,000원의 합계 중 근로계약서 제4조의 상한 5,000,000원을 넘는 1,450,000원은 비율급에서 빼어"
     );
     expect(h).not.toContain("이 달 비율급 5,800,000원");
   });
@@ -836,7 +847,7 @@ const exportRec = (): ExportPayrollRecord => ({
   employee: { name: "가상강사", empNo: "E900", rrn: "900101-1234567" },
 });
 
-describe("명세서 — 통상시급 각주는 근로계약서 제4조 ③ 과 같은 식을 금액 그대로 적는다(v1.59.1)", () => {
+describe("명세서 — 통상시급 각주는 근로계약서 제4조 ③ 과 같은 식을 금액 그대로 적는다(보상금은 식에 없다 — v1.59.2)", () => {
   /** 급여 산정(payroll-service)이 남기는 근거 그대로 — `ratioPay.hourlyBase`·`hourlyHours` 가 통상시급의 분자·분모 */
   const record = (e: Partial<EmployeePayInput>, revenue: number): DocPayroll => {
     const rr = computePayroll({ ...payInput, schedule: teacher, ...e }, { classRevenue: revenue }, DEFAULT_RATES_2025, []);
@@ -855,45 +866,73 @@ describe("명세서 — 통상시급 각주는 근로계약서 제4조 ③ 과 �
     };
   };
   const slip = (p: DocPayroll) => text(payslipHtml({ employee: emp(), payroll: p, company, bizPayer: payer }));
+  const full = { mealAllow: 200_000, nonCompeteRatio: 0.03 };
 
-  it("상한이 걸린 달 — 500만원(비율급 + 식대 + 보상금) ÷ 195.525시간 = 25,572원", () => {
-    const h = slip(record({ mealAllow: 200_000, nonCompeteRatio: 0.03 }, 15_000_000));
+  it("상한이 걸린 달 — (비율급 435만 + 식대 20만 = 455만) ÷ 195.525시간 = 23,271원. 보상금 45만은 식에 없다", () => {
+    const p = record(full, 15_000_000);
+    const h = slip(p);
     expect(h).toContain(
-      "통상시급 25,572원 = (비율급 4,350,000원 + 식대 200,000원 + 경업금지 보상금 450,000원 = 5,000,000원) " +
+      "통상시급 23,271원 = (비율급 4,350,000원 + 식대 200,000원 = 4,550,000원) " +
         "÷ 월 소정근로시간 195.525시간(주휴시간 포함)이며(근로계약서 제4조 · 근로기준법 시행령 §6②6), 연장·휴일·야간수당과 연차수당의 기준입니다."
     );
+    // 보상금을 통상시급의 식에 넣거나 임금으로 뭉뚱그려 적지 않는다
+    expect(h).not.toContain("+ 경업금지 보상금");
+    expect(h).not.toContain("이 회사가 지급한 임금");
     expect(h).not.toContain("그 달 임금 ÷ 월 소정근로시간 환산");
-    // 괄호 안의 세 금액은 위 표의 줄과 같다
-    const c = cells(payslipHtml({ employee: emp(), payroll: record({ mealAllow: 200_000, nonCompeteRatio: 0.03 }, 15_000_000), company, bizPayer: payer }));
+    // 보상금은 따로 지급하는 줄로 남고(지급액 계 500만), 그 각주가 통상시급에 넣지 않는다고 밝힌다
+    const c = cells(payslipHtml({ employee: emp(), payroll: p, company, bizPayer: payer }));
     expect(c).toContain("비율급(근로소득분) 4,350,000");
     expect(c).toContain("식대(비과세) 200,000");
     expect(c).toContain("경업금지 보상금 450,000");
+    expect(c).toContain("지급액 계 5,000,000");
+    expect(h).toContain(
+      "수강료 입금액 15,000,000원 × 3% = 450,000원. 근로의 대가가 아니므로 통상시급(수당 산정 기준)에 포함하지 않습니다(근로계약서 제4조)."
+    );
   });
 
-  it("상한이 안 걸린 달은 그 달 실제 지급액이 기준이다", () => {
-    // 매출 1,000만 — 비율급 400만(식대 20만 포함) + 보상금 30만 = 430만
-    expect(slip(record({ mealAllow: 200_000, nonCompeteRatio: 0.03 }, 10_000_000))).toContain(
-      "통상시급 21,992원 = (비율급 3,800,000원 + 식대 200,000원 + 경업금지 보상금 300,000원 = 4,300,000원) ÷ 월 소정근로시간 195.525시간(주휴시간 포함)"
+  it("보상금까지 합쳐 재는 상한을 '근로소득 상한' 이라고 적지 않는다 — 보상금이 근로소득으로 읽힌다", () => {
+    const h = slip(record(full, 15_000_000));
+    expect(h).not.toContain("근로소득 상한");
+    expect(h).toContain(
+      "이 달 비율급 6,000,000원과 경업금지 보상금 450,000원의 합계 중 근로계약서 제4조의 상한 5,000,000원을 넘는 1,450,000원은 비율급에서 빼어"
     );
+    expect(h).toContain("근로계약서 제4조의 상한은 비율급과 이 보상금을 합친 금액에 걸리고");
+    // 보상금이 없는 계약의 상한은 비율급(임금)에만 걸리므로 예전 이름 그대로다
+    const plain = slip(record({ mealAllow: 200_000 }, 15_000_000));
+    expect(plain).toContain("이 달 비율급 6,000,000원 중 근로소득 상한 5,000,000원을 넘는 1,000,000원은");
+  });
+
+  it("상한이 안 걸린 달 — 그 달 이 회사가 준 비율급(식대 포함)이 기준이고, 보상금 30만은 넣지 않는다", () => {
+    // 매출 1,000만 — 비율급 400만(식대 20만 포함) · 보상금 30만
+    const h = slip(record(full, 10_000_000));
+    expect(h).toContain(
+      "통상시급 20,458원 = (비율급 3,800,000원 + 식대 200,000원 = 4,000,000원) ÷ 월 소정근로시간 195.525시간(주휴시간 포함)"
+    );
+    expect(h).toContain("근로의 대가가 아니므로 통상시급(수당 산정 기준)에 포함하지 않습니다");
+    expect(h).not.toContain("상한은 비율급과 이 보상금을 합친 금액에 걸리고"); // 상한이 안 걸린 달
   });
 
   it("줄이 비율급 하나뿐이면 괄호·합계 없이 그 줄만 적는다(같은 금액을 되풀이할 뿐이다)", () => {
     expect(slip(record({ ratioWageCap: null }, 10_000_000))).toContain(
       "통상시급 20,458원 = 비율급 4,000,000원 ÷ 월 소정근로시간 195.525시간(주휴시간 포함)"
     );
+    // 보상금만 있고 식대가 없어도 식에는 비율급 한 줄뿐이다
+    expect(slip(record({ ratioWageCap: null, nonCompeteRatio: 0.03 }, 10_000_000))).toContain(
+      "통상시급 20,458원 = 비율급 4,000,000원 ÷ 월 소정근로시간 195.525시간(주휴시간 포함)"
+    );
   });
 
-  it("수당이 붙은 달 — 식에는 수당 줄이 들지 않는다(지급액 계가 아니라 비율급 + 식대 + 보상금)", () => {
+  it("수당이 붙은 달 — 수당은 455만 기준 통상시급으로 계산되고, 식에는 수당·보상금 줄이 들지 않는다", () => {
     const rr = computePayroll(
-      { ...payInput, schedule: teacher, mealAllow: 200_000, nonCompeteRatio: 0.03 },
+      { ...payInput, schedule: teacher, ...full },
       { classRevenue: 15_000_000, extraHours: 10, holidayHours: 4, unusedLeaveDays: 1 },
       DEFAULT_RATES_2025,
       []
     );
-    // 수당은 모두 500만원 기준 통상시급으로 계산된다
-    expect(rr.extraP).toBe(10 * 25_572);
-    expect(rr.holidayP).toBe(Math.round(4 * 25_572 * 1.5));
-    expect(rr.unusedLeaveP).toBe(Math.round(25_572 * 7.5)); // 1일 소정 7.5시간
+    expect(rr.hourlyWage).toBe(23_271);
+    expect(rr.extraP).toBe(10 * 23_271);
+    expect(rr.holidayP).toBe(Math.round(4 * 23_271 * 1.5));
+    expect(rr.unusedLeaveP).toBe(Math.round(23_271 * 7.5)); // 1일 소정 7.5시간
     const p: DocPayroll = {
       ...payroll,
       ...rr,
@@ -906,40 +945,44 @@ describe("명세서 — 통상시급 각주는 근로계약서 제4조 ③ 과 �
     const html = payslipHtml({ employee: emp(), payroll: p, company, bizPayer: payer });
     expect(cells(html)).toContain(`지급액 계 ${(5_000_000 + rr.extraP + rr.holidayP + rr.unusedLeaveP).toLocaleString()}`);
     expect(text(html)).toContain(
-      "통상시급 25,572원 = (비율급 4,350,000원 + 식대 200,000원 + 경업금지 보상금 450,000원 = 5,000,000원) ÷ 월 소정근로시간 195.525시간"
+      "통상시급 23,271원 = (비율급 4,350,000원 + 식대 200,000원 = 4,550,000원) ÷ 월 소정근로시간 195.525시간"
     );
   });
 
-  it("경업금지 보상금을 비과세로 산정한 달도 괄호 안에는 꼬리표 없이 적는다 — 통상시급 식에서는 과세 여부가 뜻이 없다", () => {
-    const p = record({ mealAllow: 200_000, nonCompeteRatio: 0.03 }, 15_000_000);
+  it("경업금지 보상금을 비과세로 산정한 달도 통상시급 식은 같다 — 표의 줄만 「(비과세)」로 바뀐다", () => {
+    const p = record(full, 15_000_000);
     const flagged = { ...p, breakdown: JSON.stringify({ ...JSON.parse(p.breakdown!), nonCompeteNonTax: true }) };
     const html = payslipHtml({ employee: emp(), payroll: flagged, company, bizPayer: payer });
     expect(cells(html)).toContain("경업금지 보상금(비과세) 450,000"); // 표의 줄
-    expect(text(html)).toContain("식대 200,000원 + 경업금지 보상금 450,000원 = 5,000,000원) ÷"); // 각주의 식
+    expect(text(html)).toContain("통상시급 23,271원 = (비율급 4,350,000원 + 식대 200,000원 = 4,550,000원) ÷");
   });
 
   it("근로시간표가 비어 209시간으로 환산한 달은 그 시간을 그대로 적는다", () => {
     const rr = computePayroll(
-      { ...payInput, schedule: [], mealAllow: 200_000, nonCompeteRatio: 0.03 },
+      { ...payInput, schedule: [], ...full },
       { classRevenue: 15_000_000 },
       DEFAULT_RATES_2025,
       []
     );
-    expect(rr.ratioHourlyBasis).toEqual({ wage: 5_000_000, hours: 209 });
+    expect(rr.ratioHourlyBasis).toEqual({ wage: 4_550_000, hours: 209 });
     const p: DocPayroll = {
       ...payroll,
       ...rr,
-      breakdown: JSON.stringify({ ratioPay: { total: rr.ratioPayTotal, hourlyBase: 5_000_000, hourlyHours: 209 } }),
+      breakdown: JSON.stringify({ ratioPay: { total: rr.ratioPayTotal, hourlyBase: 4_550_000, hourlyHours: 209 } }),
     };
     expect(slip(p)).toContain(
-      "통상시급 23,923원 = (비율급 4,350,000원 + 식대 200,000원 + 경업금지 보상금 450,000원 = 5,000,000원) ÷ 월 소정근로시간 209시간(주휴시간 포함)"
+      "통상시급 21,770원 = (비율급 4,350,000원 + 식대 200,000원 = 4,550,000원) ÷ 월 소정근로시간 209시간(주휴시간 포함)"
     );
   });
 
-  it("산정 근거가 없는 옛 기록은 예전 문장 그대로 — 숫자를 지어내지 않는다", () => {
-    const p = record({ mealAllow: 200_000, nonCompeteRatio: 0.03 }, 15_000_000);
-    // v1.59.0 이하의 기록 — 비율급 전체(total)만 남겼고 통상시급의 분자·분모는 없다
-    const old = { ...p, breakdown: JSON.stringify({ ratioPay: { total: JSON.parse(p.breakdown!).ratioPay.total } }) };
+  it("산정 근거가 없는 옛 기록(v1.59.0 이하)은 예전 문장 그대로 — 숫자를 지어내지 않는다", () => {
+    const p = record(full, 15_000_000);
+    // 비율급 전체(total)만 남겼고 통상시급의 분자·분모는 없다. 그때는 보상금을 넣어 500만 기준으로 산정했다
+    const old = {
+      ...p,
+      hourlyWage: 25_572,
+      breakdown: JSON.stringify({ ratioPay: { total: JSON.parse(p.breakdown!).ratioPay.total } }),
+    };
     const h = slip(old);
     expect(h).toContain(
       "통상시급 25,572원은 그 달 임금 ÷ 월 소정근로시간 환산이며(근로기준법 시행령 §6②6), 연장·휴일·야간수당과 연차수당의 기준입니다."
@@ -949,15 +992,26 @@ describe("명세서 — 통상시급 각주는 근로계약서 제4조 ③ 과 �
     expect(ratioHourlyBasisOf({ breakdown: null })).toBeNull();
     expect(ratioHourlyBasisOf({ breakdown: "깨진 값" })).toBeNull();
     expect(ratioHourlyBasisOf({ breakdown: JSON.stringify({ ratioPay: { total: 1, hourlyBase: 0, hourlyHours: 209 } }) })).toBeNull();
-    expect(ratioHourlyBasisOf(p)?.wage).toBe(5_000_000);
+    expect(ratioHourlyBasisOf(p)?.wage).toBe(4_550_000);
   });
 
-  it("줄의 합이 분자와 맞지 않으면 분자만 적는다 — 맞지 않는 식을 문서에 남기지 않는다", () => {
-    const p = record({ mealAllow: 200_000, nonCompeteRatio: 0.03 }, 15_000_000);
-    const off = { ...p, mealP: 150_000 }; // 기록이 손으로 고쳐져 줄의 합이 분자와 다른 경우
-    const h = slip(off);
-    expect(h).toContain("통상시급 25,572원 = 이 달 이 회사가 지급한 임금 5,000,000원 ÷ 월 소정근로시간 195.525시간");
-    expect(h).not.toContain("식대 150,000원 +");
+  it("보상금을 분자에 넣던 때(v1.59.1) 산정한 기록 — 줄의 합이 분자와 안 맞으므로 분자만 적는다(보상금을 식의 항으로 적지 않는다)", () => {
+    const p = record(full, 15_000_000);
+    const v1591 = {
+      ...p,
+      hourlyWage: 25_572,
+      breakdown: JSON.stringify({
+        ...JSON.parse(p.breakdown!),
+        ratioPay: { total: 6_000_000, hourlyBase: 5_000_000, hourlyHours: 195.525 },
+      }),
+    };
+    const h = slip(v1591);
+    expect(h).toContain("통상시급 25,572원 = 이 달 산정 기준액 5,000,000원 ÷ 월 소정근로시간 195.525시간(주휴시간 포함)");
+    expect(h).not.toContain("+ 경업금지 보상금");
+    // 기록이 손으로 고쳐져 줄의 합이 분자와 다른 경우도 같다
+    const off = slip({ ...p, mealP: 150_000 });
+    expect(off).toContain("통상시급 23,271원 = 이 달 산정 기준액 4,550,000원 ÷ 월 소정근로시간 195.525시간");
+    expect(off).not.toContain("식대 150,000원 =");
   });
 });
 
