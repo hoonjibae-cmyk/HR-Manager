@@ -10,7 +10,9 @@ export function placementReplyEvent(event:any){
  return {channel:event.channel,rootTs:m.thread_ts,replyTs:m.ts,versionTs:version,user:m.user,text:m.text.slice(0,12000)};
 }
 export function placementReplyBlocks(input:{studentName:string;authorName:string;text:string;url:string;id:string;acknowledged?:boolean}){
- return [{type:'section',text:{type:'plain_text',text:`${input.studentName} 학생 반배정 답변${input.acknowledged?' · 확인 완료':''}`}},{type:'section',text:{type:'plain_text',text:`${input.authorName}: ${input.text}`.slice(0,3000)}},{type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'원문 보기'},url:input.url},...(!input.acknowledged?[{type:'button',text:{type:'plain_text',text:'확인 완료'},style:'primary',action_id:'placement_reply_ack',value:input.id}]:[])]}];
+ const text=`${input.authorName}: ${input.text}`;
+ const sections=Array.from({length:Math.ceil(text.length/2900)},(_,index)=>({type:'section',text:{type:'plain_text',text:text.slice(index*2900,(index+1)*2900)}}));
+ return [{type:'section',text:{type:'plain_text',text:`${input.studentName} 학생 반배정 답변${input.acknowledged?' · 확인 완료':''}`}},...sections,{type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'원문 보기'},url:input.url},...(!input.acknowledged?[{type:'button',text:{type:'plain_text',text:'확인 완료'},style:'primary',action_id:'placement_reply_ack',value:input.id}]:[])]}];
 }
 export function placementOwnerAction(id:string){return {type:'actions',block_id:`placement:${id}`,elements:[{type:'users_select',action_id:'placement_owner',placeholder:{type:'plain_text',text:'담당 직원 지정 · 변경'}}]};}
 export function validPlacementRequest(input:any){return !!input&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(input.requestId??'')&&typeof input.studentName==='string'&&input.studentName.trim().length>0&&input.studentName.length<=100&&typeof input.requestedBy==='string'&&input.requestedBy.length<=120&&(input.responsibleEmpNo==null||typeof input.responsibleEmpNo==='string'&&input.responsibleEmpNo.length<=80);}

@@ -11,7 +11,7 @@ async function api(method:string,payload:unknown){
  return result;
 }
 class SlackError extends Error{}
-const activeEmployee=(slackUserId:string)=>prisma.employee.findFirst({where:{slackUserId,active:true,resignDate:null},select:{empNo:true,slackUserId:true,name:true,department:true,position:true,active:true,resignDate:true}});
+const activeEmployee=(slackUserId:string)=>/^U[A-Z0-9]+$/.test(slackUserId??'')?prisma.employee.findFirst({where:{slackUserId,active:true,resignDate:null},select:{empNo:true,slackUserId:true,name:true,department:true,position:true,active:true,resignDate:true}}):Promise.resolve(null);
 async function owner(empNo:string|null){return empNo?prisma.employee.findFirst({where:{empNo,active:true,resignDate:null},select:{empNo:true,slackUserId:true}}):null;}
 async function omrOwner(id:string){
  const key=directoryApiKey('omr-report');if(!key)throw Error('OMR 연동 키 없음');
@@ -25,7 +25,7 @@ function rootBlocks(thread:PlacementSlackThread,status:string){
 }
 async function refreshRoot(threadId:string){
  const thread=await prisma.placementSlackThread.findUniqueOrThrow({where:{id:threadId}});if(!thread.rootTs)return;
- const latest=await prisma.placementSlackReply.findFirst({where:{threadId},orderBy:{versionTs:'desc'}});
+ const latest=await prisma.placementSlackReply.findFirst({where:{threadId,state:{not:'skipped'}},orderBy:{versionTs:'desc'}});
  // Slack re-fetches image URLs on chat.update; refresh the signed URL after expiry.
  const original=JSON.parse(thread.originalBlocks) as any[];
  const image=original.find(b=>b.type==='image');
@@ -34,7 +34,7 @@ async function refreshRoot(threadId:string){
   thread.originalBlocks=JSON.stringify(original);
   await prisma.placementSlackThread.update({where:{id:thread.id},data:{originalBlocks:thread.originalBlocks}});
  }
- const status=latest?.acknowledgedAt?'답변 확인 완료':latest?.state==='sent'?'답변 전달 완료 · 확인 대기':latest?'답변 전달 대기':'원장 답변 대기';
+ const status=latest?.acknowledgedAt?'답변 확인 완료':latest?.state==='sent'?'답변 전달 완료 · 확인 대기':latest?.state==='uncertain'?'답변 발송 결과 확인 필요':latest?'답변 전달 대기':'원장 답변 대기';
  await api('chat.update',{channel:thread.channel,ts:thread.rootTs,text:`${thread.originalText}\n${status}`,blocks:rootBlocks(thread,status)});
 }
 export async function sendPlacementRequest(input:any,text:string,blocks:any[]){
@@ -62,7 +62,7 @@ async function recoverThread(channel:string,rootTs:string){
  const found=await prisma.placementSlackThread.findUnique({where:{rootTs}});if(found)return found;
  const [history,auth]=await Promise.all([api('conversations.history',{channel,oldest:rootTs,latest:rootTs,inclusive:true,limit:1}),api('auth.test',{})]);
  const root=history.messages?.find((m:any)=>m.ts===rootTs);
- if(!root||(root.user!==auth.user_id&&root.bot_id!==auth.bot_id))return null;
+ if(!root||!(root.user===auth.user_id||(auth.bot_id&&root.bot_id===auth.bot_id)))return null;
  const image=root.blocks?.find((b:any)=>b.type==='image');if(!image)return null;
  let url:URL;try{url=new URL(image.image_url);}catch{return null;}
  const match=url.pathname.match(/^\/api\/placement\/summary\/([a-f0-9-]{36})$/i);
@@ -120,6 +120,7 @@ export async function dispatchPlacementReplies(){
 }
 export async function handlePlacementAction(payload:any){
  const action=payload.actions?.[0];const user=payload.user?.id;const channel=payload.container?.channel_id??payload.channel?.id;const ts=payload.container?.message_ts??payload.message?.ts;
+ if(!/^U[A-Z0-9]+$/.test(user??''))return;
  async function reject(text:string){if(channel&&user)await api('chat.postEphemeral',{channel,user,text});}
  if(action?.action_id==='placement_reply_ack'){
   const reply=await prisma.placementSlackReply.findUnique({where:{id:String(action.value)},include:{thread:true}});
