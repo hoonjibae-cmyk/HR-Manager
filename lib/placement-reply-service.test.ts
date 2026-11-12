@@ -8,6 +8,25 @@ const reply={id:'reply',threadId:id,replyTs:'1794447937.000001',versionTs:'17944
 const fetchMock=vi.fn();
 beforeEach(()=>{vi.resetAllMocks();vi.stubGlobal('fetch',fetchMock);fetchMock.mockResolvedValue({json:async()=>({ok:true,channel:'D1',ts:'1794447938.000001'})});mocks.db.placementSlackReply.updateMany.mockResolvedValue({count:1});mocks.db.placementSlackEvent.updateMany.mockResolvedValue({count:1});mocks.db.placementSlackEvent.findMany.mockResolvedValue([]);mocks.db.placementSlackReply.findMany.mockResolvedValue([]);mocks.db.placementSlackReply.findFirst.mockResolvedValue(null);});
 describe('placement delivery boundaries',()=>{
+ it('links a legacy bot request by its immutable image token, including roots with existing replies',async()=>{
+  const resultId='a6aa6a58-49e0-4da7-9e11-52275f24bfa7';
+  const original={id,rootId:id,state:'sent',report:JSON.stringify({sourceScan:{id:'first'}})};
+  const current={id:resultId,rootId:id,state:'pending',report:JSON.stringify({sourceScan:{id:'retest'}})};
+  const rootBlocks=[{type:'image',image_url:`https://report.yussam.com/api/placement/summary/${id}?expires=1`}];
+  mocks.db.placementSlackThread.findUnique.mockResolvedValue(null);mocks.db.placementSlackResult.findUnique.mockResolvedValueOnce(current).mockResolvedValueOnce(original).mockResolvedValueOnce(original);
+  mocks.db.placementSlackThread.upsert.mockResolvedValue({...thread,originalBlocks:JSON.stringify(rootBlocks)});mocks.db.placementSlackResult.findUniqueOrThrow.mockResolvedValue(current);mocks.db.placementSlackResult.updateMany.mockResolvedValue({count:1});
+  fetchMock.mockImplementation(async(url)=>({json:async()=>String(url).endsWith('auth.test')?{ok:true,user_id:'UBOT'}:String(url).endsWith('conversations.history')?{ok:true,messages:[{user:'UBOT',ts:thread.rootTs,thread_ts:thread.rootTs,text:'원본',blocks:rootBlocks}]}:{ok:true,channel:thread.channel,ts:reply.replyTs}}));
+  const sent=await sendPlacementRequest({requestId:id,resultId,studentName:'학생',requestedBy:'staff',requestedAt:'2026-11-12T00:00:00Z'},'요청',[{type:'image',image_url:`https://report.yussam.com/api/placement/summary/${resultId}`}]);
+  expect(sent.delivered).toBe(true);
+  const posted=fetchMock.mock.calls.find(c=>String(c[0]).endsWith('chat.postMessage'));
+  expect(JSON.parse(posted![1].body).thread_ts).toBe(thread.rootTs);
+ });
+ it('labels a changed score from the same scan as a correction',async()=>{
+  const resultId='a6aa6a58-49e0-4da7-9e11-52275f24bfa7';const current={id:resultId,rootId:id,state:'pending',report:JSON.stringify({sourceScan:{id:'same-scan'}})};
+  mocks.db.placementSlackThread.findUnique.mockResolvedValue(thread);mocks.db.placementSlackResult.findUnique.mockResolvedValue(current);mocks.db.placementSlackResult.findUniqueOrThrow.mockResolvedValue(current);mocks.db.placementSlackResult.updateMany.mockResolvedValue({count:1});
+  await sendPlacementRequest({requestId:id,resultId,studentName:'학생',requestedBy:'staff'},'요청',[{type:'image',image_url:`https://report.yussam.com/api/placement/summary/${resultId}`}]);
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body).text).toContain('성적 정정 결과');
+ });
  it('posts a retest image as a reply without updating the original message or image',async()=>{
   const resultId='a6aa6a58-49e0-4da7-9e11-52275f24bfa7';
   const stored={id:resultId,rootId:id,state:'pending',report:JSON.stringify({sourceScan:{uploadedAt:'2026-11-12T00:00:00Z'}})};
