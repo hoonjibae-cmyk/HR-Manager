@@ -9,6 +9,15 @@ export function wonUnit(n: number | null | undefined): string {
   return won(n) + "원";
 }
 
+/**
+ * 시간을 **식에 그대로** 적을 때의 표기 — 소수 셋째 자리까지, 끝의 0 은 뗀다(195.525 · 209 · 173.8).
+ * 반올림해 「196시간」으로 적으면 `금액 ÷ 시간 = 통상시급` 이 문서에서 맞아떨어지지 않는다
+ * (5,000,000 ÷ 196 = 25,510 ≠ 25,572 — 실제 분모는 195.525).
+ */
+export function hoursLabel(h: number): string {
+  return String(Number((Number.isFinite(h) ? h : 0).toFixed(3)));
+}
+
 export function ymd(d: Date | string | null | undefined, sep = "."): string {
   if (!d) return "";
   const date = typeof d === "string" ? new Date(d) : d;

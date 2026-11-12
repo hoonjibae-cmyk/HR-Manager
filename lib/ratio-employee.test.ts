@@ -185,6 +185,14 @@ describe("computePayroll — 비율제 근로자", () => {
     expect(r.hourlyWage).toBe(hw); // 25,572
     expect(r.unusedLeaveP).toBe(Math.round(2 * hw * 7.5)); // 1일 소정 7.5시간
     expect(r.extraP).toBe(10 * hw);
+    // 그 식의 분자·분모를 그대로 남긴다 — 근로계약서 제4조 ③ 이 적는 기준이고 명세서가 이 값을 적는다
+    expect(r.ratioHourlyBasis?.wage).toBe(5_000_000);
+    expect(r.ratioHourlyBasis?.hours).toBeCloseTo(MONTH_HOURS, 6);
+    // 안내문도 같은 식을 금액 그대로 — 시간을 반올림해 「196시간」으로 적으면 5,000,000 ÷ 196 = 25,510 이라 안 맞는다
+    expect(r.notes).toContain(
+      "통상시급: 그 달 이 회사가 지급하는 임금 5,000,000원 ÷ 195.525시간 = 25,572원 " +
+        "(근로계약서 제4조 · 근로기준법 시행령 §6②6. 연장·휴일·야간수당과 연차수당의 기준)"
+    );
     // 상한은 비율급에만 — 근로자라서 받는 돈(연차·연장수당)은 언제나 근로소득
     expect(r.bizIncomeP).toBe(1_000_000);
     expect(r.wageTaxable).toBe(r.gross - 1_000_000);
@@ -320,6 +328,12 @@ describe("computePayroll — 비율제 근로자", () => {
     // 자동 공제 계산의 기준 = 500만 − 비과세 식대 20만
     expect(r.wageTaxable).toBe(4_800_000);
     expect(r.hourlyWage).toBe(Math.round(5_000_000 / MONTH_HOURS));
+    // 수당의 기준이 되는 금액 = 매월 이 회사가 근로자에게 주는 500만원(식대 20만원 + 경업금지 보상금 포함)
+    expect(r.ratioHourlyBasis?.wage).toBe(5_000_000);
+    expect(r.notes).toContain(
+      "통상시급: 그 달 이 회사가 지급하는 임금 5,000,000원(식대·경업금지 보상금 포함) ÷ 195.525시간 = 25,572원 " +
+        "(근로계약서 제4조 · 근로기준법 시행령 §6②6. 연장·휴일·야간수당과 연차수당의 기준)"
+    );
     expect(r.net).toBe(r.gross - r.totalDeduct);
   });
 
@@ -440,6 +454,7 @@ describe("computePayroll — 비율제 근로자", () => {
     );
     expect(r.hourlyWage).toBe(Math.round(4_000_000 / 209));
     expect(r.notes.some((n) => n.includes("209시간"))).toBe(true);
+    expect(r.ratioHourlyBasis).toEqual({ wage: 4_000_000, hours: 209 });
   });
 
   it("위탁 비율제는 그대로다 — 3.3%, 통상시급 0, 연장·연차수당 없음", () => {
@@ -451,6 +466,7 @@ describe("computePayroll — 비율제 근로자", () => {
     );
     expect(r.gross).toBe(6_000_000);
     expect(r.hourlyWage).toBe(0);
+    expect(r.ratioHourlyBasis).toBeNull(); // 위탁은 통상시급 개념이 없다
     expect(r.unusedLeaveP).toBe(0);
     expect(r.extraP).toBe(0);
     expect(r.bizIncomeP).toBe(0);
@@ -478,6 +494,7 @@ describe("computePayroll — 비율제 근로자", () => {
     );
     expect(b).toEqual(a);
     expect(a.bizIncomeP).toBe(0);
+    expect(a.ratioHourlyBasis).toBeNull(); // 월급제의 통상시급은 기준급여 분해(inclusiveWageBreakdown)가 정한다
   });
 });
 

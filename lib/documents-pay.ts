@@ -1,6 +1,6 @@
 // 급여명세서 / 사업소득명세서 / 각종 증명서 템플릿
 
-import { won, wonUnit, ymd, ymdKo, josa } from "./format";
+import { won, wonUnit, ymd, ymdKo, josa, hoursLabel } from "./format";
 import { INCOME_TYPE_LABEL } from "./constants";
 import { logoImg, stampImg, type DocCompany, type DocEmployee } from "./documents";
 import { carryoverNotice, type CarryoverInfo } from "./leave-payout";
@@ -107,6 +107,63 @@ export function ratioPayTotalOf(p: Pick<DocPayroll, "baseP" | "breakdown">): num
     if (typeof t === "number" && Number.isFinite(t)) return t;
   } catch {}
   return p.baseP;
+}
+
+/**
+ * 명세서의 통상시급 각주(비율제 근로계약) — 근로계약서 제4조 ③ 과 **같은 식을 금액 그대로** 적는다:
+ * 「통상시급 X원 = (비율급 + 식대 + 경업금지 보상금 = Y원) ÷ 월 소정근로시간 N시간」.
+ *
+ * 수당의 기준이 되는 금액은 **이 회사가 그 달 근로자에게 지급하는 금액**(연장·휴일수당 같은 수당 자체는 빼고)이다
+ * (2026-11 요청) — 식대는 비율급 안에 든 금액이라 빼지 않고, 경업금지 보상금도 넣는다. 근로소득 상한이 걸린 달은
+ * 정확히 상한액(예: 500만원)이 된다.
+ *  · 식의 항은 **위 표의 줄 이름과 금액 그대로**다 — 명세서만 보고 검산할 수 있고, 어느 줄이 기준에 드는지(수당 줄은
+ *    들지 않는다)가 그대로 읽힌다. 「이 회사가 지급한 임금 500만원」처럼 뭉뚱그려 적으면 수당이 붙은 달의 지급액 계와
+ *    달라 무엇을 가리키는지 알 수 없다.
+ *  · 줄의 합이 산정이 남긴 분자와 맞을 때만 그렇게 적는다. 어긋나면(기록을 손으로 고친 경우) 분자만 적는다 —
+ *    맞지 않는 식을 문서에 남기지 않는다.
+ *  · 산정 근거가 없는 옛 기록은 식을 숫자 없이 적는다(예전 문장 그대로).
+ */
+function ratioHourlyNote(p: DocPayroll, bizPart: number): string {
+  const use = `연장·휴일·야간수당과 연차수당의 기준입니다.`;
+  const basis = ratioHourlyBasisOf(p);
+  if (!basis)
+    return `통상시급 ${won(p.hourlyWage)}원은 그 달 임금 ÷ 월 소정근로시간 환산이며(근로기준법 시행령 §6②6), ${use}`;
+  // 줄 이름은 짧게(「비율급(근로소득분)」·「경업금지 보상금(비과세)」의 꼬리표는 뗀다 — 괄호가 겹쳐 읽기 어렵고,
+  // 통상시급 식에서는 과세 여부가 뜻이 없다)
+  const parts: [string, number][] = [
+    ["비율급", p.baseP - bizPart],
+    ["식대", p.mealP || 0],
+    ["차량유지비", p.carP || 0],
+    ["경업금지 보상금", p.nonCompeteP || 0],
+  ];
+  const shown = parts.filter(([, v]) => v > 0);
+  const sum = shown.reduce((a, [, v]) => a + v, 0);
+  const terms = shown.map(([k, v]) => `${k} ${won(v)}원`).join(" + ");
+  const numerator =
+    sum !== basis.wage || !shown.length
+      ? `이 달 이 회사가 지급한 임금 ${won(basis.wage)}원`
+      : shown.length > 1
+        ? `(${terms} = ${won(basis.wage)}원)`
+        : terms;
+  return `통상시급 ${won(p.hourlyWage)}원 = ${numerator} ÷ 월 소정근로시간 ${hoursLabel(
+    basis.hours
+  )}시간(주휴시간 포함)이며(근로계약서 제4조 · 근로기준법 시행령 §6②6), ${use}`;
+}
+
+/**
+ * 비율제 근로자의 **통상시급 산정 근거** — 급여 산정이 남긴 분자(`wage`: 그 달 이 회사가 지급하는 금액 = 이 회사 몫
+ * 비율급[식대 포함] + 경업금지 보상금. 근로소득 상한이 걸린 달은 상한액)와 분모(`hours`: 월 환산시간).
+ * 근로계약서 제4조 ③ 이 적는 식이고, 명세서가 「통상시급 = X원 ÷ N시간」을 다시 짓지 않고 이 값을 적는다.
+ * 근거가 없는 옛 기록(v1.59.0 이하)이나 값이 어긋난 기록은 null — 그때는 식을 숫자 없이 적는다.
+ */
+export function ratioHourlyBasisOf(p: Pick<DocPayroll, "breakdown">): { wage: number; hours: number } | null {
+  try {
+    const rp = p.breakdown ? JSON.parse(p.breakdown)?.ratioPay : null;
+    const wage = rp?.hourlyBase;
+    const hours = rp?.hourlyHours;
+    if (typeof wage === "number" && typeof hours === "number" && wage > 0 && hours > 0) return { wage, hours };
+  } catch {}
+  return null;
 }
 
 /** 식대·차량유지비가 비율급 **안에** 든 기록인가(v1.58.2 부터의 비율제 근로계약 기록) — 명세서 각주가 갈린다 */
@@ -512,9 +569,10 @@ export function payslipHtml(args: {
     ${isHourly ? `<div class="small">· 기본급 = 기본 근로시간 × 시급</div>` : ""}
     ${
       ratioWorker
-        ? `<div class="small">· 비율급 = 담당 원생 수강료 입금액 × 근로계약서 제4조의 비율(성과급)로, 소정근로와 주휴일 임금이 포함되어 있습니다. 통상시급 ${won(
-            p.hourlyWage
-          )}원은 그 달 임금 ÷ 월 소정근로시간 환산이며(근로기준법 시행령 §6②6), 연장·휴일·야간수당과 연차수당의 기준입니다.</div>`
+        ? `<div class="small">· 비율급 = 담당 원생 수강료 입금액 × 근로계약서 제4조의 비율(성과급)로, 소정근로와 주휴일 임금이 포함되어 있습니다. ${ratioHourlyNote(
+            p,
+            bizPart
+          )}</div>`
         : ""
     }
     ${(() => {

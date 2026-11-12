@@ -3,6 +3,7 @@
 // DB에 의존하지 않으므로 단위 테스트가 용이합니다.
 
 import { ScheduleDay, isContractorContract } from "./constants";
+import { hoursLabel } from "./format";
 
 /** 근속연수 계산 등에서 쓰는 4.345주/월 */
 export const WEEKS_PER_MONTH = 4.345;
@@ -225,6 +226,12 @@ export interface PayrollResult {
    * 별도 사업장 몫을 가르기 전의 금액이고 `baseP + mealP + carP` 와 같다. 비율제 근로자가 아니면 null.
    */
   ratioPayTotal: number | null;
+  /**
+   * 비율제 근로자의 **통상시급 산정 근거** — `wage`(그 달 이 회사가 지급하는 금액: 이 회사 몫 비율급[식대·차량유지비
+   * 포함] + 경업금지 보상금. 근로소득 상한이 걸린 달은 상한액) ÷ `hours`(월 환산시간 = (소정+주휴)×4.345, 근로시간표가
+   * 비면 209). 근로계약서 제4조 ③ 이 적는 식이고, 명세서가 이 두 값을 그대로 적는다. 비율제 근로자가 아니면 null.
+   */
+  ratioHourlyBasis: { wage: number; hours: number } | null;
   /**
    * 경업금지 보상금 — 월급제는 총액에서 떼어 낸 몫(그만큼 baseP 가 줄었다), 완전비율제는 매출 × 비율(별도 가산).
    * 자동 공제 계산에서는 과세 급여에 넣는다(아래 `taxableGross`) — 회사 설정으로 비과세 처리를 켜면 뺀다
@@ -670,6 +677,7 @@ export function computePayroll(
   let ratioMealP: number | null = null;
   let ratioCarP: number | null = null;
   let ratioPayTotal: number | null = null;
+  let ratioHourlyBasis: { wage: number; hours: number } | null = null;
 
   // --- 통상시급 ---
   let hourlyWage = 0;
@@ -813,12 +821,21 @@ export function computePayroll(
             "직원 정보에 근로시간표를 채우면 계약 소정근로시간 기준으로 다시 계산됩니다."
         );
       }
+      // 분자는 **그 달 이 회사가 근로자에게 지급하는 금액 전부**다 — 이 회사 몫 비율급(식대 포함) + 경업금지 보상금.
+      // 상한이 걸린 달은 정확히 상한액(예: 500만원)이 된다. 근로계약서 제4조 ③ 이 같은 식을 적는다(2026-11).
       const wageBase = ownWage + nonCompeteP;
       hourlyWage = wageBase > 0 ? round0(wageBase / hours) : 0;
+      ratioHourlyBasis = { wage: wageBase, hours };
+      const included = [
+        ratioMealP > 0 ? "식대" : "",
+        ratioCarP > 0 ? "차량유지비" : "",
+        nonCompeteP > 0 ? "경업금지 보상금" : "",
+      ].filter(Boolean);
       notes.push(
-        `통상시급: 그 달 임금 ${wageBase.toLocaleString()}원${nonCompeteP > 0 ? "(경업금지 보상금 포함)" : ""} ÷ ` +
-          `${round0(hours)}시간 = ${hourlyWage.toLocaleString()}원 ` +
-          `(비율급 — 근로기준법 시행령 §6②6. 연장·휴일·야간수당과 연차수당의 기준)`
+        `통상시급: 그 달 이 회사가 지급하는 임금 ${wageBase.toLocaleString()}원${
+          included.length ? `(${included.join("·")} 포함)` : ""
+        } ÷ ${hoursLabel(hours)}시간 = ${hourlyWage.toLocaleString()}원 ` +
+          `(근로계약서 제4조 · 근로기준법 시행령 §6②6. 연장·휴일·야간수당과 연차수당의 기준)`
       );
     }
   } else {
@@ -1069,6 +1086,7 @@ export function computePayroll(
     mealP,
     carP,
     ratioPayTotal,
+    ratioHourlyBasis,
     nonCompeteP,
     nonCompeteNonTaxP,
     incentiveP,

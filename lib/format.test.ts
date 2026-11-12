@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tenureOf, ageOf, birthIsoOf, ymd } from "./format";
+import { tenureOf, ageOf, birthIsoOf, ymd, hoursLabel } from "./format";
 
 const d = (s: string) => new Date(s + "T00:00:00Z");
 
@@ -57,5 +57,25 @@ describe("josa — 받침에 맞춘 조사", () => {
     expect(josa("유쌤학원", "과", "와")).toBe("유쌤학원과");
     expect(josa("가상아카데미", "이", "가")).toBe("가상아카데미가");
     expect(josa("ABC", "이", "가")).toBe("ABC이(가)");
+  });
+});
+
+describe("hoursLabel — 식에 그대로 적는 시간", () => {
+  it("소수 셋째 자리까지 적고 끝의 0 은 뗀다", () => {
+    expect(hoursLabel(209)).toBe("209");
+    expect(hoursLabel(173.8)).toBe("173.8");
+    expect(hoursLabel(195.525)).toBe("195.525");
+  });
+  it("부동소수점 꼬리를 걷어낸다 — (37.5 + 7.5) × 4.345 는 195.52499999999998 로 나온다", () => {
+    expect((37.5 + 7.5) * 4.345).not.toBe(195.525);
+    expect(hoursLabel((37.5 + 7.5) * 4.345)).toBe("195.525");
+  });
+  it("반올림해 정수로 적지 않는다 — 5,000,000 ÷ 196 = 25,510 이라 통상시급 25,572원과 안 맞는다", () => {
+    expect(hoursLabel(195.525)).not.toBe("196");
+    expect(Math.round(5_000_000 / Number(hoursLabel(195.525)))).toBe(25_572);
+  });
+  it("값이 아니면 0", () => {
+    expect(hoursLabel(NaN)).toBe("0");
+    expect(hoursLabel(Infinity)).toBe("0");
   });
 });
