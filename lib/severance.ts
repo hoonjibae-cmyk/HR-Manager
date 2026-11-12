@@ -182,7 +182,10 @@ export interface SeverancePayItems {
   positionP: number; // 직책수당
   mealP: number; // 식대
   carP: number; // 차량유지비
-  /** 경업금지 보상금 — 계약 월 급여총액 안에서 기본급과 구분한 몫(없던 기록은 0) */
+  /**
+   * 경업금지 보상금 — 월급제는 월 지급 총액 안에서 임금 항목과 구분한 몫, 비율제는 비율급과 별도로 준 금액
+   * (없던 기록은 0). **산정기준 임금에 넣지 않는다** — 근로의 대가가 아니다(아래 `severanceBase`).
+   */
   nonCompeteP?: number;
   /**
    * 비율제 근로자의 근로소득 상한 초과분 — `baseP` 안에 들어 있지만 별도 사업장이 지급하는 사업소득이라
@@ -244,10 +247,13 @@ export function severanceBase(
   drop("별도 사업장 사업소득(근로소득 상한 초과분)", bizPart, "다른 사업장이 사업소득으로 지급");
   take("주휴수당", p.weeklyHolidayP);
   take("직책수당", p.positionP);
-  // 경업금지 보상금은 **계약 월 급여총액 안에서 기본급을 갈라 낸 몫**이다 — 빼면 산정기준 임금이
-  // 계약 월 급여보다 작아지고, 법원이 임금으로 보면 그대로 부담금 미달(§20①)이 된다. 그래서
-  // 기본급과 같이 언제나 넣는다(계약 추산 `estimateContractBase` 도 총액 안에 있어 같은 값이 된다).
-  take("경업금지 보상금", p.nonCompeteP ?? 0);
+  // **경업금지 보상금은 넣지 않는다**(2026-11 결정 — v1.59.3. 그 전에는 언제나 넣었다). 보상금은 근로의 대가가
+  // 아니라 경업금지 의무의 대가라는 것이 계약의 입장이라(근로계약서 제4조·제8조), 어떤 경우에도 임금(근로소득)의
+  // 모양으로 다루지 않는다 — 통상시급에서 뺀 것과 같은 원칙이고 **설정으로 켜는 항목이 아니다**(산입 범위 설정은
+  // 임금 항목 가운데 무엇을 넣을지를 정하는 자리다). 무엇을 뺐는지는 제외 목록에 사유와 함께 남긴다 — 조용히 빠지면
+  // 산정기준이 왜 월 지급 총액보다 적은지 알 수 없다. 계약 추산(`estimateContractBase`)도 같은 금액을 낸다.
+  //  ⚠ 뒤집어 보면: 보상금이 임금으로 판단되면 그만큼이 부담금 미달(§20①)이 된다(노무 자문 대목).
+  drop("경업금지 보상금", p.nonCompeteP ?? 0, "근로의 대가가 아닌 경업금지 의무의 대가");
 
   if (policy.includeMealCar) {
     take("식대", p.mealP);
@@ -299,6 +305,11 @@ export interface ContractWageTerms {
   isContractor: boolean;
   /** 비율제 근로계약 — RATIO 지만 퇴직급여 대상(월 급여가 매출에 달려 추산은 못 한다) */
   ratioEmployee?: boolean | null;
+  /**
+   * 경업금지 보상금(월) — 월급제·인센티브는 `baseWage`(월 지급 총액) **안에** 들어 있다. 산정기준 임금에 넣지
+   * 않으므로 추산에서 뺀다(없으면 0). 시급제에는 없다.
+   */
+  nonCompetePay?: number | null;
 }
 
 export interface ContractBaseEstimate {
@@ -321,6 +332,7 @@ const WEEKS_PER_MONTH = 4.345;
  *  · **월급제·인센티브** — `baseWage` 가 이미 월 지급 총액이고 식대·차량유지비와
  *    **포괄임금 약정 시간외·야간이 그 안에 들어 있다**(`inclusiveWageBreakdown`).
  *    그래서 따로 더하지 않고 직책수당만 가산한다 — 직책수당은 총액 밖의 별도 항목이다.
+ *    **경업금지 보상금은 그 총액 안에 있지만 임금이 아니라 뺀다**(v1.59.3 — `severanceBase` 와 같은 금액이 되게).
  *  · **시급제** — 시급 × (주 소정 + 주휴) × 4.345 로 월 환산하고, 식대·차량은 별도 가산이다
  *    (기본급 개념이 달라 총액에 포함돼 있지 않다).
  *  · **위탁계약·완전비율제** — 퇴직급여 대상이 아니라 추산하지 않는다.
@@ -375,10 +387,13 @@ export function estimateContractBase(
       (t.mealAllow ? ` + 식대 ${won(t.mealAllow)}원` : "") +
       (t.carAllow ? ` + 차량유지비 ${won(t.carAllow)}원` : "");
   } else {
-    // 월급제·인센티브 — baseWage 가 곧 월 지급 총액(식대·차량·약정OT 포함)
-    full = t.baseWage + t.positionAllow;
+    // 월급제·인센티브 — baseWage 가 곧 월 지급 총액(식대·차량·약정OT 포함).
+    // 경업금지 보상금은 그 안에 있지만 근로의 대가가 아니라 뺀다(총액보다 클 수는 없다 — 0 에서 자른다)
+    const ncp = Math.min(Math.max(Math.round(t.nonCompetePay ?? 0), 0), Math.max(t.baseWage, 0));
+    full = t.baseWage - ncp + t.positionAllow;
     how =
       `계약 월 급여총액 ${won(t.baseWage)}원(식대·차량유지비·포괄임금 약정분 포함)` +
+      (ncp ? ` − 경업금지 보상금 ${won(ncp)}원(근로의 대가 아님)` : "") +
       (t.positionAllow ? ` + 직책수당 ${won(t.positionAllow)}원` : "");
   }
 

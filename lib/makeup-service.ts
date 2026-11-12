@@ -276,6 +276,9 @@ export function hourlyWageOf(emp: any, seg?: MonthContractTerms): number {
     baseHours,
     otHours: input.fixedOtHours ?? 0,
     nightHours: input.fixedNightHours ?? 0,
+    // 경업금지 보상금은 통상시급의 분자에서 빠진다(v1.59.3) — 급여 엔진과 같은 값을 넘겨야
+    // 보강 화면·슬랙 DM 의 예상 수당이 명세서와 갈리지 않는다
+    nonCompetePay: input.nonCompetePay,
   });
   return Math.round(bd.exactHourly);
 }

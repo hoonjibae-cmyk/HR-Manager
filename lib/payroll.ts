@@ -76,7 +76,8 @@ export interface EmployeePayInput {
   fixedNightHours?: number | null;
   /**
    * 경업금지 보상금(월) — 월급제·인센티브만. **월 지급 총액(baseWage) 안에서** 떼어 따로 적고
-   * 기본급이 그만큼 줄어든다(지급계는 그대로). 통상시급은 총액 기준 그대로 둔다(lib/non-compete.ts).
+   * 기본급이 그만큼 줄어든다(지급계는 그대로). **통상시급은 총액에서 보상금을 뺀 금액으로 낸다**(v1.59.3 —
+   * 근로의 대가가 아니라 임금으로 다루지 않는다. lib/non-compete.ts).
    */
   nonCompetePay?: number | null;
   /**
@@ -394,7 +395,8 @@ export interface InclusiveWageTerms {
   nightHours?: number | null;
   /**
    * 경업금지 보상금(월) — 총액 **안에서** 떼어 따로 적는다(근로계약서 제8조).
-   * 통상시급(분자·분모)에는 손대지 않는다 — 총액 기준 그대로라 연장·야간·연차수당이 줄지 않는다.
+   * **통상시급의 분자에서 뺀다**(v1.59.3 — 그 전에는 총액 그대로 나눴다): 보상금은 근로의 대가가 아니라
+   * 경업금지 의무의 대가라, 어떤 경우에도 임금(근로소득)의 모양으로 다루지 않는다.
    */
   nonCompetePay?: number | null;
   /** 일할계산 비율 (월중 입·퇴사). 기본 1 */
@@ -405,6 +407,8 @@ export interface InclusiveWageTerms {
 export interface InclusiveWageBreakdown {
   hourlyWage: number; // 통상시급(표시용 반올림)
   exactHourly: number; // 반올림 전 — 분해에 사용
+  /** 통상시급의 분자 = 기준급여 − 경업금지 보상금(월, 일할 전). 보상금이 없으면 기준급여 그대로 */
+  hourlyBase: number;
   baseHours: number;
   otHours: number;
   nightHours: number;
@@ -433,16 +437,23 @@ export interface InclusiveWageBreakdown {
 /**
  * 포괄임금 분해 — 계약서에 적힌 '기준급여' 를 기본급·시간외·야간으로 되돌린다.
  *
- *   통상시급 = 기준급여 ÷ (기본급 산정시간 + 1.5×약정 시간외 + 0.5×약정 야간)
+ *   통상시급 = (기준급여 − 경업금지 보상금) ÷ (기본급 산정시간 + 1.5×약정 시간외 + 0.5×약정 야간)
  *   시간외(고정) = 통상시급 × 1.5 × 약정 시간외시간
  *   야간(고정)   = 통상시급 × 0.5 × 약정 야간시간
  *   기본급       = 기준급여 − 식대·차량유지비 − 시간외(고정) − 야간(고정) − 경업금지 보상금
  *
  * 기본급을 잔액으로 두므로 항목 합계는 언제나 기준급여와 정확히 일치한다.
- * 경업금지 보상금은 통상시급 식에 들어가지 않는다 — 총액에서 떼는 몫일 뿐이라
- * 통상시급은 보상금이 없을 때와 같다(연장·야간·연차수당이 줄지 않는 쪽 — 보수적).
- * 약정시간이 없으면 통상시급 = 기준급여 ÷ 기본급 산정시간 (기존 동작).
- * 계약서·급여명세서가 같은 결과를 쓰도록 두 곳에서 이 함수를 호출한다.
+ *
+ * **경업금지 보상금은 통상시급의 분자에서 뺀다**(2026-11 결정 — v1.59.3. 그 전에는 총액 그대로 나눴다).
+ * 보상금은 근로의 대가가 아니라 경업금지 의무의 대가라는 것이 계약의 입장이라(근로계약서 제4조·제8조),
+ * 어떤 경우에도 임금(근로소득)의 모양으로 다루지 않는다 — 비율제 근로계약(v1.59.2)과 같은 원칙이다.
+ *  · 그래서 보상금이 있으면 통상시급이 그만큼 낮고, 그 통상시급으로 내는 **약정 시간외·야간 금액도 함께 준다**
+ *    (총액은 그대로이니 줄어든 만큼은 잔액인 기본급에 남는다). 연장·휴일·야간수당과 연차수당의 단가도 같이 내려간다.
+ *  · 보상금이 없는 계약은 한 글자도 달라지지 않는다(실제 서명된 계약서를 원 단위까지 재현한다).
+ *  ⚠ 뒤집어 보면: 보상금은 총액 안에서 떼어 낸 몫이라 임금으로 판단될 여지가 있고, 그때는 뺀 만큼이
+ *    연장·휴일·야간·연차수당의 차액이 된다(노무 자문 대목).
+ * 약정시간이 없으면 통상시급 = (기준급여 − 보상금) ÷ 기본급 산정시간.
+ * 계약서·급여명세서·보강 화면·계약 폼 미리보기가 같은 결과를 쓰도록 모두 이 함수를 호출한다.
  */
 export function inclusiveWageBreakdown(t: InclusiveWageTerms): InclusiveWageBreakdown {
   const otHours = Math.max(t.otHours ?? 0, 0);
@@ -452,7 +463,9 @@ export function inclusiveWageBreakdown(t: InclusiveWageTerms): InclusiveWageBrea
   const nonTax = (t.mealAllow || 0) + (t.carAllow || 0);
 
   const divisor = t.baseHours + 1.5 * otHours + 0.5 * nightHours;
-  const exactHourly = divisor > 0 ? t.baseWage / divisor : 0;
+  // 통상시급의 분자 — 기준급여에서 경업금지 보상금을 뺀 금액(월 금액끼리. 일할은 지급액에만 건다)
+  const hourlyBase = Math.max((t.baseWage || 0) - Math.max(t.nonCompetePay || 0, 0), 0);
+  const exactHourly = divisor > 0 ? hourlyBase / divisor : 0;
 
   const overtimePay = round0(exactHourly * 1.5 * otHours * prorate);
   const nightPay = round0(exactHourly * 0.5 * nightHours * prorate);
@@ -476,6 +489,7 @@ export function inclusiveWageBreakdown(t: InclusiveWageTerms): InclusiveWageBrea
   return {
     hourlyWage: round0(exactHourly),
     exactHourly,
+    hourlyBase,
     baseHours: t.baseHours,
     otHours,
     nightHours,
@@ -822,7 +836,7 @@ export function computePayroll(
       // 회사가 스스로 보상금을 임금(근로소득)으로 다루는 셈이라, 어떤 경우에도 근로소득의 모양으로 보이지 않게 한다.
       // 그래서 상한이 걸린 달의 분자는 상한액이 아니라 **상한액 − 보상금**이다(500만 − 45만 = 455만).
       //  ⚠ 뒤집어 보면: 보상금이 임금으로 판단되면 뺀 만큼이 연장·휴일·야간·연차수당의 차액이 된다(노무 자문 대목).
-      //  ⚠ 월급제(총액 안에서 뗀 보상금)는 여전히 기준급여 전체로 나눈다 — 그쪽은 `inclusiveWageBreakdown`.
+      //  월급제(총액 안에서 뗀 보상금)도 같은 원칙이다 — `inclusiveWageBreakdown` 이 총액에서 보상금을 뺀 금액으로 나눈다(v1.59.3).
       let hours = monthlyStdHours;
       if (hours <= 0) {
         hours = 209;
@@ -881,8 +895,10 @@ export function computePayroll(
     if (!hasFixed) baseP = inclusive.basePay;
     if (nonCompeteP > 0)
       notes.push(
-        `경업금지 보상금 ${nonCompeteP.toLocaleString()}원은 월 급여 총액에 포함된 금액으로, ` +
-          `근로계약서 제8조에 따라 기본급과 구분해 지급합니다(과세).`
+        // 과세 여부는 적지 않는다 — 회사 설정 스위치가 정하고(아래 nonCompeteNonTaxP), 통상시급에서는 언제나 뺀다
+        `경업금지 보상금 ${nonCompeteP.toLocaleString()}원은 월 지급 총액에 포함된 금액으로, ` +
+          `근로계약서 제8조에 따라 임금 항목과 구분해 지급합니다 — 근로의 대가가 아니라 통상시급에는 넣지 않습니다` +
+          `(통상시급 ${hourlyWage.toLocaleString()}원 = 총액에서 보상금을 뺀 ${inclusive.hourlyBase.toLocaleString()}원 기준).`
       );
     if (inclusive.nonCompeteCapped)
       notes.push(

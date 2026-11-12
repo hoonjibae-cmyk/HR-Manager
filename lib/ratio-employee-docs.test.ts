@@ -823,10 +823,14 @@ describe("식대(비과세)는 비율급 안에 든 금액 — 명세서·내역
   it("퇴직급여 산정기준 — 식대를 넣든 빼든 비율급을 두 번 세지 않는다", () => {
     const items = { ...(rr as any), extraHours: 0, overtimeHours: 0, nightHours: 0, holidayHours: 0, holidayOverHours: 0 };
     const b = severanceBase(items);
-    // 이 회사가 주는 임금 = 비율급 근로분 435만 + 식대 20만 + 보상금 45만 = 500만
-    expect(b.base).toBe(5_000_000);
+    // 이 회사가 주는 **임금** = 비율급 근로분 435만 + 식대 20만 = 455만. 경업금지 보상금 45만은 근로의 대가가 아니라
+    // 산정기준에 넣지 않는다(v1.59.3 — 통상시급의 분자와 같은 금액이다). 이 회사가 주는 합계 500만과는 다르다
+    expect(b.base).toBe(4_550_000);
+    expect(b.base).toBe(rr.ratioHourlyBasis!.wage);
     expect(b.included).toContainEqual(["기본급", 4_350_000]);
     expect(b.included).toContainEqual(["식대", 200_000]);
+    expect(b.included.some(([label]) => label.includes("경업금지"))).toBe(false);
+    expect(b.excluded).toContainEqual(["경업금지 보상금", 450_000, "근로의 대가가 아닌 경업금지 의무의 대가"]);
     expect(b.excluded.some(([label, amt]) => label.includes("별도 사업장") && amt === 1_450_000)).toBe(true);
   });
 });

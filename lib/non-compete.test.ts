@@ -1,7 +1,9 @@
 // 경업금지 조항 · 경업금지 보상금 — 교수부 근로계약서(월급제 · 월급+인센티브)
 //
 // 못박는 것:
-//  ① 보상금은 월 지급 총액 **안에서** 떼는 몫이다 — 지급계·과세표준·공제·통상시급은 그대로, 기본급만 준다.
+//  ① 보상금은 월 지급 총액 **안에서** 떼는 몫이다 — 지급계·과세표준·공제는 그대로, 기본급만 준다.
+//     **통상시급은 총액에서 보상금을 뺀 금액으로 낸다**(v1.59.3 — 근로의 대가가 아니라 임금·근로소득의 모양으로
+//     다루지 않는다). 그래서 수당 단가와 포괄임금 약정 시간외·야간 금액이 그만큼 내려가고, 퇴직급여 산정기준에도 넣지 않는다.
 //  ② 계약서에는 보상금이 있을 때만 제8조가 들어가고 기타사항이 제9조로 밀린다. 없으면 예전과 한 글자도 다르지 않다.
 //  ③ 명세서·퇴직급여·대시보드 추이가 같은 돈을 같은 자리에 센다.
 //  ④ 교수부 필수 판정·입력 검사는 화면과 서버가 같은 함수를 쓴다.
@@ -40,7 +42,13 @@ import {
   type DocEmployee,
 } from "./documents";
 import { payslipHtml, type DocPayroll } from "./documents-pay";
-import { severanceBase, type SeverancePayItems } from "./severance";
+import {
+  severanceBase,
+  estimateContractBase,
+  underMinimumWarning,
+  DEFAULT_SEVERANCE_POLICY,
+  type SeverancePayItems,
+} from "./severance";
 import { contractBaseOf, grossOf, overtimeOf, type TrendRecord } from "./payroll-trend";
 
 // 학원 강사 스케줄 (주 5일 15:00~22:00, 휴게 0.5)
@@ -85,9 +93,22 @@ describe("급여 엔진 — 보상금은 총액 안에서 떼는 몫", () => {
     expect(withNc.gross).toBe(without.gross);
   });
 
-  it("통상시급·과세표준·공제·실수령은 보상금이 없을 때와 같다 (과세, 통상시급 총액 기준)", () => {
-    expect(withNc.hourlyWage).toBe(without.hourlyWage);
-    expect(withNc.hourlyWage).toBe(Math.round(3_500_000 / 209));
+  it("통상시급은 총액에서 보상금을 뺀 금액으로 낸다 — 보상금은 근로의 대가가 아니다(v1.59.3)", () => {
+    expect(without.hourlyWage).toBe(Math.round(3_500_000 / 209)); // 16,746
+    expect(withNc.hourlyWage).toBe(Math.round(3_200_000 / 209)); // 15,311 — 350만 − 보상금 30만
+    expect(withNc.hourlyWage).toBe(15_311);
+    // 보상금이 없는 320만 계약과 통상시급이 같다 — 보상금을 받는다고 수당 단가가 올라가지 않는다
+    const lower = computePayroll({ ...prof, baseWage: 3_200_000 }, {}, DEFAULT_RATES_2025, taxTable);
+    expect(withNc.hourlyWage).toBe(lower.hourlyWage);
+    // 산정 안내문이 그 사실과 기준 금액을 적는다(과세 여부는 적지 않는다 — 회사 설정이 정한다)
+    expect(withNc.notes).toContain(
+      "경업금지 보상금 300,000원은 월 지급 총액에 포함된 금액으로, 근로계약서 제8조에 따라 임금 항목과 구분해 지급합니다 — " +
+        "근로의 대가가 아니라 통상시급에는 넣지 않습니다(통상시급 15,311원 = 총액에서 보상금을 뺀 3,200,000원 기준)."
+    );
+    expect(withNc.notes.some((n) => n.includes("(과세)"))).toBe(false);
+  });
+
+  it("과세표준·공제·실수령은 보상금이 없을 때와 같다(수당이 없는 달 — 세무 처리는 회사 설정이 정한다)", () => {
     expect(withNc.taxableGross).toBe(without.taxableGross);
     expect(withNc.totalDeduct).toBe(without.totalDeduct);
     expect(withNc.net).toBe(without.net);
@@ -101,25 +122,46 @@ describe("급여 엔진 — 보상금은 총액 안에서 떼는 몫", () => {
     }
   });
 
-  it("연장수당·연차수당은 줄지 않는다 — 통상시급이 그대로라서", () => {
+  it("연장수당·연차수당은 보상금을 뺀 통상시급으로 계산된다 — 보상금이 있으면 그만큼 단가가 낮다", () => {
     const m = { overtimeHours: 10, unusedLeaveDays: 2 };
     const a = computePayroll(prof, m, DEFAULT_RATES_2025, taxTable);
     const b = computePayroll({ ...prof, nonCompetePay: 300_000 }, m, DEFAULT_RATES_2025, taxTable);
-    expect(b.overtimeP).toBe(a.overtimeP);
-    expect(b.unusedLeaveP).toBe(a.unusedLeaveP);
-    expect(b.gross).toBe(a.gross);
+    expect(a.overtimeP).toBe(Math.round(10 * 16_746 * 1.5)); // 251,190
+    expect(b.overtimeP).toBe(Math.round(10 * 15_311 * 1.5)); // 229,665
+    // 연차수당 = 일수 × 통상시급 × 1일 소정근로시간(15~22시·휴게 30분 = 6.5시간)
+    expect(a.unusedLeaveP).toBe(Math.round(2 * 16_746 * 6.5)); // 217,698
+    expect(b.unusedLeaveP).toBe(Math.round(2 * 15_311 * 6.5)); // 199,043
+    // 고정 지급분(총액 350만)은 그대로이고 수당만 그 차이만큼 준다
+    expect(a.gross - b.gross).toBe(a.overtimeP - b.overtimeP + (a.unusedLeaveP - b.unusedLeaveP));
+    expect(b.baseP + b.mealP + b.nonCompeteP).toBe(3_500_000);
   });
 
-  it("포괄임금 약정 시간외·야간은 그대로, 잔액인 기본급에서만 뗀다", () => {
+  it("포괄임금 — 약정 시간외·야간도 보상금을 뺀 통상시급으로 내고, 줄어든 만큼은 잔액인 기본급에 남는다", () => {
     const incl = { ...prof, baseWage: 5_000_000, mealAllow: 0, fixedOtHours: 21.725, fixedNightHours: 10.8625 };
     const a = computePayroll(incl, {}, DEFAULT_RATES_2025, taxTable);
     const b = computePayroll({ ...incl, nonCompetePay: 500_000 }, {}, DEFAULT_RATES_2025, taxTable);
+    // 보상금이 없는 계약은 예전 그대로 — 실제 서명된 계약서를 원 단위까지 재현한다
     expect(a.baseP).toBe(4_230_448); // 김지연 계약서 제4조
-    expect(b.baseP).toBe(3_730_448);
-    expect(b.overtimeP).toBe(a.overtimeP);
-    expect(b.nightP).toBe(a.nightP);
-    expect(b.hourlyWage).toBe(20_241);
+    expect(a.hourlyWage).toBe(20_241); // 500만 ÷ (209 + 1.5×21.725 + 0.5×10.8625)
+    expect(a.overtimeP).toBe(659_616);
+    expect(a.nightP).toBe(109_936);
+    // 보상금 50만 — 통상시급 = 450만 ÷ 같은 시간. 약정 시간외·야간이 9할로 줄고(450 ÷ 500) 기본급이 잔액을 받는다
+    expect(b.hourlyWage).toBe(18_217);
+    expect(b.overtimeP).toBe(593_654);
+    expect(b.nightP).toBe(98_942);
+    expect(b.baseP).toBe(3_807_404);
+    expect(b.nonCompeteP).toBe(500_000);
+    // 합계는 언제나 계약 총액
+    expect(b.baseP + b.overtimeP + b.nightP + b.nonCompeteP).toBe(5_000_000);
     expect(b.gross).toBe(5_000_000);
+    // 임금 부분(총액 − 보상금 = 450만)이 보상금 없는 450만 계약과 똑같이 분해된다
+    const plain450 = computePayroll({ ...incl, baseWage: 4_500_000 }, {}, DEFAULT_RATES_2025, taxTable);
+    expect([b.hourlyWage, b.baseP, b.overtimeP, b.nightP]).toEqual([
+      plain450.hourlyWage,
+      plain450.baseP,
+      plain450.overtimeP,
+      plain450.nightP,
+    ]);
   });
 
   it("일할계산 — 보상금도 같은 비율로 일할되고 합계는 round(총액 × 비율)", () => {
@@ -198,12 +240,29 @@ describe("inclusiveWageBreakdown — 항목 합계는 언제나 총액", () => {
     }
   });
 
-  it("통상시급은 보상금과 무관하다", () => {
+  it("통상시급의 분자는 기준급여 − 보상금이다 — 약정 시간외도 그 통상시급으로 낸다(v1.59.3)", () => {
     const a = inclusiveWageBreakdown({ baseWage: 4_000_000, baseHours: 209, otHours: 10 });
     const b = inclusiveWageBreakdown({ baseWage: 4_000_000, baseHours: 209, otHours: 10, nonCompetePay: 400_000 });
-    expect(b.hourlyWage).toBe(a.hourlyWage);
-    expect(b.overtimePay).toBe(a.overtimePay);
-    expect(b.basePay).toBe(a.basePay - 400_000);
+    expect(a.hourlyBase).toBe(4_000_000);
+    expect(a.hourlyWage).toBe(17_857); // 400만 ÷ (209 + 15)
+    expect(b.hourlyBase).toBe(3_600_000);
+    expect(b.hourlyWage).toBe(16_071); // 360만 ÷ (209 + 15)
+    expect(a.overtimePay).toBe(267_857);
+    expect(b.overtimePay).toBe(241_071);
+    // 기본급은 잔액 — 보상금만큼 줄되, 약정 시간외가 준 만큼은 되돌아온다
+    expect(a.basePay).toBe(3_732_143);
+    expect(b.basePay).toBe(3_358_929);
+    expect(b.basePay).toBe(a.basePay - 400_000 + (a.overtimePay - b.overtimePay));
+    expect(b.basePay + b.overtimePay + b.nonCompetePay).toBe(b.target);
+    // 통상시급은 월 금액끼리 나눈다 — 일할이 걸려도 같다(일할은 지급액에만 건다)
+    const half = inclusiveWageBreakdown({ baseWage: 4_000_000, baseHours: 209, otHours: 10, nonCompetePay: 400_000, prorate: 0.5 });
+    expect(half.hourlyWage).toBe(16_071);
+    expect(half.hourlyBase).toBe(3_600_000);
+    // 보상금이 총액보다 큰 잘못된 값이어도 분자가 음수가 되지 않는다
+    expect(inclusiveWageBreakdown({ baseWage: 1_000_000, baseHours: 209, nonCompetePay: 2_000_000 }).hourlyWage).toBe(0);
+    // 보상금이 없거나 0 이면 예전과 같다
+    for (const v of [undefined, null, 0])
+      expect(inclusiveWageBreakdown({ baseWage: 4_000_000, baseHours: 209, otHours: 10, nonCompetePay: v })).toEqual(a);
   });
 });
 
@@ -355,9 +414,9 @@ describe("근로계약서 — 보상금이 있으면 제8조, 기타사항은 �
   const html = contractHtml({ employee: emp(), contract: ct({ nonCompetePay: 300_000 }), company, printedAt });
   const t = text(html);
 
-  it("제4조에 보상금을 임금 항목과 구분해 적고 기준급여(총액)는 그대로 둔다", () => {
+  it("제4조에 보상금을 임금 항목과 구분해 적고, 통상시급의 산정에 포함하지 않는다고 못박는다(v1.59.3)", () => {
     expect(t).toContain(
-      "3,500,000원을 기준급여로 하여 아래와 같은 항목으로 포괄하여 지급하며, 이 중 경업금지 보상금 300,000원은 제8조에 따른 경업금지 의무의 대가로서 임금 항목과 구분하여 지급한다."
+      "3,500,000원을 기준급여로 하여 아래와 같은 항목으로 포괄하여 지급하며, 이 중 경업금지 보상금 300,000원은 제8조에 따른 경업금지 의무의 대가로서 임금 항목과 구분하여 지급하고, 근로의 대가가 아니므로 통상시급의 산정에 포함하지 아니한다."
     );
     expect(html).toContain('class="nc-row"');
     expect(spaced(html)).toContain("경업금지 보상금 (제8조) 300,000원 월 지급 총액 3,500,000원");
@@ -474,7 +533,9 @@ describe("급여명세서 — 보상금 줄과 각주", () => {
     expect(t).toContain("근로계약서 제8조의 경업금지 의무에 대한 대가");
     expect(t).toContain("지급받은 보상금 전액을 반환");
     // 과세·비과세는 명세서가 단정하지 않는다(v1.58.2) — 세무 처리는 세무대리인 지정값에 따른다
-    expect(t).toContain("월 급여 총액 중 기본급과 구분해 지급하는 금액입니다. 경업금지 의무를 위반하면");
+    expect(t).toContain(
+      "월 지급 총액 중 임금과 구분해 지급하는 금액입니다. 근로의 대가가 아니므로 통상시급(수당 산정 기준)에 포함하지 않습니다(근로계약서 제4조). 경업금지 의무를 위반하면"
+    );
     expect(t).not.toContain("금액입니다(과세)");
   });
 
@@ -643,8 +704,8 @@ describe("그 달 산정이 남긴 비과세 처리 표시 — nonCompeteNonTaxO
 
 /* ───────────────────────── 퇴직급여 · 추이 ───────────────────────── */
 
-describe("퇴직급여 — 보상금은 계약 월 급여의 일부라 언제나 산입", () => {
-  it("산정기준 임금 = 계약 월 급여총액 그대로", () => {
+describe("퇴직급여 — 보상금은 산정기준 임금에 넣지 않는다(v1.59.3 — 근로의 대가가 아니다)", () => {
+  it("산정기준 임금 = 월 지급 총액 − 보상금, 뺀 사실은 제외 목록에 사유와 함께 남는다", () => {
     const items: SeverancePayItems = {
       baseP: 3_000_000,
       weeklyHolidayP: 0,
@@ -668,9 +729,51 @@ describe("퇴직급여 — 보상금은 계약 월 급여의 일부라 언제나
       payScheme: "MONTHLY",
     };
     const b = severanceBase(items);
-    expect(b.base).toBe(3_500_000);
-    expect(b.included).toContainEqual(["경업금지 보상금", 300_000]);
-    expect(b.excluded.some(([l]) => l.includes("경업금지"))).toBe(false);
+    expect(b.base).toBe(3_200_000); // 350만 − 보상금 30만
+    expect(b.included.some(([l]) => l.includes("경업금지"))).toBe(false);
+    expect(b.excluded).toContainEqual(["경업금지 보상금", 300_000, "근로의 대가가 아닌 경업금지 의무의 대가"]);
+    // 산입 범위 설정을 전부 켜도 들어가지 않는다 — 설정은 임금 항목 가운데 무엇을 넣을지를 정하는 자리다
+    const all = severanceBase(items, {
+      ...DEFAULT_SEVERANCE_POLICY,
+      includeIncentive: true,
+      includeBonus: true,
+      includeOvertime: true,
+      includeUnusedLeave: true,
+    });
+    expect(all.base).toBe(3_200_000);
+    // 법정 하한 경고도 띄우지 않는다(임금 항목을 뺀 것이 아니다)
+    expect(underMinimumWarning(b)).toBeNull();
+    // 보상금이 없는 기록은 예전 그대로
+    const none = severanceBase({ ...items, baseP: 3_300_000, nonCompeteP: 0 });
+    expect(none.base).toBe(3_500_000);
+    expect(none.excluded.some(([l]) => l.includes("경업금지"))).toBe(false);
+  });
+
+  it("계약 추산도 같은 금액을 낸다 — 급여 기록에서 뽑은 값과 섞여도 누계가 매끄럽다", () => {
+    const terms = {
+      payScheme: "MONTHLY",
+      baseWage: 3_500_000,
+      positionAllow: 0,
+      mealAllow: 200_000,
+      carAllow: 0,
+      isContractor: false,
+      nonCompetePay: 300_000,
+    };
+    const est = estimateContractBase(terms);
+    expect(est.base).toBe(3_200_000);
+    expect(est.note).toContain("계약 월 급여총액 3,500,000원(식대·차량유지비·포괄임금 약정분 포함) − 경업금지 보상금 300,000원(근로의 대가 아님)");
+    // 급여 엔진이 낸 그 달 기록의 산정기준과 같다
+    const r = computePayroll({ ...prof, nonCompetePay: 300_000 }, {}, DEFAULT_RATES_2025, taxTable);
+    const hours = { extraHours: 0, overtimeHours: 0, nightHours: 0, holidayHours: 0, holidayOverHours: 0 };
+    expect(severanceBase({ ...r, ...hours, payScheme: "MONTHLY" }).base).toBe(est.base);
+    // 직책수당은 총액 밖의 항목이라 그대로 더한다
+    expect(estimateContractBase({ ...terms, positionAllow: 100_000 }).base).toBe(3_300_000);
+    // 보상금이 없으면 예전 그대로
+    const plain = estimateContractBase({ ...terms, nonCompetePay: null });
+    expect(plain.base).toBe(3_500_000);
+    expect(plain.note).not.toContain("경업금지");
+    // 일할은 뺀 뒤의 금액에 건다
+    expect(estimateContractBase(terms, { prorate: 0.5 }).base).toBe(1_600_000);
   });
 });
 

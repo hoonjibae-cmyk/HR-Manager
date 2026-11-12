@@ -13,6 +13,8 @@ import {
  *
  * 금액을 넣으면 월 급여 총액 **안에서** 그만큼 떼어 근로계약서 제4조에 따로 적고, 제8조
  * 「경업금지 및 경업금지 보상금」이 들어간다. 지급 총액은 그대로이고 기본급이 줄어든다.
+ * **통상시급(수당 산정 기준)은 보상금을 뺀 금액으로 낸다**(v1.59.3 — 근로의 대가가 아니다). 그래서 보상금을 넣으면
+ * 통상시급이 내려가고, 포괄임금 약정 시간외·야간 금액도 함께 준다 — 미리보기가 바뀌는 통상시급을 보여 준다.
  * 교수부는 필수다 — 새 계약(onSkip 이 있음)에서 비워 두려면 '조항을 넣지 않음' 을 직접 체크해야 한다.
  * 계산(미리보기·검사)은 서버와 같은 함수를 쓴다 — 화면이 통과시킨 값을 서버가 거절하지 않게.
  */
@@ -67,13 +69,17 @@ export default function NonCompeteField({
         월 급여 총액 <b>안에서</b> 떼어 근로계약서 제4조에 따로 적고, 제8조 「경업금지 및 경업금지
         보상금」(재직 중·퇴직 후 {NON_COMPETE_MONTHS}개월 · 반경 {NON_COMPETE_RADIUS_KM}km — 위반하면
         받은 보상금 전액 반환, 별도 법적 조치 가능)이 들어갑니다. 지급 총액은 그대로이고 그만큼 기본급이
-        줄어듭니다.
+        줄어듭니다. 근로의 대가가 아니라서 <b>통상시급(연장·휴일·야간수당과 연차수당의 기준)에는 넣지 않습니다</b> —
+        통상시급은 총액에서 보상금을 뺀 금액으로 냅니다.
       </p>
       {error && <p className="text-[11px] text-red-600 mt-1 break-keep">{error}</p>}
       {p && (
         <p className="text-[11px] text-slate-600 mt-1 leading-relaxed break-keep">
           기본급 {won(p.basePayBefore)}원 → <b>{won(p.basePayAfter)}원</b> · 임금 {won(p.wageTotal)}원 +
           보상금 {won(amount)}원 = 월 {won(p.monthlyTotal)}원
+          <br />
+          통상시급 {won(p.hourlyBefore)}원 → <b>{won(p.hourlyAfter)}원</b>{" "}
+          <span className="text-slate-400">(보상금을 뺀 금액 기준 — 수당 단가가 그만큼 내려갑니다)</span>
           <br />
           최저임금 비교용 시간당 임금 약 <b>{won(p.minWageHourly)}원</b>{" "}
           <span className="text-slate-400">

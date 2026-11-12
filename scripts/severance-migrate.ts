@@ -142,6 +142,8 @@ async function main() {
             carAllow: c.carAllow,
             isContractor: c.isContractor,
             ratioEmployee: c.ratioEmployee,
+            // 경업금지 보상금은 월 지급 총액 안에 있지만 산정기준 임금에 넣지 않는다 — 추산에서 뺀다
+            nonCompetePay: c.nonCompetePay,
           }
         : {
             // 계약 이력이 없는 달은 직원 카드로 대신한다 — 근거에 그렇게 적는다
@@ -152,6 +154,7 @@ async function main() {
             carAllow: e.carAllow,
             isContractor: e.isContractor,
             ratioEmployee: e.ratioEmployee,
+            nonCompetePay: e.nonCompetePay,
           };
 
       const est = estimateContractBase(terms, { weeklyContractual, weeklyHoliday, prorate });

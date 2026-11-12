@@ -8,9 +8,16 @@
 // **보상금은 새로 얹는 돈이 아니라 월 지급 총액 안에서 떼어 낸 몫이다**(2026-11 결정).
 // 그만큼 기본급이 줄고 지급계는 그대로다(lib/payroll.ts `inclusiveWageBreakdown`).
 //
-// ⚠ **통상시급은 총액 기준 그대로 둔다**(보상금을 빼지 않는다). 총액에서 떼어 낸 돈은 법원에서
-// 임금으로 판단될 여지가 크고, 그때 통상임금에서 뺀 만큼이 연장·야간·연차수당 체불이 된다.
-// 덜 주는 쪽으로 틀리지 않게 한다. 퇴직급여 산정에도 그대로 넣는다.
+// ⚠ **통상시급과 퇴직급여 산정기준에는 넣지 않는다**(2026-11 결정 — v1.59.3. 그 전에는 둘 다 넣었다).
+// 보상금은 근로의 대가가 아니라 경업금지 의무의 대가라는 것이 계약의 입장이라, **어떤 경우에도 임금(근로소득)의
+// 모양으로 다루지 않는다** — 비율제 근로계약의 보상금(v1.59.2)과 같은 원칙이다.
+//  · 통상시급 = (총액 − 보상금) ÷ 시간(`inclusiveWageBreakdown` 의 `hourlyBase`). 연장·휴일·야간수당과 연차수당의
+//    단가가 그만큼 낮고, 포괄임금 약정 시간외·야간 금액도 그 통상시급으로 낸다(줄어든 만큼은 잔액인 기본급에 남는다).
+//  · 퇴직급여 산정기준(`severanceBase`·`estimateContractBase`)에서 빼고, 제외 목록에 사유와 함께 남긴다.
+//  · 계약서 제4조 ① 이 「근로의 대가가 아니므로 통상시급의 산정에 포함하지 아니한다」고 적고, 명세서의 보상금
+//    각주가 같은 말을 한다. 계약 폼은 보상금을 넣으면 바뀌는 통상시급을 보여 준다(`nonCompetePreview`).
+//  ⚠ 뒤집어 보면: 총액에서 떼어 낸 돈은 임금으로 판단될 여지가 있고, 그때는 뺀 만큼이 연장·휴일·야간·연차수당과
+//    퇴직급여 부담금의 차액이 된다. 회사가 그 위험을 알고 정한 것이다(노무 자문 대목).
 //
 // **세무 처리(과세·비과세)는 계약서가 단정하지 않는다**(2026-11 — 회사가 복리후생비 성격의 비과세 처리를
 // 하기로 했다). 계약서의 공제 문장·명세서 각주·화면 도움말에 '보상금은 과세' 라고 적지 않는다 — 적으면
@@ -119,6 +126,13 @@ export interface NonCompetePreview {
    * 보상금을 뺀 임금만으로 그해 최저임금을 넘어야 한다 — 보상금이 임금이 아니라는 전제와 맞물린다.
    */
   minWageHourly: number;
+  /** 보상금을 떼기 전 통상시급 — 총액 기준 */
+  hourlyBefore: number;
+  /**
+   * 뗀 뒤 통상시급 = (총액 − 보상금) 기준(v1.59.3). 보상금은 근로의 대가가 아니라 통상시급에 넣지 않으므로
+   * 보상금을 넣으면 그만큼 내려간다 — 연장·휴일·야간수당과 연차수당의 단가다. 폼이 바뀌는 값을 보여 준다.
+   */
+  hourlyAfter: number;
 }
 
 /** 엔진(computePayroll)과 같은 기본급 산정시간 */
@@ -132,26 +146,34 @@ function baseHoursOf(t: NonCompeteTerms): number {
 /** 보상금을 뗀 뒤의 임금 항목 — 계약 폼 미리보기와 입력 검사가 같은 값을 본다 */
 export function nonCompetePreview(t: NonCompeteTerms, amount: number): NonCompetePreview {
   const baseHours = baseHoursOf(t);
-  const iw = inclusiveWageBreakdown({
+  const ncp = Math.max(Math.round(amount || 0), 0);
+  const terms = {
     baseWage: t.baseWage || 0,
     mealAllow: t.mealAllow,
     carAllow: t.carAllow,
     baseHours,
     otHours: t.fixedOtHours,
     nightHours: t.fixedNightHours,
-  });
-  const ncp = Math.max(Math.round(amount || 0), 0);
-  const basePayAfter = iw.basePay - ncp;
+  };
+  const before = inclusiveWageBreakdown(terms);
+  // 보상금을 넣으면 통상시급이 내려가고 약정 시간외·야간 금액도 함께 줄어든다(엔진과 같은 함수) — 그래서 뗀 뒤의
+  // 기본급은 '떼기 전 기본급 − 보상금' 이 아니라 **보상금을 넣고 다시 분해한 잔액**이다(약정시간이 없으면 같다).
+  const after = inclusiveWageBreakdown({ ...terms, nonCompetePay: ncp });
+  // 떼고 남는 기본급이 없으면 엔진은 남는 몫까지만 뗀다(nonCompeteCapped) — 그때는 모자란 만큼을 음수로 돌려
+  // 입력 검사(nonCompetePayError)가 거르게 한다
+  const basePayAfter = after.nonCompeteCapped ? after.nonCompetePay - ncp : after.basePay;
   const positionAllow = t.positionAllow || 0;
   const monthlyTotal = (t.baseWage || 0) + positionAllow;
   const minWageBase = basePayAfter + positionAllow + (t.mealAllow || 0) + (t.carAllow || 0);
   return {
     baseHours,
-    basePayBefore: iw.basePay,
+    basePayBefore: before.basePay,
     basePayAfter,
     monthlyTotal,
     wageTotal: monthlyTotal - ncp,
     minWageHourly: baseHours > 0 ? Math.round(minWageBase / baseHours) : 0,
+    hourlyBefore: before.hourlyWage,
+    hourlyAfter: after.hourlyWage,
   };
 }
 
@@ -208,7 +230,8 @@ export function resolveNonCompetePay(args: {
 //    **통상시급의 분자에는 넣지 않는다**(2026-11 결정 — v1.59.2. 그 전에는 넣었다): 보상금은 근로의 대가가 아니라
 //    경업금지 의무의 대가라는 것이 계약의 입장이라, 어떤 경우에도 임금(근로소득)의 모양으로 다루지 않는다.
 //    근로계약서 제4조 ③ 이 「통상시급의 산정에 포함하지 아니한다」고 적고 명세서의 통상시급 식에도 없다.
-//    ⚠ 월급제 보상금(총액 안에서 뗀 몫)은 위 설명대로 여전히 기준급여 전체로 통상시급을 낸다 — 두 갈래가 다르다.
+//    월급제 보상금(총액 안에서 뗀 몫)도 같은 원칙이다(v1.59.3 — 통상시급 = 총액 − 보상금 기준). 퇴직급여
+//    산정기준에도 두 갈래 모두 넣지 않는다.
 //    ⚠ 보상금이 임금으로 판단되면 뺀 만큼이 연장·휴일·야간·연차수당의 차액이 된다(노무 자문 대목).
 
 /**
