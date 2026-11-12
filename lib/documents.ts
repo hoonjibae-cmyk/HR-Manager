@@ -12,7 +12,7 @@ import {
   NON_COMPETE_RETURN_DAYS,
   ratioPctLabel,
 } from "./non-compete";
-import { bizPayerMissingMessage, DEFAULT_BIZ_PAYER_SERVICE } from "./ratio-employee";
+import { bizPayerMissingMessage, DEFAULT_BIZ_PAYER_SERVICE, hasSplitIncome } from "./ratio-employee";
 
 /**
  * 부서가 정하는 서류 정책 — 어떤 서류를 발급할지.
@@ -976,7 +976,7 @@ export function needsBizPayerContract(
   employee?: Pick<DocEmployee, "payScheme"> | null
 ): boolean {
   const scheme = paySchemeOfTemplate(contract.templateKey) ?? employee?.payScheme;
-  return scheme === "RATIO" && contract.ratioEmployee === true && (contract.ratioWageCap ?? 0) > 0;
+  return hasSplitIncome({ payScheme: scheme, ratioEmployee: contract.ratioEmployee, ratioWageCap: contract.ratioWageCap });
 }
 
 /* ================== 인센티브 산정 계약서 (강사) — 별지, 원문 전문 ================== */

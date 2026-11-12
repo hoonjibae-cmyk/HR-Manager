@@ -14,61 +14,27 @@
 // (확인서 제6조) 유보금이 있는 달에는 급여 줄 뒤에 유보금 줄이 따로 붙는다.
 // 세무 시트의 `입금액(공제후)` 은 이미 유보액을 뺀 금액이라, 두 줄을 그대로 더하면 맞아떨어진다.
 //
+// **받는 통장은 셋까지 갈린다** — 급여(근로소득) 계좌 · 퇴직유보금 계좌 · 사업소득용 계좌(v1.62).
+// 사업소득용 계좌는 비율제 근로계약의 근로소득 상한 초과분, 곧 **별도 사업장이 보내는 사업소득**을 받는
+// 통장이다(`bizIncomeDestination`). 그 돈은 출금 계좌도 달라 별도 사업장 파일(`payer: "BIZ"`)에만 실린다.
+//
 // 파일 형식은 **.xls(BIFF8)** 로 낸다 — 양식 안내문이 xls/csv/txt 만 받는다고 못박고 있다.
 
 import * as XLSX from "xlsx";
-import { isContractorContract } from "./constants";
+import { isContractorContract, isRatioEmployee } from "./constants";
 import { recordSplit } from "./ratio-employee";
+import { bizIncomeDestination, maskAccount, normalizeAccountNo, normalizeBankName } from "./bank-account";
 
-/* ============================ 은행명 ============================ */
+export { bizIncomeDestination, maskAccount, normalizeAccountNo, normalizeBankName };
+export type { BizIncomeDestination, BizIncomeSource } from "./bank-account";
 
-/**
- * 은행 표기 통일 — 사람이 "국민"/"KB"/"국민은행" 아무렇게나 적어 두므로 정식 명칭으로 맞춘다.
- * 은행은 은행코드("004")나 약칭("국민")도 받지만, 사람이 파일을 눈으로 검토하는 단계가 있어
- * 이름을 다 적어 주는 쪽이 낫다. 표에 없는 값은 **그대로 통과시킨다** — 지방은행·조합처럼
- * 여기 없는 곳을 임의로 고치면 오히려 이체가 실패한다.
- */
-const BANK_ALIASES: Record<string, string[]> = {
-  국민은행: ["국민", "kb", "kb국민", "국민은행", "kb국민은행"],
-  신한은행: ["신한", "신한은행"],
-  우리은행: ["우리", "우리은행"],
-  하나은행: ["하나", "하나은행", "keb하나", "keb하나은행", "외환", "외환은행"],
-  기업은행: ["기업", "ibk", "ibk기업", "기업은행", "ibk기업은행"],
-  농협은행: ["농협", "nh", "nh농협", "농협은행", "단위농협", "지역농협"],
-  수협은행: ["수협", "수협은행"],
-  산업은행: ["산업", "kdb", "산업은행", "kdb산업은행"],
-  SC제일은행: ["sc", "sc제일", "제일", "sc제일은행", "스탠다드차타드"],
-  한국씨티은행: ["씨티", "citi", "한국씨티", "씨티은행", "한국씨티은행"],
-  우체국: ["우체국", "우정사업본부", "우체국은행"],
-  카카오뱅크: ["카카오", "카뱅", "카카오뱅크"],
-  토스뱅크: ["토스", "토스뱅크"],
-  케이뱅크: ["케이뱅크", "k뱅크", "kbank", "케이"],
-  새마을금고: ["새마을", "새마을금고", "mg새마을금고", "mg"],
-  신협: ["신협", "신용협동조합"],
-  부산은행: ["부산", "부산은행", "bnk부산"],
-  대구은행: ["대구", "대구은행", "im뱅크", "im"],
-  광주은행: ["광주", "광주은행"],
-  전북은행: ["전북", "전북은행"],
-  경남은행: ["경남", "경남은행", "bnk경남"],
-  제주은행: ["제주", "제주은행"],
-};
+/* ============================ 은행명·계좌 ============================ */
+//
+// 은행명·계좌번호 정리와 사업소득용 계좌 판정은 `lib/bank-account.ts` 에 있다(엑셀 라이브러리가 없는 순수
+// 모듈 — 직원 폼·직원 상세 화면이 함께 쓴다). 여기서 쓰던 이름 그대로 다시 내보낸다.
 
+/** 머리글 비교용 — 공백을 떼고 소문자로 */
 const normKey = (s: unknown) => String(s ?? "").replace(/\s+/g, "").toLowerCase();
-
-/** "국민" / "KB" / " 국민은행 " → "국민은행". 모르는 값은 공백만 정리해 그대로 돌려준다 */
-export function normalizeBankName(v: unknown): string {
-  const k = normKey(v);
-  if (!k) return "";
-  for (const [canon, aliases] of Object.entries(BANK_ALIASES)) {
-    if (normKey(canon) === k || aliases.some((a) => normKey(a) === k)) return canon;
-  }
-  return String(v).trim();
-}
-
-/** "110-503-740850" / "110 503 740850" → "110503740850" (은행이 구분자를 받지 않는다) */
-export function normalizeAccountNo(v: unknown): string {
-  return String(v ?? "").replace(/\D/g, "");
-}
 
 /* ============================ 이체 줄 만들기 ============================ */
 
@@ -96,6 +62,10 @@ export interface TransferPayrollRecord {
     bankHolder?: string | null;
     retentionBank?: string | null;
     retentionAccount?: string | null;
+    /** 사업소득용 계좌 — 별도 사업장이 보내는 사업소득을 받는 통장. 비면 급여 계좌로 보낸다 */
+    bizIncomeBank?: string | null;
+    bizIncomeAccount?: string | null;
+    bizIncomeHolder?: string | null;
   };
 }
 
@@ -157,6 +127,11 @@ export interface TransferPlan {
   zeroAmount: string[];
   /** 이 회사 파일에서 빠진 별도 사업장 몫이 있는 사람 — 별도 사업장 파일을 따로 받아야 한다 */
   bizExcluded: string[];
+  /**
+   * 별도 사업장 파일에서 **사업소득용 계좌가 없어 급여 계좌로 보내는** 사람 — 근로소득과 사업소득을 다른
+   * 통장으로 가르려면 직원 정보에 사업소득용 계좌를 넣어야 한다. 이 회사 파일에서는 늘 비어 있다.
+   */
+  bizToSalaryAccount: string[];
   total: number;
 }
 
@@ -176,29 +151,44 @@ export function buildTransferRows(args: BuildTransferArgs): TransferPlan {
   const missingAccount: string[] = [];
   const zeroAmount: string[] = [];
   const bizExcluded: string[] = [];
+  const bizToSalaryAccount: string[] = [];
 
-  // 별도 사업장 파일 — 상한 초과분만, 사업소득으로. 유보금·이 회사 급여는 싣지 않는다
+  // 별도 사업장 파일 — 상한 초과분만, 사업소득으로. 유보금·이 회사 급여는 싣지 않는다.
+  // 받는 통장은 사업소득용 계좌가 우선이고, 없으면 급여 계좌다(누가 그랬는지 돌려준다)
   if (args.payer === "BIZ") {
     for (const r of records) {
       const amount = bizNetOf(r);
       if (amount <= 0) continue;
       const e = r.employee;
-      const bank = normalizeBankName(e.bankName);
-      const account = normalizeAccountNo(e.bankAccount);
-      if (!bank || !account) missingAccount.push(e.name);
-      else
-        rows.push({
-          bank,
-          account,
-          amount,
-          holder: (e.bankHolder || "").trim() || e.name,
-          depositMemo: `${alias}_${mm}사업소득`,
-          withdrawMemo: `${e.name}_${mm}`,
-          kind: "PAY",
-          name: e.name,
-        });
+      const dest = bizIncomeDestination(e);
+      if (dest.source === "NONE") {
+        missingAccount.push(e.name);
+        continue;
+      }
+      if (dest.source === "INCOMPLETE") {
+        missingAccount.push(`${e.name}(사업소득용 계좌 — ${dest.bank ? "계좌번호" : "은행"} 빠짐)`);
+        continue;
+      }
+      if (dest.source === "PAY") bizToSalaryAccount.push(e.name);
+      rows.push({
+        bank: dest.bank,
+        account: dest.account,
+        amount,
+        holder: dest.holder,
+        depositMemo: `${alias}_${mm}사업소득`,
+        withdrawMemo: `${e.name}_${mm}`,
+        kind: "PAY",
+        name: e.name,
+      });
     }
-    return { rows, missingAccount, zeroAmount, bizExcluded, total: rows.reduce((a, r) => a + r.amount, 0) };
+    return {
+      rows,
+      missingAccount,
+      zeroAmount,
+      bizExcluded,
+      bizToSalaryAccount,
+      total: rows.reduce((a, r) => a + r.amount, 0),
+    };
   }
 
   const pay: TransferRow[] = [];
@@ -258,6 +248,7 @@ export function buildTransferRows(args: BuildTransferArgs): TransferPlan {
     missingAccount,
     zeroAmount,
     bizExcluded,
+    bizToSalaryAccount,
     total: rows.reduce((a, r) => a + r.amount, 0),
   };
 }
@@ -349,13 +340,21 @@ export function buildBankTransferWorkbook(args: BuildTransferArgs): TransferWork
 //
 // 유보금 줄(입금통장표시가 '퇴직유보금…')은 **퇴직유보금 통장**으로 따로 넣는다 — 같은 사람이
 // 두 줄인데 계좌가 다를 수 있어(급여는 기업은행, 유보금은 우리은행) 뭉뚱그리면 덮어써 버린다.
+//
+// '사업소득' 줄도 같은 이유로 가린다(v1.62) — **비율제 근로자(4대보험)의 사업소득 줄은 별도 사업장이 보내는
+// 몫**이라 사업소득용 계좌로 들어간다. 이 회사가 그 사람에게 보내는 돈은 '급여' 로 찍히기 때문이다
+// (`incomeLabelOf`). 급여 계좌로 뭉뚱그리면 별도 사업장 이체 파일을 올렸을 때 급여 계좌가 사업소득용 계좌로
+// 덮인다. 위탁계약자의 사업소득 줄은 그것이 곧 그 사람의 (하나뿐인) 급여 계좌다 — 예전 그대로.
+
+/** 양식 한 줄이 가리키는 통장 — 입금통장표시로 가린다. 어느 칸에 넣을지는 직원을 보고 정한다 */
+export type BankAccountKind = TransferKind | "BIZ_INCOME";
 
 export interface BankAccountRow {
   rowNo: number;
   name: string; // 예상예금주 = 직원 성명
   bankName: string;
   bankAccount: string;
-  kind: TransferKind;
+  kind: BankAccountKind;
 }
 
 const HEADER_ALIAS: Record<string, string[]> = {
@@ -416,7 +415,7 @@ export function parseBankAccountWorkbook(buf: Buffer | Uint8Array): {
       name,
       bankName,
       bankAccount,
-      kind: memo.includes("유보") ? "RETENTION" : "PAY",
+      kind: memo.includes("유보") ? "RETENTION" : memo.includes("사업소득") ? "BIZ_INCOME" : "PAY",
     });
   }
   return { rows, skipped };
@@ -429,6 +428,11 @@ export interface BankAccountTarget {
   bankAccount?: string | null;
   retentionBank?: string | null;
   retentionAccount?: string | null;
+  bizIncomeBank?: string | null;
+  bizIncomeAccount?: string | null;
+  /** '사업소득' 줄을 어느 칸에 넣을지 가린다 — 비율제 근로자면 사업소득용 계좌, 아니면 급여 계좌 */
+  payScheme?: string | null;
+  ratioEmployee?: boolean | null;
 }
 
 export interface BankAccountChange {
@@ -453,11 +457,6 @@ export interface BankAccountPlan {
   matchedCount: number;
   changeCount: number;
   unmatched: string[];
-}
-
-/** 계좌번호는 화면·이력에 뒤 4자리만 남긴다 */
-export function maskAccount(v: string): string {
-  return v.length > 4 ? `${"•".repeat(v.length - 4)}${v.slice(-4)}` : v;
 }
 
 /**
@@ -501,6 +500,12 @@ export function planBankAccounts(
           ? [
               ["retentionBank", "유보금 은행", r.bankName],
               ["retentionAccount", "유보금 계좌", r.bankAccount],
+            ]
+          : r.kind === "BIZ_INCOME" && isRatioEmployee(target)
+          ? [
+              // 근로자의 '사업소득' 줄 = 별도 사업장이 보내는 몫 (이 회사 몫은 '급여' 로 찍힌다)
+              ["bizIncomeBank", "사업소득용 은행", r.bankName],
+              ["bizIncomeAccount", "사업소득용 계좌", r.bankAccount],
             ]
           : [
               ["bankName", "은행", r.bankName],

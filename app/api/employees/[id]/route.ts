@@ -3,6 +3,7 @@ import { logActivity } from "@/lib/activity";
 import { prisma } from "@/lib/db";
 import { isAuthed } from "@/lib/auth";
 import { CONTRACT_OWNED_FIELDS } from "@/lib/contracts";
+import { bizIncomeAccountError } from "@/lib/bank-account";
 
 export const dynamic = "force-dynamic";
 
@@ -29,8 +30,29 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     "name", "rrn", "birth", "department", "position", "duty", "address",
     "phone", "email", "workEmail", "slackUserId", "bankName", "bankAccount", "bankHolder",
     "retentionBank", "retentionAccount",
+    // 사업소득용 계좌 — 별도 사업장이 보내는 사업소득(근로소득 상한 초과분)을 받는 통장. 비면 급여 계좌로 나간다
+    "bizIncomeBank", "bizIncomeAccount", "bizIncomeHolder",
   ];
   for (const f of fields) if (f in body) data[f] = body[f] || null;
+
+  // 사업소득용 계좌는 은행·계좌번호가 **함께** 있어야 한다 — 한쪽만 보낸 부분 수정이면 저장돼 있는 나머지와
+  // 합쳐서 본다(고친 뒤의 모습을 검사한다). 화면과 같은 함수.
+  const bizKeys = ["bizIncomeBank", "bizIncomeAccount", "bizIncomeHolder"] as const;
+  if (bizKeys.some((k) => k in body)) {
+    const cur = bizKeys.every((k) => k in body)
+      ? null
+      : await prisma.employee.findUnique({
+          where: { id: Number(params.id) },
+          select: { bizIncomeBank: true, bizIncomeAccount: true, bizIncomeHolder: true },
+        });
+    const after = (k: (typeof bizKeys)[number]) => (k in body ? data[k] : cur?.[k] ?? null);
+    const bizAcctErr = bizIncomeAccountError({
+      bank: after("bizIncomeBank"),
+      account: after("bizIncomeAccount"),
+      holder: after("bizIncomeHolder"),
+    });
+    if (bizAcctErr) return NextResponse.json({ error: bizAcctErr }, { status: 400 });
+  }
   for (const f of ["dependents", "nonTaxTotal"])
     if (f in body) data[f] = Math.max(Number(body[f]) || 0, 0);
   // parkingFee(월 정기주차 비용)는 보수조건이 아니라 복리후생이라 여기서 받는다.

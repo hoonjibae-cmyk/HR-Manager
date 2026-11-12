@@ -144,6 +144,7 @@ describe("encryptEmployeeData — 쓰기 인자 훑기", () => {
       rrn: RRN,
       bankAccount: "1234567890",
       retentionAccount: "9998887776",
+      bizIncomeAccount: "3333011234567",
       phone: "010-0000-0000",
       baseWage: 3_000_000,
     });

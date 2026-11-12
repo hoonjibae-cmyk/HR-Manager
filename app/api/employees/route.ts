@@ -6,6 +6,7 @@ import { templateKeyOf } from "@/lib/contracts";
 import { parseSchedule } from "@/lib/constants";
 import { PROBATION_MONTHS } from "@/lib/probation";
 import { normalizeRatioTerms } from "@/lib/ratio-employee";
+import { bizIncomeAccountError } from "@/lib/bank-account";
 import {
   resolveNonCompetePay,
   nonCompeteRequired,
@@ -27,6 +28,14 @@ export async function GET() {
 export async function POST(req: Request) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json();
+
+  // 사업소득용 계좌 — 은행·계좌번호가 한쪽만 오면 받지 않는다(화면과 같은 함수. 이체 파일은 그런 계좌로 보내지 않는다)
+  const bizAcctErr = bizIncomeAccountError({
+    bank: body.bizIncomeBank,
+    account: body.bizIncomeAccount,
+    holder: body.bizIncomeHolder,
+  });
+  if (bizAcctErr) return NextResponse.json({ error: bizAcctErr }, { status: 400 });
 
   // 사번 자동 생성
   let empNo = body.empNo;
@@ -54,6 +63,10 @@ export async function POST(req: Request) {
     bankHolder: body.bankHolder || null,
     retentionBank: body.retentionBank || null,
     retentionAccount: body.retentionAccount || null,
+    // 사업소득용 계좌 — 별도 사업장이 보내는 사업소득을 받는 통장(비율제 근로계약 + 근로소득 상한). 비면 급여 계좌
+    bizIncomeBank: body.bizIncomeBank || null,
+    bizIncomeAccount: body.bizIncomeAccount || null,
+    bizIncomeHolder: body.bizIncomeHolder || null,
     hireDate: new Date(body.hireDate),
     resignDate: body.resignDate ? new Date(body.resignDate) : null,
     active: body.active ?? true,

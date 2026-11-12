@@ -230,3 +230,23 @@ export function bizPayerMissingMessage(missing: string[]): string {
     `「별도 사업장(사업소득 지급처)」에서 빈 항목(${missing.join("·")})을 채워야 그 사업장의 용역위탁계약서·사업소득 지급명세서·이체 파일을 만들 수 있습니다.`
   );
 }
+
+/* ───────────── 사업소득용 계좌 ───────────── */
+//
+// 근로소득(이 회사)과 사업소득(별도 사업장)을 함께 받는 직원은 **받는 통장도 가를 수 있다**(v1.62 요청 —
+// 「근로소득 계좌와 사업소득 계좌를 서로 구분」). 급여 계좌·퇴직유보금 계좌와 별도로 `Employee.bizIncome*` 에
+// 사업소득용 계좌를 넣어 두면 별도 사업장 이체 파일이 그 계좌로 나간다. 비워 두면 예전처럼 급여 계좌로 나가고,
+// 이체 파일을 받을 때 그 사실을 알린다 — 조용히 급여 계좌로 나가면 갈랐다고 믿은 채로 한 통장에 섞인다.
+// 어느 통장으로 가는지(`bizIncomeDestination`)와 입력 검사(`bizIncomeAccountError`)는 lib/bank-account.ts 에 있다.
+
+/**
+ * **근로소득과 별도 사업장 사업소득을 함께 받는 구조인가** — 비율제 근로계약에 근로소득 상한을 둔 경우.
+ * 직원 카드는 그대로, 계약은 급여형태를 풀어서 넘긴다(`paySchemeOfTemplate(c.templateKey) ?? 카드`).
+ * 직원 폼이 「사업소득용 계좌」 칸을 이 직원에게만 보이고, 계약서 세트의 용역위탁계약서
+ * (`needsBizPayerContract`)도 같은 판정을 쓴다 — 둘로 두면 계약서는 나가는데 계좌 칸은 없는 식으로 갈라진다.
+ */
+export function hasSplitIncome(
+  t: { payScheme?: string | null; ratioEmployee?: unknown; ratioWageCap?: unknown } | null | undefined
+): boolean {
+  return !!t && t.payScheme === "RATIO" && t.ratioEmployee === true && Number(t.ratioWageCap ?? 0) > 0;
+}

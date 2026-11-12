@@ -40,7 +40,7 @@ export async function GET(req: Request) {
   const biz = searchParams.get("payer") === "biz";
   if (biz && !company.bizPayer)
     return NextResponse.json({ error: bizPayerMissingMessage(company.bizPayerMissing) }, { status: 400 });
-  const { buffer, rows, missingAccount, zeroAmount, bizExcluded, total } = buildBankTransferWorkbook({
+  const { buffer, rows, missingAccount, zeroAmount, bizExcluded, bizToSalaryAccount, total } = buildBankTransferWorkbook({
     year,
     month,
     alias: biz ? company.bizPayer!.alias : company.transferAlias,
@@ -51,7 +51,10 @@ export async function GET(req: Request) {
     return NextResponse.json(
       {
         error: biz
-          ? `${year}년 ${month}월에는 별도 사업장이 지급할 사업소득(근로소득 상한 초과분)이 없습니다.`
+          ? missingAccount.length
+            ? // 줄 돈은 있는데 받을 계좌가 없다 — '지급할 사업소득이 없다' 고 답하면 그 달 사업소득을 놓친다
+              `별도 사업장이 지급할 사업소득은 있지만 받을 계좌가 없습니다: ${missingAccount.join(", ")}. 직원 정보의 사업소득용 계좌(또는 급여 계좌)를 확인하세요.`
+            : `${year}년 ${month}월에는 별도 사업장이 지급할 사업소득(근로소득 상한 초과분)이 없습니다.`
           : "이체할 줄이 없습니다. 직원 정보에 은행·계좌번호가 입력돼 있는지 확인하세요.",
       },
       { status: 400 }
@@ -62,8 +65,16 @@ export async function GET(req: Request) {
     action: "PAYROLL_EXPORT",
     summary:
       `${year}.${month} ${biz ? `별도 사업장(${company.bizPayer!.name}) ` : ""}은행 이체 파일 내려받기 — ${rows.length}건 / ${total.toLocaleString()}원` +
-      (missingAccount.length ? ` (계좌 없음 ${missingAccount.length}명 제외)` : ""),
-    meta: missingAccount.length ? { missingAccount } : undefined,
+      (missingAccount.length ? ` (계좌 없음 ${missingAccount.length}명 제외)` : "") +
+      (bizToSalaryAccount.length ? ` (사업소득용 계좌가 없어 급여 계좌로 ${bizToSalaryAccount.length}명)` : ""),
+    meta:
+      missingAccount.length || bizToSalaryAccount.length
+        ? {
+            ...(missingAccount.length ? { missingAccount } : {}),
+            // 근로소득과 사업소득을 다른 통장으로 가르려던 달에 어느 계좌로 나갔는지 되짚을 수 있게 남긴다
+            ...(bizToSalaryAccount.length ? { bizToSalaryAccount } : {}),
+          }
+        : undefined,
   }).catch(() => {});
 
   const filename = `${biz ? "이체_별도사업장" : "이체"}_${year}-${String(month).padStart(2, "0")}.xls`;
@@ -79,6 +90,8 @@ export async function GET(req: Request) {
           zeroAmount,
           // 이 회사 파일에서 빠진 별도 사업장 몫 — 화면이 '별도 사업장 이체 파일' 을 따로 받으라고 알린다
           bizExcluded,
+          // 별도 사업장 파일에서 사업소득용 계좌가 없어 급여 계좌로 보내는 사람 — 통장을 가르려면 직원 정보에 넣어야 한다
+          bizToSalaryAccount,
           count: rows.length,
           total,
           // 여기가 돈이 실제로 나가는 자리다 — 오늘 기준 이미 퇴직한 사람이 파일에

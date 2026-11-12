@@ -23,6 +23,10 @@ const rec = (
   retentionD: o.retentionD ?? 0,
   incomeType: o.incomeType ?? "EMPLOYEE",
   payScheme: o.payScheme ?? "MONTHLY",
+  ratioEmployee: o.ratioEmployee,
+  bizIncomeP: o.bizIncomeP,
+  bizTaxD: o.bizTaxD,
+  bizLocalTaxD: o.bizLocalTaxD,
   employee: {
     name: o.name,
     empNo: o.empNo ?? "1",
@@ -32,6 +36,9 @@ const rec = (
     bankHolder: o.bankHolder ?? null,
     retentionBank: o.retentionBank ?? null,
     retentionAccount: o.retentionAccount ?? null,
+    bizIncomeBank: o.bizIncomeBank ?? null,
+    bizIncomeAccount: o.bizIncomeAccount ?? null,
+    bizIncomeHolder: o.bizIncomeHolder ?? null,
   },
 });
 
@@ -239,7 +246,9 @@ describe("계좌 일괄 등록 — 같은 양식을 거꾸로 읽는다", () => 
   it("은행·계좌·예금주를 읽는다", () => {
     const { rows } = parseBankAccountWorkbook(file);
     expect(rows).toHaveLength(3);
-    expect(rows[0]).toMatchObject({ name: "김은진", bankName: "신한은행", bankAccount: "110503740850", kind: "PAY" });
+    // 입금통장표시가 '사업소득' 인 줄 — 어느 칸에 넣을지는 직원을 보고 정한다(아래 「사업소득 줄」)
+    expect(rows[0]).toMatchObject({ name: "김은진", bankName: "신한은행", bankAccount: "110503740850", kind: "BIZ_INCOME" });
+    expect(rows[1]).toMatchObject({ name: "안정미", kind: "PAY" });
   });
 
   it("유보금 줄은 퇴직유보금 통장으로 간다 — 뭉뚱그리면 급여 계좌를 덮어쓴다", () => {
@@ -318,5 +327,178 @@ describe("계좌 일괄 등록 — 같은 양식을 거꾸로 읽는다", () => 
       { rowNo: 2, name: "안정미", bankName: "기업은행", bankAccount: "50003160201010", kind: "PAY" },
       { rowNo: 3, name: "안정미", bankName: "우리은행", bankAccount: "1002833519064", kind: "RETENTION" },
     ]);
+  });
+});
+
+/* ───────────── 사업소득용 계좌 (v1.62) ───────────── */
+//
+// 근로소득(이 회사)과 사업소득(별도 사업장)을 함께 받는 직원 — 비율제 근로계약 + 근로소득 상한.
+// 급여 계좌·퇴직유보금 계좌와 별도로 사업소득용 계좌를 두면 별도 사업장 파일이 그 계좌로 나간다.
+
+describe("사업소득용 계좌 — 별도 사업장이 보내는 사업소득은 다른 통장으로", () => {
+  // 가상 직원: 실수령 5,350,000 가운데 별도 사업장 몫 1,450,000 − 3.3%(43,500 + 4,350) = 1,402,150
+  const split = (o: Partial<TransferPayrollRecord["employee"]> = {}) =>
+    rec({
+      name: "가상강사",
+      net: 5_350_000,
+      payScheme: "RATIO",
+      ratioEmployee: true,
+      bizIncomeP: 1_450_000,
+      bizTaxD: 43_500,
+      bizLocalTaxD: 4_350,
+      bankName: "신한",
+      bankAccount: "110-503-740850",
+      ...o,
+    });
+  const bizFile = (records: TransferPayrollRecord[]) =>
+    buildTransferRows({ year: 2026, month: 11, alias: "가상A", records, payer: "BIZ" });
+
+  it("사업소득용 계좌가 있으면 별도 사업장 파일은 그 계좌로 나간다", () => {
+    const plan = bizFile([split({ bizIncomeBank: "카카오", bizIncomeAccount: "3333-01-1234567" })]);
+    expect(plan.rows).toEqual([
+      expect.objectContaining({
+        bank: "카카오뱅크",
+        account: "3333011234567",
+        amount: 1_402_150,
+        holder: "가상강사",
+        depositMemo: "가상A_11월사업소득",
+      }),
+    ]);
+    expect(plan.bizToSalaryAccount).toEqual([]);
+    expect(plan.missingAccount).toEqual([]);
+  });
+
+  it("이 회사 파일(근로소득)은 그대로 급여 계좌로 나간다 — 두 통장이 갈린다", () => {
+    const r = split({ bizIncomeBank: "카카오뱅크", bizIncomeAccount: "3333011234567" });
+    const company = build([r]);
+    expect(company.rows).toEqual([
+      expect.objectContaining({ bank: "신한은행", account: "110503740850", amount: 5_350_000 - 1_402_150, depositMemo: "유쌤_7월급여" }),
+    ]);
+    expect(company.bizExcluded).toEqual(["가상강사"]);
+    // 이 회사 파일에는 사업소득 줄이 없으므로 알릴 것도 없다
+    expect(company.bizToSalaryAccount).toEqual([]);
+    // 두 파일을 더하면 그 사람의 실수령 전체
+    expect(company.total + bizFile([r]).total).toBe(5_350_000);
+  });
+
+  it("사업소득용 계좌가 없으면 급여 계좌로 나가고 누구인지 알린다 — 조용히 한 통장에 섞이지 않게", () => {
+    const plan = bizFile([split()]);
+    expect(plan.rows).toEqual([expect.objectContaining({ bank: "신한은행", account: "110503740850", amount: 1_402_150 })]);
+    expect(plan.bizToSalaryAccount).toEqual(["가상강사"]);
+  });
+
+  it("예금주 — 사업소득용 계좌는 그 계좌의 예금주를 쓰고, 급여 계좌의 예금주를 빌리지 않는다", () => {
+    // 급여 계좌는 가족 명의, 사업소득용 계좌는 상호 명의 사업자 통장
+    const own = bizFile([split({ bankHolder: "가상보호자", bizIncomeBank: "국민", bizIncomeAccount: "123456789012", bizIncomeHolder: " 가상연구소(가상강사) " })]);
+    expect(own.rows[0].holder).toBe("가상연구소(가상강사)");
+    // 사업소득용 예금주가 비면 성명 — 급여 계좌의 예금주(가상보호자)가 아니다
+    const blank = bizFile([split({ bankHolder: "가상보호자", bizIncomeBank: "국민", bizIncomeAccount: "123456789012" })]);
+    expect(blank.rows[0].holder).toBe("가상강사");
+    // 사업소득용 계좌가 없어 급여 계좌로 가면 그 계좌의 예금주 그대로
+    expect(bizFile([split({ bankHolder: "가상보호자" })]).rows[0].holder).toBe("가상보호자");
+  });
+
+  it("반만 들어 있으면 급여 계좌로 넘겨짚지 않는다 — 줄을 만들지 않고 무엇이 빠졌는지 알린다", () => {
+    const noAccount = bizFile([split({ bizIncomeBank: "국민은행" })]);
+    expect(noAccount.rows).toEqual([]);
+    expect(noAccount.missingAccount).toEqual(["가상강사(사업소득용 계좌 — 계좌번호 빠짐)"]);
+    expect(noAccount.bizToSalaryAccount).toEqual([]);
+
+    const noBank = bizFile([split({ bizIncomeAccount: "123-456" })]);
+    expect(noBank.rows).toEqual([]);
+    expect(noBank.missingAccount).toEqual(["가상강사(사업소득용 계좌 — 은행 빠짐)"]);
+  });
+
+  it("어느 계좌도 없으면 계좌 없음으로 알린다", () => {
+    const plan = bizFile([split({ bankName: null, bankAccount: null })]);
+    expect(plan.rows).toEqual([]);
+    expect(plan.missingAccount).toEqual(["가상강사"]);
+  });
+
+  it("급여 계좌가 비어도 사업소득용 계좌가 있으면 별도 사업장 파일은 나간다", () => {
+    const r = split({ bankName: null, bankAccount: null, bizIncomeBank: "국민은행", bizIncomeAccount: "123456789012" });
+    expect(bizFile([r]).rows).toHaveLength(1);
+    // 이 회사 파일은 급여 계좌가 없어 빠진다 — 사업소득용 계좌로 대신 보내지 않는다
+    const company = build([r]);
+    expect(company.rows).toEqual([]);
+    expect(company.missingAccount).toEqual(["가상강사"]);
+  });
+
+  it("퇴직유보금·위탁계약자의 줄은 사업소득용 계좌와 무관하다 — 이 회사 파일은 예전 그대로", () => {
+    const plan = build([
+      rec({ name: "가상위탁", net: 3_000_000, payScheme: "RATIO", isContractor: true, bizIncomeBank: "국민은행", bizIncomeAccount: "999" }),
+      rec({ name: "가상인센", net: 2_000_000, retentionD: 100_000, payScheme: "INCENTIVE", bizIncomeBank: "국민은행", bizIncomeAccount: "999" }),
+    ]);
+    expect(plan.rows.map((r) => [r.name, r.depositMemo, r.account])).toEqual([
+      ["가상위탁", "유쌤_7월사업소득", "110503740850"],
+      ["가상인센", "유쌤_7월급여", "110503740850"],
+      ["가상인센", "퇴직유보금_7월", "110503740850"],
+    ]);
+  });
+});
+
+describe("계좌 일괄 등록 — '사업소득' 줄은 직원을 보고 칸을 정한다", () => {
+  const worker = { id: 1, name: "가상강사", payScheme: "RATIO", ratioEmployee: true };
+  const contractor = { id: 2, name: "가상위탁", payScheme: "RATIO", ratioEmployee: false };
+
+  it("비율제 근로자의 사업소득 줄은 사업소득용 계좌로 — 이 회사가 보내는 몫은 '급여' 로 찍히기 때문이다", () => {
+    const plan = planBankAccounts(
+      [{ rowNo: 2, name: "가상강사", bankName: "카카오뱅크", bankAccount: "3333011234567", kind: "BIZ_INCOME" }],
+      [{ ...worker, bankName: "신한은행", bankAccount: "110503740850" }]
+    );
+    expect(plan.rows[0].data).toEqual({ bizIncomeBank: "카카오뱅크", bizIncomeAccount: "3333011234567" });
+    expect(plan.rows[0].changes.map((c) => c.label)).toEqual(["사업소득용 은행", "사업소득용 계좌"]);
+    // 계좌번호는 화면에 가려서 낸다
+    expect(plan.rows[0].changes[1].to).toBe("•••••••••4567");
+  });
+
+  it("위탁계약자의 사업소득 줄은 그 사람의 급여 계좌다 — 예전 그대로", () => {
+    const plan = planBankAccounts(
+      [{ rowNo: 2, name: "가상위탁", bankName: "신한은행", bankAccount: "110503740850", kind: "BIZ_INCOME" }],
+      [contractor]
+    );
+    expect(plan.rows[0].data).toEqual({ bankName: "신한은행", bankAccount: "110503740850" });
+  });
+
+  it("별도 사업장 이체 파일을 덮어쓰기로 올려도 급여 계좌가 사업소득용 계좌로 덮이지 않는다", () => {
+    const r = rec({
+      name: "가상강사",
+      net: 5_350_000,
+      payScheme: "RATIO",
+      ratioEmployee: true,
+      bizIncomeP: 1_450_000,
+      bizTaxD: 43_500,
+      bizLocalTaxD: 4_350,
+      bizIncomeBank: "카카오뱅크",
+      bizIncomeAccount: "3333011234567",
+    });
+    const { buffer } = buildBankTransferWorkbook({ year: 2026, month: 11, alias: "가상A", records: [r], payer: "BIZ" });
+    const { rows } = parseBankAccountWorkbook(buffer);
+    expect(rows).toEqual([{ rowNo: 2, name: "가상강사", bankName: "카카오뱅크", bankAccount: "3333011234567", kind: "BIZ_INCOME" }]);
+
+    // 급여 계좌만 등록된 직원 — 사업소득용 계좌 칸이 채워지고 급여 계좌는 손대지 않는다
+    const plan = planBankAccounts(rows, [{ ...worker, bankName: "신한은행", bankAccount: "110503740850" }], { overwrite: true });
+    expect(plan.rows[0].data).toEqual({ bizIncomeBank: "카카오뱅크", bizIncomeAccount: "3333011234567" });
+    expect(Object.keys(plan.rows[0].data)).not.toContain("bankAccount");
+  });
+
+  it("이 회사 파일의 '급여' 줄은 비율제 근로자도 급여 계좌로 간다", () => {
+    const plan = planBankAccounts(
+      [{ rowNo: 2, name: "가상강사", bankName: "신한은행", bankAccount: "110503740850", kind: "PAY" }],
+      [worker]
+    );
+    expect(plan.rows[0].data).toEqual({ bankName: "신한은행", bankAccount: "110503740850" });
+  });
+
+  it("이미 사업소득용 계좌가 있으면 덮어쓰지 않는다 (기본)", () => {
+    const rows = [{ rowNo: 2, name: "가상강사", bankName: "카카오뱅크", bankAccount: "3333011234567", kind: "BIZ_INCOME" as const }];
+    const target = [{ ...worker, bizIncomeBank: "국민은행", bizIncomeAccount: "999" }];
+    const keep = planBankAccounts(rows, target);
+    expect(keep.rows[0].changes).toEqual([]);
+    expect(keep.rows[0].kept).toHaveLength(2);
+    expect(planBankAccounts(rows, target, { overwrite: true }).rows[0].data).toEqual({
+      bizIncomeBank: "카카오뱅크",
+      bizIncomeAccount: "3333011234567",
+    });
   });
 });

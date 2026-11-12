@@ -33,6 +33,7 @@ const LABEL: Record<string, string> = {
   rrn: "주민등록번호",
   bankAccount: "급여계좌",
   retentionAccount: "유보금계좌",
+  bizIncomeAccount: "사업소득용계좌",
 };
 
 /** 화면·로그에 남길 때는 가린다 — 옮기는 작업 로그에 평문을 남기면 하는 일이 무의미해진다 */
@@ -64,6 +65,7 @@ async function main() {
       rrn: true,
       bankAccount: true,
       retentionAccount: true,
+      bizIncomeAccount: true,
     },
   });
 

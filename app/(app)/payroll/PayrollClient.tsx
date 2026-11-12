@@ -10,6 +10,7 @@ import {
   paySchemeLabelOf,
 } from "@/lib/constants";
 import { recordSplit } from "@/lib/ratio-employee";
+import { decodeHeaderJson } from "@/lib/header-json";
 import { Pill } from "@/components/ui";
 import { resignStatusOf, resignBadgeLabel, resignedSummary } from "@/lib/payroll-roster";
 import { isEstimatedHourly } from "@/lib/payroll";
@@ -370,7 +371,7 @@ export default function PayrollClient({ today }: { today: string }) {
       try {
         const raw = res.headers.get("X-Export-Warnings");
         if (raw) {
-          const w = JSON.parse(atob(raw));
+          const w = decodeHeaderJson(raw); // atob 만 쓰면 한글 이름이 깨진다 (lib/header-json.ts)
           const msgs = [
             w.missingId?.length
               ? `주민등록번호(ID)가 비어 있는 직원 ${w.missingId.length}명: ${w.missingId.join(", ")}\n→ 직원 정보에 입력한 뒤 다시 받으세요.`
@@ -415,7 +416,7 @@ export default function PayrollClient({ today }: { today: string }) {
       try {
         const raw = res.headers.get("X-Export-Warnings");
         if (raw) {
-          const w = JSON.parse(atob(raw));
+          const w = decodeHeaderJson(raw); // atob 만 쓰면 한글 이름이 깨진다 (lib/header-json.ts)
           const msgs = [
             w.missingAccount?.length
               ? `계좌가 없어 빠진 ${w.missingAccount.length}건: ${w.missingAccount.join(", ")}\n→ 직원 정보에 은행·계좌번호를 넣은 뒤 다시 받으세요.`
@@ -423,6 +424,11 @@ export default function PayrollClient({ today }: { today: string }) {
             w.zeroAmount?.length ? `지급액이 0원이라 빠진 직원: ${w.zeroAmount.join(", ")}` : "",
             w.bizExcluded?.length
               ? `별도 사업장이 지급하는 사업소득(근로소득 상한 초과분)은 이 파일에서 뺐습니다: ${w.bizExcluded.join(", ")}\n→ '🏦 별도 사업장 이체 파일' 을 따로 받아 그 사업장 계좌로 올리세요.`
+              : "",
+            // 별도 사업장 파일 — 사업소득용 계좌가 없으면 급여(근로소득) 계좌로 나간다. 통장을 가르려던 사람이
+            // 모르고 지나가지 않게 알린다(막지는 않는다 — 한 통장으로 받는 것도 정상이다)
+            w.bizToSalaryAccount?.length
+              ? `사업소득용 계좌가 없어 급여(근로소득) 계좌로 보내는 ${w.bizToSalaryAccount.length}명: ${w.bizToSalaryAccount.join(", ")}\n→ 근로소득과 다른 통장으로 받게 하려면 직원 정보 → 수정의 「사업소득용 계좌」를 넣은 뒤 다시 받으세요.`
               : "",
             // 돈이 실제로 나가는 파일이라 여기서 한 번 더 걸리게 한다 (막지는 않는다)
             w.resigned?.count

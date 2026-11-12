@@ -136,7 +136,7 @@ export function decryptField(stored: string | null | undefined): string | null |
 }
 
 /** 암호화 대상 컬럼 (Employee) — 늘리려면 여기와 스키마 주석만 고친다 */
-export const ENCRYPTED_EMPLOYEE_FIELDS = ["rrn", "bankAccount", "retentionAccount"] as const;
+export const ENCRYPTED_EMPLOYEE_FIELDS = ["rrn", "bankAccount", "retentionAccount", "bizIncomeAccount"] as const;
 export type EncryptedEmployeeField = (typeof ENCRYPTED_EMPLOYEE_FIELDS)[number];
 
 /** 쓰기 인자에서 대상 필드만 골라 암호화 (create/update 의 data 객체) */

@@ -22,7 +22,8 @@ import {
 import NonCompeteField from "./NonCompeteField";
 import NonCompeteRatioField from "./NonCompeteRatioField";
 import RatioContractField from "./RatioContractField";
-import { ratioFormSwitch } from "@/lib/ratio-employee";
+import { ratioFormSwitch, hasSplitIncome } from "@/lib/ratio-employee";
+import { bizIncomeAccountError } from "@/lib/bank-account";
 
 const DAYS: ScheduleDay["day"][] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -36,7 +37,17 @@ function defaultSchedule(): ScheduleDay[] {
   }));
 }
 
-export default function EmployeeForm({ initial }: { initial?: any }) {
+export default function EmployeeForm({
+  initial,
+  splitIncome,
+}: {
+  initial?: any;
+  /**
+   * 근로소득과 별도 사업장 사업소득을 함께 받는 계약이 이 직원에게 있는가(수정 화면이 계약 이력에서 구해 넘긴다).
+   * 직원 카드는 '오늘' 의 거울이라 발효 전인 계약이나 이미 끝난 계약의 지급분(급여는 다음 달에 나간다)을 못 본다.
+   */
+  splitIncome?: boolean;
+}) {
   const router = useRouter();
   const editing = !!initial?.id;
   const [saving, setSaving] = useState(false);
@@ -59,6 +70,10 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
     bankHolder: initial?.bankHolder ?? "",
     retentionBank: initial?.retentionBank ?? "",
     retentionAccount: initial?.retentionAccount ?? "",
+    // 사업소득용 계좌 — 별도 사업장이 보내는 사업소득(근로소득 상한 초과분)을 받는 통장. 비면 급여 계좌로 나간다
+    bizIncomeBank: initial?.bizIncomeBank ?? "",
+    bizIncomeAccount: initial?.bizIncomeAccount ?? "",
+    bizIncomeHolder: initial?.bizIncomeHolder ?? "",
     hireDate: initial?.hireDate ? String(initial.hireDate).slice(0, 10) : "",
     contractEnd: "", // 신규 등록 시 초기(기간제) 계약 종료일 — 공란이면 계약서에도 공란
     resignDate: initial?.resignDate ? String(initial.resignDate).slice(0, 10) : "",
@@ -133,9 +148,25 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
   const ncMissing =
     (ncRequired && !(Number(f.nonCompetePay) > 0)) || (ncrRequired && !(ncrFrac && ncrFrac > 0));
 
+  // 사업소득용 계좌 칸 — 근로소득(이 회사)과 사업소득(별도 사업장)을 함께 받는 직원에게만 보인다
+  // (비율제 근로계약 + 근로소득 상한). 이미 값이 있으면 구조가 바뀐 뒤에도 보인다 — 숨기면 지울 길이 없다.
+  const showBizAccount =
+    !!splitIncome ||
+    hasSplitIncome(
+      editing
+        ? initial
+        : { payScheme: f.payScheme, ratioEmployee: ratioWorker, ratioWageCap: f.ratioWageCap === "" ? null : Number(f.ratioWageCap) }
+    ) ||
+    !!(initial?.bizIncomeBank || initial?.bizIncomeAccount || initial?.bizIncomeHolder);
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr("");
+    if (showBizAccount) {
+      // 은행·계좌번호가 한쪽만 있으면 어느 통장인지 알 수 없다 — 서버도 같은 함수로 다시 막는다
+      const bizErr = bizIncomeAccountError({ bank: f.bizIncomeBank, account: f.bizIncomeAccount, holder: f.bizIncomeHolder });
+      if (bizErr) return setErr(bizErr);
+    }
     if (ncApplies) {
       const ncErr = nonCompetePayError(ncTerms, f.nonCompetePay === "" ? null : f.nonCompetePay);
       if (ncErr) return setErr(ncErr);
@@ -154,13 +185,16 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
       nonCompetePay, nonCompeteRatio, skipNonCompete, ratioEmployee, ratioWageCap,
       ...personal
     } = f;
+    // 칸이 보이지 않는데 값이 남아 있을 수 있다(등록 화면에서 넣었다가 계약 형태를 바꾼 경우) — 보이지 않는 계좌를 저장하지 않는다
+    const bizAccount = showBizAccount ? {} : { bizIncomeBank: "", bizIncomeAccount: "", bizIncomeHolder: "" };
     // "" = 자동 판정(null), "1"/"0" = 강제
     const leaveEligible =
       f.leaveEligible === "1" ? true : f.leaveEligible === "0" ? false : null;
     const payload = editing
-      ? { ...personal, leaveEligible, schedule: JSON.stringify(schedule) }
+      ? { ...personal, ...bizAccount, leaveEligible, schedule: JSON.stringify(schedule) }
       : {
           ...f,
+          ...bizAccount,
           leaveEligible,
           ratioPercent: f.ratioPercent !== "" ? Number(f.ratioPercent) / 100 : null,
           // 완전비율제 화면에는 직책수당 칸이 없고, 위탁에는 식대·차량유지비 칸도 없다 — 숨은 기본값(식대 20만)이
@@ -224,6 +258,12 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
           급여 화면의 <b>🏦 은행 이체 파일</b>에 그대로 실립니다. 계좌번호는 하이픈을 넣어도 되고,
           파일로 나갈 때 숫자만 남습니다.
         </p>
+        {/* 사업소득용 계좌가 함께 보일 때만 — 어느 묶음이 어느 지급처의 통장인지 나란히 읽히게 */}
+        {showBizAccount && (
+          <h3 className="text-sm font-bold text-slate-700 mb-3 break-keep">
+            근로소득용 계좌 <span className="font-normal text-slate-400">— 이 회사 지급분 (급여)</span>
+          </h3>
+        )}
         <div className="grid md:grid-cols-3 gap-4">
           <Field label="은행"><input className="input" placeholder="국민은행" value={f.bankName} onChange={(e) => set("bankName", e.target.value)} /></Field>
           <Field label="계좌번호"><input className="input" placeholder="123-45-678901" value={f.bankAccount} onChange={(e) => set("bankAccount", e.target.value)} /></Field>
@@ -237,6 +277,33 @@ export default function EmployeeForm({ initial }: { initial?: any }) {
             <p className="text-[11px] text-slate-400 mt-1">유보금은 급여와 별도 통장으로 송금합니다(확인서 제6조).</p>
           </Field>
         </div>
+
+        {/* 사업소득용 계좌 — 근로소득과 별도 사업장 사업소득을 함께 받는 직원만(비율제 근로계약 + 근로소득 상한) */}
+        {showBizAccount && (
+          <div className="mt-5 pt-4 border-t border-slate-100">
+            <h3 className="text-sm font-bold text-slate-700 break-keep">
+              사업소득용 계좌 <span className="font-normal text-slate-400">— 별도 사업장 지급분</span>
+            </h3>
+            <p className="text-xs text-slate-500 mt-1 mb-4 leading-relaxed break-keep">
+              근로소득 상한을 넘는 비율급은 별도 사업장이 사업소득으로 지급합니다. 그 돈을 위의 <b>근로소득용(급여) 계좌와
+              다른 통장</b>으로 받으려면 여기에 넣으세요 — 급여 화면의 <b>🏦 별도 사업장 이체 파일</b>이 이 계좌로 나갑니다.
+              비워 두면 급여 계좌로 나가고, 파일을 받을 때 그 사실을 알려 줍니다.
+            </p>
+            <div className="grid md:grid-cols-3 gap-4">
+              <Field label="사업소득용 은행">
+                <input className="input" placeholder="(급여 계좌로 받으면 비움)" value={f.bizIncomeBank} onChange={(e) => set("bizIncomeBank", e.target.value)} />
+              </Field>
+              <Field label="사업소득용 계좌번호">
+                <input className="input" placeholder="(급여 계좌로 받으면 비움)" value={f.bizIncomeAccount} onChange={(e) => set("bizIncomeAccount", e.target.value)} />
+                <p className="text-[11px] text-slate-400 mt-1">은행과 계좌번호는 함께 넣습니다.</p>
+              </Field>
+              <Field label="사업소득용 예금주">
+                <input className="input" placeholder={f.name || "(성명과 같으면 비움)"} value={f.bizIncomeHolder} onChange={(e) => set("bizIncomeHolder", e.target.value)} />
+                <p className="text-[11px] text-slate-400 mt-1">계좌 명의가 성명과 다를 때만 (상호 명의 사업자 통장 등).</p>
+              </Field>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 소속/근로형태 */}

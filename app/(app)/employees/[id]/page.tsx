@@ -29,6 +29,7 @@ import AttachmentBox from "@/components/AttachmentBox";
 import EmployeeDeleteButton from "@/components/EmployeeDeleteButton";
 import { nonCompeteRequired, nonCompeteRatioRequired, ratioPctLabel } from "@/lib/non-compete";
 import { bizPayerMissing } from "@/lib/ratio-employee";
+import { bizIncomeDestination, maskAccount } from "@/lib/bank-account";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,13 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
     select: { bizPayerName: true, bizPayerBizNo: true, bizPayerCeo: true, bizPayerAddress: true },
   });
   const bizMissing = bizPayerMissing(bizPayer);
+  // 별도 사업장 지급분(사업소득)이 어느 통장으로 나가는지 — 사업소득용 계좌가 있으면 그쪽, 없으면 급여 계좌.
+  // 이체 파일과 **같은 함수**로 가린다(화면은 '따로 나간다' 인데 파일은 급여 계좌로 나가는 일이 없게).
+  // 근로소득 상한을 둔 계약 카드 가운데 **가장 최근 것 하나에만** 적는다 — 갱신 계약마다 같은 줄이 되풀이되지 않게.
+  const bizDest = bizIncomeDestination(emp);
+  const bizAccountNoteId = emp.contracts.find(
+    (c) => c.templateKey === "RATIO" && c.ratioEmployee && (c.ratioWageCap ?? 0) > 0
+  )?.id;
 
   // 보수조건은 계약이 정한다 — 카드는 '오늘 시점 지배 계약' 을 비추는 읽기 전용 뷰
   const now = new Date();
@@ -521,6 +529,29 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                       {bizMissing.length
                         ? `별도 사업장 정보(${bizMissing.join("·")})가 비어 계약서를 발급할 수 없습니다 — 설정 → 회사 정보의 「별도 사업장」을 먼저 채우세요.`
                         : `계약서 발급 때 별도 사업장(${bizPayer?.bizPayerName}) 명의의 용역위탁계약서와 그 사업장 앞 개인사업자 지위 확인서가 함께 나갑니다.`}
+                    </p>
+                  )}
+                  {c.id === bizAccountNoteId && (
+                    <p
+                      className={`text-[11px] mt-1 leading-relaxed break-keep ${
+                        bizDest.source === "INCOMPLETE" || bizDest.source === "NONE" ? "text-amber-700" : "text-slate-500"
+                      }`}
+                    >
+                      {bizDest.source === "BIZ"
+                        ? `사업소득용 계좌 ${bizDest.bank} ${maskAccount(bizDest.account)} — 별도 사업장 지급분은 급여 계좌가 아니라 이 계좌로 나갑니다.`
+                        : bizDest.source === "PAY"
+                        ? "사업소득용 계좌가 없어 별도 사업장 지급분도 급여(근로소득) 계좌로 나갑니다 — 통장을 가르려면 "
+                        : bizDest.source === "INCOMPLETE"
+                        ? "사업소득용 계좌가 은행·계좌번호 중 한쪽만 들어 있어 별도 사업장 이체 파일에서 빠집니다 — "
+                        : "별도 사업장 지급분을 받을 계좌가 없습니다(급여 계좌도 비어 있습니다) — "}
+                      {bizDest.source !== "BIZ" && (
+                        <>
+                          <Link href={`/employees/${emp.id}/edit`} className="text-brand-600 font-semibold underline">
+                            정보 수정
+                          </Link>
+                          {bizDest.source === "PAY" ? "의 「사업소득용 계좌」에 넣으세요." : "에서 채워 주세요."}
+                        </>
+                      )}
                     </p>
                   )}
                   <div className="mt-2 flex items-center gap-3">

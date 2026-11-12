@@ -1,7 +1,8 @@
 // 계좌 일괄 등록 — 은행 이체 양식을 거꾸로 읽어 직원 정보의 은행·계좌를 채운다.
 //
 // 매달 손으로 채워 쓰던 이체 파일에 이미 전 직원의 계좌가 들어 있어, 그 파일을 그대로 올리면
-// 옮겨 적을 일이 없다. 계좌는 잘못 넣으면 돈이 남에게 가므로 **비어 있는 항목만** 채우는 것이
+// 옮겨 적을 일이 없다. 유보금 줄은 퇴직유보금 통장으로, 비율제 근로자의 '사업소득' 줄(별도 사업장 지급분)은
+// 사업소득용 계좌로 갈라 넣는다(lib/bank-transfer.ts). 계좌는 잘못 넣으면 돈이 남에게 가므로 **비어 있는 항목만** 채우는 것이
 // 기본이고, 덮어쓰기는 화면에서 따로 켠다.
 
 import { NextResponse } from "next/server";
@@ -47,6 +48,11 @@ export async function POST(req: Request) {
       bankAccount: true,
       retentionBank: true,
       retentionAccount: true,
+      // '사업소득' 줄을 어느 칸에 넣을지 — 비율제 근로자면 사업소득용 계좌(별도 사업장 지급분)
+      bizIncomeBank: true,
+      bizIncomeAccount: true,
+      payScheme: true,
+      ratioEmployee: true,
     },
   });
   const plan = planBankAccounts(rows, targets, { overwrite });
@@ -66,7 +72,7 @@ export async function POST(req: Request) {
     });
   }
 
-  // 한 사람이 급여·유보금 두 줄로 나뉘어 오므로 직원별로 합쳐 한 번에 저장한다
+  // 한 사람이 급여·유보금(·사업소득) 여러 줄로 나뉘어 오므로 직원별로 합쳐 한 번에 저장한다
   const merged = new Map<number, Record<string, string>>();
   const names = new Set<string>();
   for (const r of plan.rows) {

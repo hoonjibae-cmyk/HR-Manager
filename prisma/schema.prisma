@@ -200,6 +200,16 @@ model Employee {
   retentionBank    String?
   retentionAccount String?
 
+  /// 사업소득용 계좌 — **별도 사업장이 보내는 사업소득**(비율제 근로계약의 근로소득 상한 초과분)을 받는 통장.
+  /// 근로소득(급여) 계좌와 섞지 않으려는 직원만 넣는다. 비어 있으면 급여 계좌로 보낸다(화면이 그 사실을 알린다).
+  /// 은행과 계좌번호는 **둘 다** 있어야 쓴다 — 한쪽만 있으면 이체 줄을 만들지 않고 알린다(lib/bank-account.ts).
+  /// 계좌번호는 급여·유보금 계좌처럼 암호문으로 저장한다(lib/crypto.ts ENCRYPTED_EMPLOYEE_FIELDS).
+  bizIncomeBank    String?
+  bizIncomeAccount String?
+  /// 사업소득용 계좌의 예금주 — 계좌 명의가 성명과 다를 때만(상호 명의 사업자 통장 등). 비면 성명을 쓴다.
+  /// 급여 계좌의 예금주(bankHolder)와 따로 둔다 — 서로 다른 통장이라 명의도 다를 수 있다.
+  bizIncomeHolder  String?
+
   hireDate   DateTime
   resignDate DateTime?
   active     Boolean   @default(true)
