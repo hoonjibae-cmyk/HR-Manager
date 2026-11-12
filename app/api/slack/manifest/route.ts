@@ -99,6 +99,7 @@ ${redirectBlock}  scopes:
       - commands # 슬래시 명령 수신
       - chat:write # 승인 요청·결과 메시지 게시
       - chat:write.public # 봇 미초대 채널에도 게시
+      - channels:history # 반배정 요청 스레드 댓글 수신
       - users:read # 신청자 식별
       - users:read.email # 이메일로 직원 카드 자동 연결
       - pins:write # 채널 상단에 '휴가신청서 작성' 버튼 고정
@@ -112,6 +113,7 @@ settings:
     request_url: ${origin}/api/slack/events
     bot_events:
       - app_home_opened
+      - message.channels
   org_deploy_enabled: false
   socket_mode_enabled: false
   token_rotation_enabled: false

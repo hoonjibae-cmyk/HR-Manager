@@ -20,6 +20,8 @@ const dedicatedAuth = new Set([
   // 캘린더 변경 알림 — 크론과 같은 CRON_SECRET(Bearer) 대조. x-vercel-cron 헤더는 위조되므로 믿지 않는다
   "app/api/calendar-alerts/route.ts",
   "app/api/cron/route.ts",
+  // Durable placement reply queue: exact CRON_SECRET Bearer comparison, no cookie auth.
+  "app/api/cron/placement-replies/route.ts",
   "app/api/directory/app-users/route.ts",
   // 휴일 표 — 학생 카드가 x-api-key 로 받아 간다 (명부 창구와 같은 열쇠)
   "app/api/directory/holidays/route.ts",
@@ -33,6 +35,8 @@ const dedicatedAuth = new Set([
   "app/api/slack/events/route.ts",
   "app/api/slack/interactivity/route.ts",
   "app/api/slack/notify/route.ts",
+  // OMR service-key only; immutable Slack result snapshots.
+  "app/api/slack/placement-results/route.ts",
   // 직원 본인 문서 — 슬랙이 본인에게 준 15분짜리 서명 토큰 + 제출 주인 대조
   "app/api/vacation/doc/route.ts",
 ]);

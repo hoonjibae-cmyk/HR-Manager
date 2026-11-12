@@ -1,3 +1,4 @@
+import {handlePlacementAction} from '@/lib/placement-reply-service';
 import { prisma } from "@/lib/db";
 import {
   verifySlackSignature,
@@ -768,6 +769,7 @@ export async function POST(req: Request) {
 
   const action = payload.actions?.[0];
   if (!action) return new Response("", { status: 200 });
+  if(action.action_id==='placement_reply_ack'||action.action_id==='placement_owner'){waitUntil(handlePlacementAction(payload).catch(e=>console.error('[placement] action failed',e)));return new Response("",{status:200});}
 
   /* ---------- 방학 근무·연차 버튼 — 아래의 '모르는 버튼 = 연차 신청 id' 분기보다 앞이어야 한다 ---------- */
   const vacAction = await handleVacationAction(payload, publicOrigin(req));
