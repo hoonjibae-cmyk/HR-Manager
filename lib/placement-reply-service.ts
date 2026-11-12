@@ -13,9 +13,9 @@ async function api(method:string,payload:unknown){
 class SlackError extends Error{}
 const activeEmployee=(slackUserId:string)=>/^U[A-Z0-9]+$/.test(slackUserId??'')?prisma.employee.findFirst({where:{slackUserId,active:true,resignDate:null},select:{empNo:true,slackUserId:true,name:true,department:true,position:true,active:true,resignDate:true}}):Promise.resolve(null);
 async function owner(empNo:string|null){return empNo?prisma.employee.findFirst({where:{empNo,active:true,resignDate:null},select:{empNo:true,slackUserId:true}}):null;}
-async function omrOwner(id:string){
+async function omrOwner(id:string,imageId=id){
  const key=directoryApiKey('omr-report');if(!key)throw Error('OMR 연동 키 없음');
- const response=await fetch(`https://report.yussam.com/api/integrations/placement-owner?request=${encodeURIComponent(id)}`,{headers:{'x-api-key':key},cache:'no-store',signal:AbortSignal.timeout(12000)});
+ const response=await fetch(`https://report.yussam.com/api/integrations/placement-owner?request=${encodeURIComponent(id)}&image=${encodeURIComponent(imageId)}`,{headers:{'x-api-key':key},cache:'no-store',signal:AbortSignal.timeout(12000)});
  if(!response.ok)throw Error(`OMR 담당자 조회 실패 (${response.status})`);
  return response.json() as Promise<{studentName:string;requestedBy:string;responsibleEmpNo:string|null;imageUrl:string}>;
 }
@@ -30,7 +30,8 @@ async function refreshRoot(threadId:string){
  const original=JSON.parse(thread.originalBlocks) as any[];
  const image=original.find(b=>b.type==='image');
  if(image&&Number(new URL(image.image_url).searchParams.get('expires'))<Date.now()+60000){
-  image.image_url=(await omrOwner(thread.id)).imageUrl;
+  const imageId=new URL(image.image_url).pathname.split('/').pop()!;
+  image.image_url=(await omrOwner(thread.id,imageId)).imageUrl;
   thread.originalBlocks=JSON.stringify(original);
   await prisma.placementSlackThread.update({where:{id:thread.id},data:{originalBlocks:thread.originalBlocks}});
  }
@@ -40,6 +41,26 @@ async function refreshRoot(threadId:string){
 export async function sendPlacementRequest(input:any,text:string,blocks:any[]){
  if(!validPlacementRequest(input))return {delivered:false,error:'반배정 요청 정보 오류'};
  let thread=await prisma.placementSlackThread.findUnique({where:{id:input.requestId}});
+ const result=input.resultId?await prisma.placementSlackResult.findUnique({where:{id:input.resultId}}):null;
+ if(input.resultId&&(!result||result.rootId!==input.requestId||!blocks.some(b=>b.type==='image'&&new URL(b.image_url).pathname.endsWith(`/${result.id}`))))return {delivered:false,error:'보관 성적표 연결 오류'};
+ if(!thread?.rootTs&&result){
+  const original=await prisma.placementSlackResult.findUnique({where:{id:input.requestId}});
+  if(original?.state==='sent'){
+   const legacy=await findLegacyPlacementRoot(input.requestId,input.requestedAt);
+   if(!legacy)return {delivered:false,error:'기존 Slack 반배정 요청을 찾지 못했습니다. 새 메시지를 중복 발송하지 않았습니다.'};
+   const employee=await owner(input.responsibleEmpNo??null);
+   thread=await prisma.placementSlackThread.upsert({where:{id:input.requestId},create:{id:input.requestId,channel:PLACEMENT_CHANNEL,rootTs:legacy.ts,studentName:input.studentName,requestedBy:input.requestedBy,ownerEmpNo:employee?.empNo,ownerSlackId:employee?.slackUserId,originalText:legacy.text??text,originalBlocks:JSON.stringify(legacy.blocks.filter((b:any)=>['section','image'].includes(b.type))),state:'sent'},update:{rootTs:legacy.ts,state:'sent'}});
+  }
+ }
+ if(thread?.rootTs&&result){
+  const rootImage=JSON.parse(thread.originalBlocks).find((b:any)=>b.type==='image');
+  if(rootImage&&new URL(rootImage.image_url).pathname.endsWith(`/${result.id}`)){
+   // Recover a crash after posting the root but before saving its result delivery.
+   await prisma.placementSlackResult.update({where:{id:result.id},data:{state:'sent',slackTs:thread.rootTs}});
+   return {delivered:true,channel:thread.channel,ts:thread.rootTs,imageIncluded:true};
+  }
+  return sendPlacementRetest(thread,result.id,text,blocks);
+ }
  if(thread?.rootTs)return {delivered:true,channel:thread.channel,ts:thread.rootTs,imageIncluded:true};
  if(thread&&thread.state!=='error')return {delivered:null,error:'발송 결과 확인 대기. 중복 발송하지 않습니다.'};
  const employee=await owner(input.responsibleEmpNo??null);
@@ -50,8 +71,42 @@ export async function sendPlacementRequest(input:any,text:string,blocks:any[]){
  try{
   const result=await api('chat.postMessage',{channel:PLACEMENT_CHANNEL,text,blocks:rootBlocks(thread,'원장 답변 대기'),client_msg_id:stableMessageId(`placement:${thread.id}`)});
   await prisma.placementSlackThread.update({where:{id:thread.id},data:{rootTs:result.ts,state:'sent'}});
+  if(input.resultId)await prisma.placementSlackResult.update({where:{id:input.resultId},data:{state:'sent',slackTs:result.ts}});
   return {delivered:true,channel:PLACEMENT_CHANNEL,ts:result.ts,imageIncluded:true};
  }catch(error){const certain=error instanceof SlackError;await prisma.placementSlackThread.update({where:{id:thread.id},data:{state:certain?'error':'uncertain',error:error instanceof Error?error.message:'발송 결과 불명'}});return {delivered:certain?false:null,error:'반배정 알림 발송 상태를 확인해 주세요.'};}
+}
+// Locate only this bot's original score image; never infer a thread by student name.
+async function findLegacyPlacementRoot(rootId:string,requestedAt?:string){
+ const auth=await api('auth.test',{});let cursor:string|undefined;
+ const when=Date.parse(requestedAt??'');const oldest=Number.isFinite(when)?String(Math.floor(when/1000)-86400):undefined;
+ for(let page=0;page<5;page++){
+  const history=await api('conversations.history',{channel:PLACEMENT_CHANNEL,limit:100,oldest,cursor});
+  const root=history.messages?.find((m:any)=>(!m.thread_ts||m.thread_ts===m.ts)&&m.blocks?.some((b:any)=>{if(b.type!=='image')return false;try{const url=new URL(b.image_url);return url.hostname==='report.yussam.com'&&url.pathname===`/api/placement/summary/${rootId}`;}catch{return false;}})&&(m.user===auth.user_id||(auth.bot_id&&m.bot_id===auth.bot_id)));
+  if(root)return root;
+  cursor=history.response_metadata?.next_cursor;if(!cursor)return null;
+ }
+ return null;
+}
+async function sendPlacementRetest(thread:PlacementSlackThread,resultId:string,text:string,blocks:any[]){
+ const result=await prisma.placementSlackResult.findUniqueOrThrow({where:{id:resultId}});
+ if(result.state==='sent')return {delivered:true,imageIncluded:true,channel:thread.channel,ts:result.slackTs};
+ if(!['pending','error'].includes(result.state))return {delivered:null,error:'재시험 알림 발송 결과 확인 대기. 중복 전송하지 않습니다.'};
+ const uploadedAt=JSON.parse(result.report).sourceScan?.uploadedAt;
+ const scanned=uploadedAt&&Number.isFinite(Date.parse(uploadedAt))?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(uploadedAt)):null;
+ const original=await prisma.placementSlackResult.findUnique({where:{id:thread.id}});
+ const originalScan=original?JSON.parse(original.report).sourceScan?.id:null;
+ const currentScan=JSON.parse(result.report).sourceScan?.id;
+ const correction=!!originalScan&&originalScan===currentScan;
+ const caption=correction?'성적 정정 결과':'재시험 결과';
+ const body=`${caption} · ${thread.studentName}${scanned?`\n답안지 업로드일: ${scanned}`:''}\n기존 성적표는 유지되며, ${correction?'정정된 성적을':'다시 응시한 결과를'} 추가합니다.\n${text}`;
+ const replyBlocks=[{type:'section',text:{type:'mrkdwn',text:body.slice(0,3000)}},...blocks.filter(b=>b.type==='image')];
+ const claim=await prisma.placementSlackResult.updateMany({where:{id:resultId,state:{in:['pending','error']}},data:{state:'sending',error:null}});
+ if(!claim.count)return {delivered:null,error:'재시험 알림 발송 결과 확인 대기. 중복 전송하지 않습니다.'};
+ try{
+  const posted=await api('chat.postMessage',{channel:thread.channel,thread_ts:thread.rootTs,text:body,blocks:replyBlocks,client_msg_id:stableMessageId(`placement-result:${resultId}`)});
+  await prisma.placementSlackResult.update({where:{id:resultId},data:{state:'sent',slackTs:posted.ts}});
+  return {delivered:true,imageIncluded:true,channel:thread.channel,ts:posted.ts};
+ }catch(error){const certain=error instanceof SlackError;await prisma.placementSlackResult.update({where:{id:resultId},data:{state:certain?'error':'uncertain',error:error instanceof Error?error.message:'발송 결과 불명'}});return {delivered:certain?false:null,error:'재시험 댓글 알림 발송 상태를 확인해 주세요.'};}
 }
 // Store the verified event before acknowledging Slack. Background work is recoverable by cron.
 export async function enqueuePlacementEvent(eventId:string,event:unknown){

@@ -1,5 +1,5 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
-const mocks=vi.hoisted(()=>({db:{employee:{findFirst:vi.fn()},placementSlackThread:{findUnique:vi.fn(),findUniqueOrThrow:vi.fn(),create:vi.fn(),update:vi.fn(),updateMany:vi.fn()},placementSlackReply:{findUnique:vi.fn(),findUniqueOrThrow:vi.fn(),findFirst:vi.fn(),findMany:vi.fn(),update:vi.fn(),updateMany:vi.fn(),count:vi.fn(),upsert:vi.fn()},placementSlackEvent:{upsert:vi.fn(),updateMany:vi.fn(),findMany:vi.fn(),findUniqueOrThrow:vi.fn(),update:vi.fn()}}}));
+const mocks=vi.hoisted(()=>({db:{employee:{findFirst:vi.fn()},placementSlackThread:{upsert:vi.fn(),findUnique:vi.fn(),findUniqueOrThrow:vi.fn(),create:vi.fn(),update:vi.fn(),updateMany:vi.fn()},placementSlackReply:{findUnique:vi.fn(),findUniqueOrThrow:vi.fn(),findFirst:vi.fn(),findMany:vi.fn(),update:vi.fn(),updateMany:vi.fn(),count:vi.fn(),upsert:vi.fn()},placementSlackResult:{findUnique:vi.fn(),findUniqueOrThrow:vi.fn(),update:vi.fn(),updateMany:vi.fn()},placementSlackEvent:{upsert:vi.fn(),updateMany:vi.fn(),findMany:vi.fn(),findUniqueOrThrow:vi.fn(),update:vi.fn()}}}));
 vi.mock('./db',()=>({prisma:mocks.db}));
 import {dispatchPlacementReplies,enqueuePlacementEvent,handlePlacementAction,sendPlacementRequest} from './placement-reply-service';
 const id='b6aa6a58-49e0-4da7-9e11-52275f24bfa7';
@@ -8,6 +8,32 @@ const reply={id:'reply',threadId:id,replyTs:'1794447937.000001',versionTs:'17944
 const fetchMock=vi.fn();
 beforeEach(()=>{vi.resetAllMocks();vi.stubGlobal('fetch',fetchMock);fetchMock.mockResolvedValue({json:async()=>({ok:true,channel:'D1',ts:'1794447938.000001'})});mocks.db.placementSlackReply.updateMany.mockResolvedValue({count:1});mocks.db.placementSlackEvent.updateMany.mockResolvedValue({count:1});mocks.db.placementSlackEvent.findMany.mockResolvedValue([]);mocks.db.placementSlackReply.findMany.mockResolvedValue([]);mocks.db.placementSlackReply.findFirst.mockResolvedValue(null);});
 describe('placement delivery boundaries',()=>{
+ it('posts a retest image as a reply without updating the original message or image',async()=>{
+  const resultId='a6aa6a58-49e0-4da7-9e11-52275f24bfa7';
+  const stored={id:resultId,rootId:id,state:'pending',report:JSON.stringify({sourceScan:{uploadedAt:'2026-11-12T00:00:00Z'}})};
+  mocks.db.placementSlackThread.findUnique.mockResolvedValue({...thread,originalBlocks:JSON.stringify([{type:'image',image_url:`https://report.yussam.com/api/placement/summary/${id}?expires=1`}])});
+  mocks.db.placementSlackResult.findUnique.mockResolvedValue(stored);mocks.db.placementSlackResult.findUniqueOrThrow.mockResolvedValue(stored);mocks.db.placementSlackResult.updateMany.mockResolvedValue({count:1});
+  const result=await sendPlacementRequest({requestId:id,resultId,studentName:'학생',requestedBy:'staff'},'반배정 요청',[{type:'image',image_url:`https://report.yussam.com/api/placement/summary/${resultId}?expires=1`}]);
+  expect(result.delivered).toBe(true);
+  const payload=JSON.parse(fetchMock.mock.calls[0][1].body);
+  expect(payload).toMatchObject({thread_ts:thread.rootTs,channel:thread.channel});expect(payload.text).toContain('재시험 결과');
+  expect(payload.blocks[1].image_url).toContain(resultId);
+  expect(fetchMock.mock.calls.some(c=>String(c[0]).includes('chat.update'))).toBe(false);
+  expect(mocks.db.placementSlackThread.update).not.toHaveBeenCalled();
+ });
+ it('does not post the same retest result twice',async()=>{
+  const resultId='a6aa6a58-49e0-4da7-9e11-52275f24bfa7';
+  const stored={id:resultId,rootId:id,state:'sent',slackTs:'1794447999.000001'};
+  mocks.db.placementSlackThread.findUnique.mockResolvedValue(thread);mocks.db.placementSlackResult.findUnique.mockResolvedValue(stored);mocks.db.placementSlackResult.findUniqueOrThrow.mockResolvedValue(stored);
+  expect((await sendPlacementRequest({requestId:id,resultId,studentName:'학생',requestedBy:'staff'},'반배정 요청',[{type:'image',image_url:`https://report.yussam.com/api/placement/summary/${resultId}`}])).delivered).toBe(true);
+  expect(fetchMock).not.toHaveBeenCalled();
+ });
+ it('keeps an ambiguous retest delivery held instead of posting again',async()=>{
+  const resultId='a6aa6a58-49e0-4da7-9e11-52275f24bfa7';const stored={id:resultId,rootId:id,state:'uncertain'};
+  mocks.db.placementSlackThread.findUnique.mockResolvedValue(thread);mocks.db.placementSlackResult.findUnique.mockResolvedValue(stored);mocks.db.placementSlackResult.findUniqueOrThrow.mockResolvedValue(stored);mocks.db.placementSlackResult.updateMany.mockResolvedValue({count:0});
+  expect((await sendPlacementRequest({requestId:id,resultId,studentName:'학생',requestedBy:'staff'},'반배정 요청',[{type:'image',image_url:`https://report.yussam.com/api/placement/summary/${resultId}`}])).delivered).toBeNull();expect(fetchMock).not.toHaveBeenCalled();
+ });
+
  it.each([{department:'경영지원',position:'직원'},{department:'교수부',position:'교수부장'}])('queues the permitted author $department/$position for the linked root',async(role)=>{
   mocks.db.placementSlackEvent.findMany.mockResolvedValue([{id:'Ev1'}]);
   mocks.db.placementSlackEvent.findUniqueOrThrow.mockResolvedValue({payload:JSON.stringify({user:'UMANAGER',channel:thread.channel,rootTs:thread.rootTs,replyTs:reply.replyTs,versionTs:reply.versionTs,text:reply.text})});

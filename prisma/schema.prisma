@@ -1193,3 +1193,19 @@ model PlacementSlackEvent {
  updatedAt DateTime @updatedAt
  @@index([state, leaseUntil])
 }
+
+/// Immutable score summaries and their individual Slack deliveries (root or retest reply).
+model PlacementSlackResult {
+ id String @id
+ rootId String
+ fingerprint String
+ report String
+ schedule String
+ state String @default("pending")
+ slackTs String?
+ error String?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ @@unique([rootId,fingerprint])
+ @@index([rootId,createdAt])
+}
