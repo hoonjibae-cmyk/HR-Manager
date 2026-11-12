@@ -20,6 +20,8 @@ const dedicatedAuth = new Set([
   // 캘린더 변경 알림 — 크론과 같은 CRON_SECRET(Bearer) 대조. x-vercel-cron 헤더는 위조되므로 믿지 않는다
   "app/api/calendar-alerts/route.ts",
   "app/api/cron/route.ts",
+  // Durable placement reply queue: exact CRON_SECRET Bearer comparison, no cookie auth.
+  "app/api/cron/placement-replies/route.ts",
   "app/api/directory/app-users/route.ts",
   // 휴일 표 — 학생 카드가 x-api-key 로 받아 간다 (명부 창구와 같은 열쇠)
   "app/api/directory/holidays/route.ts",

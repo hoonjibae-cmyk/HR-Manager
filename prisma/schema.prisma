@@ -1140,3 +1140,56 @@ model VacationEvent {
 
   @@index([noticeId, createdAt])
 }
+
+/// 반배정 요청 스레드와 담당자. 다른 채널의 메시지는 처리하지 않는다.
+model PlacementSlackThread {
+  id String @id
+  channel String
+  rootTs String? @unique
+  studentName String
+  requestedBy String
+  ownerEmpNo String?
+  ownerSlackId String?
+  originalText String
+  originalBlocks String
+  state String @default("pending")
+  error String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  replies PlacementSlackReply[]
+}
+model PlacementSlackReply {
+  id String @id
+  threadId String
+  thread PlacementSlackThread @relation(fields:[threadId],references:[id],onDelete:Cascade)
+  replyTs String
+  versionTs String
+  authorSlackId String
+  authorName String
+  text String
+  state String @default("pending")
+  recipientSlackId String?
+  dmChannel String?
+  dmTs String?
+  leaseUntil DateTime?
+  attempts Int @default(0)
+  error String?
+  acknowledgedAt DateTime?
+  syncedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([threadId,replyTs,versionTs])
+  @@index([state,leaseUntil])
+}
+
+model PlacementSlackEvent {
+ id String @id
+ payload String
+ state String @default("pending")
+ attempts Int @default(0)
+ leaseUntil DateTime?
+ error String?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ @@index([state, leaseUntil])
+}

@@ -1,3 +1,5 @@
+import {waitUntil} from '@vercel/functions';
+import {enqueuePlacementEvent,dispatchPlacementReplies} from '@/lib/placement-reply-service';
 import { verifySlackSignature, slackConfigured } from "@/lib/slack";
 import { refreshHomeTab } from "@/lib/home-tab";
 
@@ -25,6 +27,7 @@ export async function POST(req: Request) {
   }
 
   const event = body.event;
+  if(typeof body.event_id==='string'&&await enqueuePlacementEvent(body.event_id,event))waitUntil(dispatchPlacementReplies().catch(e=>console.error('[placement] event dispatch failed',e))); 
   if (event?.type === "app_home_opened" && event.tab === "home" && event.user) {
     // 슬랙은 3초 내 200 을 기대한다 — 실패해도 재시도 폭주를 막기 위해 삼킨다
     await refreshHomeTab(event.user).catch((e) =>

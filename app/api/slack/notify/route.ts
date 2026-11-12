@@ -1,3 +1,4 @@
+import {sendPlacementRequest} from '@/lib/placement-reply-service';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { postMessage, slackConfigured } from "@/lib/slack";
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { empNo?: unknown; email?: unknown; channel?: unknown; text?: unknown; imageUrl?:unknown;imageAlt?:unknown };
+  let body: { empNo?: unknown; email?: unknown; channel?: unknown; text?: unknown; imageUrl?:unknown;imageAlt?:unknown;placementRequest?:unknown };
   try {
     body = await req.json();
   } catch {
@@ -71,6 +72,10 @@ export async function POST(req: Request) {
 
   // 채널로 보내는 경우 — 사람이 아니라 방(예: 운영진 채널)에 알린다. 직원 조회는
   // 필요 없고, 봇이 그 채널에 들어가 있어야 한다(초대되지 않았으면 슬랙이 거부한다).
+  if(body.placementRequest!==undefined){
+    if(app!=='omr-report'||channel!=='C06PAG818TZ'||!blocks)return NextResponse.json({delivered:false,error:'반배정 알림 대상 오류'},{status:400});
+    return NextResponse.json(await sendPlacementRequest(body.placementRequest,text,blocks));
+  }
   if (channel) {
     const res = (await postMessage(channel, text, blocks)) as { ok?: boolean; error?: string };
     if (!res?.ok) {
