@@ -14,6 +14,9 @@ function routeFiles(dir: string): string[] {
 }
 
 const dedicatedAuth = new Set([
+  // Narrow expense integration key only; fixed-channel relay, no general HR access.
+  "app/api/management/payroll-summary/route.ts",
+  "app/api/management/expense-delivery/route.ts",
   "app/api/auth/login/route.ts",
   "app/api/auth/logout/route.ts",
   "app/api/auth/portal/route.ts",
