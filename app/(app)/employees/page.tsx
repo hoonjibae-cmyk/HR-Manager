@@ -5,7 +5,7 @@ import SlackLinkButton from "@/components/SlackLinkButton";
 import EmployeeImport from "@/components/EmployeeImport";
 import EmployeeTable, { type EmployeeRow } from "@/components/EmployeeTable";
 import { ymd, birthIsoOf, ageOf, tenureOf, kstTodayYmd } from "@/lib/format";
-import { governingContract, paySchemeOf, contractIssues } from "@/lib/contracts";
+import { displayContract, paySchemeOf, contractIssues } from "@/lib/contracts";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +15,13 @@ export default async function EmployeesPage() {
     include: { contracts: { where: { status: { not: "DRAFT" } }, orderBy: { startDate: "asc" } } },
   });
 
-  // 표시 조건은 '오늘 시점 지배 계약' 기준 (카드 값은 그 거울일 뿐)
+  // 표시 조건은 '오늘 시점 지배 계약' 기준 (카드 값은 그 거울일 뿐).
+  // ⚠ **입사일이 아직 오지 않은 직원은 지배 계약이 없다** — 그대로 두면 계약을 다 써 둔 사람의 계약만료일이
+  // 빈칸으로 나온다(실제로 겪었다). 그때는 가장 먼저 시작할 계약을 보여 준다(`displayContract` — 표시 전용).
   const now = new Date();
   const today = kstTodayYmd(now);
   const emps: EmployeeRow[] = rows.map((e) => {
-    const gov = governingContract(e.contracts, now);
+    const gov = displayContract(e.contracts, now).contract;
     // 생년월일 — 두 자리 연도(YYMMDD)는 세기를 알 수 없어 나이를 만들지 않는다(생일 알림과 같은 규칙)
     const birthIso = birthIsoOf(e.birth);
     // 근속 — 퇴직자는 퇴사일에 멈춘 값 (연차·퇴직급여 화면과 같은 규칙)
@@ -46,7 +48,7 @@ export default async function EmployeesPage() {
       age: ageOf(birthIso, today),
       tenureLabel: tenure.label,
       tenureMonths: tenure.months,
-      // 계약만료일 — 지배 계약 기준. 기한 없는 계약은 만료일이 없는 것이지 계약이 없는 게 아니다
+      // 계약만료일 — 지배 계약(입사 전이면 시작할 계약) 기준. 기한 없는 계약은 만료일이 없는 것이지 계약이 없는 게 아니다
       contractEnd: gov?.endDate ? ymd(gov.endDate) : null,
       contractEndless: !!gov && !gov.endDate,
       today: today.replace(/-/g, "."),

@@ -44,7 +44,7 @@ export interface EmployeeRow {
   tenureLabel: string;
   /** 정렬용 근속 개월수 */
   tenureMonths: number;
-  /** 지배 계약의 만료일 (YYYY.MM.DD) — 기한 없는 계약은 null + contractEndless */
+  /** 지배 계약(입사 전이면 시작할 계약)의 만료일 (YYYY.MM.DD) — 기한 없는 계약은 null + contractEndless */
   contractEnd: string | null;
   contractEndless: boolean;
   /** 서버가 구한 오늘(KST, YYYY.MM.DD) — 만료 지남 판정용. 클라이언트 시계를 믿지 않는다 */

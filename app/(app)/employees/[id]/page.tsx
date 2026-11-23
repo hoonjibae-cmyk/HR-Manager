@@ -20,6 +20,7 @@ import { won, wonUnit, ymd, kstTodayYmd } from "@/lib/format";
 import { probationTimeline } from "@/lib/probation";
 import {
   governingContract,
+  displayContract,
   contractIssues,
   paySchemeOf,
   effectiveContractStatus,
@@ -83,24 +84,28 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
   const now = new Date();
   const todayYmd = kstTodayYmd(now); // 수습 중 판정 — 계약 날짜와 같은 YYYY-MM-DD 로 비교한다
   const gov = governingContract(emp.contracts, now);
+  // 보수 카드에 보여 줄 계약 — 지배 계약, **입사 전이면(시작한 계약이 없으면) 가장 먼저 시작할 계약**.
+  // 직원 목록과 같은 규칙이다(`displayContract` — 표시 전용). 입사 전에는 카드가 계약을 따라가지 않아
+  // (지배 계약이 없으면 카드를 고치지 않는다) 카드 값을 그대로 보이면 계약을 고쳐도 옛 조건이 남는다.
+  const shown = displayContract(emp.contracts, now).contract;
   const issues = contractIssues(emp, emp.contracts, now);
-  const terms = gov
+  const terms = shown
     ? {
-        payScheme: paySchemeOf(gov.templateKey),
-        baseWage: gov.baseWage,
-        positionAllow: gov.positionAllow,
-        mealAllow: gov.mealAllow,
-        carAllow: gov.carAllow,
-        incThreshold: gov.incThreshold,
-        incPerStudent: gov.incPerStudent,
-        incRevenuePercent: gov.incRevenuePercent,
-        ratioPercent: gov.ratioPercent,
-        incomeType: gov.incomeType ?? emp.incomeType,
-        nonCompetePay: gov.nonCompetePay ?? null,
-        nonCompeteRatio: gov.nonCompeteRatio ?? null,
-        isContractor: gov.isContractor,
-        ratioEmployee: gov.ratioEmployee,
-        ratioWageCap: gov.ratioWageCap ?? null,
+        payScheme: paySchemeOf(shown.templateKey),
+        baseWage: shown.baseWage,
+        positionAllow: shown.positionAllow,
+        mealAllow: shown.mealAllow,
+        carAllow: shown.carAllow,
+        incThreshold: shown.incThreshold,
+        incPerStudent: shown.incPerStudent,
+        incRevenuePercent: shown.incRevenuePercent,
+        ratioPercent: shown.ratioPercent,
+        incomeType: shown.incomeType ?? emp.incomeType,
+        nonCompetePay: shown.nonCompetePay ?? null,
+        nonCompeteRatio: shown.nonCompeteRatio ?? null,
+        isContractor: shown.isContractor,
+        ratioEmployee: shown.ratioEmployee,
+        ratioWageCap: shown.ratioWageCap ?? null,
       }
     : {
         payScheme: emp.payScheme,
@@ -190,6 +195,9 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
             <p className="text-xs text-slate-400 mb-3">
               {gov
                 ? `${ymd(gov.startDate)} ~ ${gov.endDate ? ymd(gov.endDate) : "기한 없음"} 계약 적용 중`
+                : shown
+                ? // 입사 전 — 아직 시작한 계약이 없다. 시작할 계약의 조건을 보여 주고 그 사실을 적는다
+                  `${ymd(shown.startDate)} ~ ${shown.endDate ? ymd(shown.endDate) : "기한 없음"} 계약 적용 예정 — 아직 시작 전이라 이 계약의 조건을 표시합니다`
                 : "적용 중인 계약이 없어 직원 카드 값을 표시합니다"}
             </p>
             <dl className="text-sm space-y-2">
@@ -241,8 +249,8 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                       </span>
                     </Row>
                   )}
-                  {gov?.ratioMinGuarantee ? (
-                    <Row k={ratioWorker ? "보장급(월, §47)" : "최저보장(월)"}>{wonUnit(gov.ratioMinGuarantee)}</Row>
+                  {shown?.ratioMinGuarantee ? (
+                    <Row k={ratioWorker ? "보장급(월, §47)" : "최저보장(월)"}>{wonUnit(shown.ratioMinGuarantee)}</Row>
                   ) : null}
                 </>
               ) : (
@@ -309,7 +317,8 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                 </Row>
               )}
             </dl>
-            {upcoming && (
+            {/* 위에 보인 것이 바로 그 발효 예정 계약이면(입사 전) 이 안내는 틀린 말이 된다 — 값이 바뀌지 않는다 */}
+            {upcoming && upcoming.id !== shown?.id && (
               <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-3">
                 {ymd(upcoming.startDate)}부터 적용될 새 계약이 등록돼 있습니다. 발효일이 지나면 이 값이 자동으로 바뀝니다.
               </p>

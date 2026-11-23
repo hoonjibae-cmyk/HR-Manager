@@ -164,6 +164,38 @@ export function governingContract<T extends { startDate: Date; id?: number }>(
   });
 }
 
+/**
+ * 화면에 **보여 줄** 계약 — 오늘을 지배하는 계약, 없으면 **가장 먼저 시작할 계약**.
+ *
+ * 입사일이 아직 오지 않은 직원은 시작한 계약이 하나도 없어 `governingContract` 가 null 을 준다. 그 값만 보고
+ * 화면을 그리면 **계약을 다 써 둔 직원의 계약만료일이 빈칸으로 나온다**(실제로 겪었다 — 입사 전날 직원 목록에서
+ * 「만료일을 지정해 놨는데 왜 계속 빈칸이냐」. 만료일은 DB 에 멀쩡히 있었다). 보수조건도 계약이 아니라 등록 때
+ * 적어 둔 카드 값이 나온다 — 입사 전에는 카드가 계약을 따라가지 않는다(`refreshEmployeeCard` 는 지배 계약이
+ * 없으면 아무것도 하지 않는다).
+ *
+ * `pending` 은 그 계약이 아직 시작 전이라는 표시다. 계약이 하나도 없으면 `contract` 가 null 이다.
+ * 같은 날 시작하는 계약이 둘이면 id 가 큰 쪽 — 그날이 오면 `governingContract` 가 고를 계약과 같다.
+ *
+ * ⚠ **표시 전용이다.** 급여 산정·카드 반영·재계약 판정에는 쓰지 않는다 — 발효 전 계약은 그 어느 것에도 닿지
+ * 않아야 한다(그쪽은 `governingContract`).
+ */
+export function displayContract<T extends { startDate: Date; id?: number }>(
+  contracts: T[],
+  asOf: Date
+): { contract: T | null; pending: boolean } {
+  const gov = governingContract(contracts, asOf);
+  if (gov) return { contract: gov, pending: false };
+  // 시작한 계약이 없다 — 남은 것은 모두 앞으로 시작할 계약이다
+  if (!contracts.length) return { contract: null, pending: false };
+  const first = contracts.reduce((best, c) => {
+    const a = dayStart(c.startDate).getTime();
+    const b = dayStart(best.startDate).getTime();
+    if (a !== b) return a < b ? c : best;
+    return (c.id ?? 0) > (best.id ?? 0) ? c : best;
+  });
+  return { contract: first, pending: true };
+}
+
 export type IssueKind = "before-first" | "between" | "after-last" | "overlap" | "none";
 
 export interface ContractIssue {

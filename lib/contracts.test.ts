@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   governingContract,
+  displayContract,
   contractIssues,
   mirrorFromContract,
   templateKeyOf,
@@ -55,6 +56,60 @@ describe("governingContract — 그 시점을 지배하는 계약", () => {
   it("같은 날 시작한 계약이 둘이면 나중에 만든 것", () => {
     const dup = [ct(5, "2025-03-01", null), ct(6, "2025-03-01", null)];
     expect(governingContract(dup, d("2025-06-01"))!.id).toBe(6);
+  });
+});
+
+describe("displayContract — 화면에 보여 줄 계약 (입사 전이면 시작할 계약)", () => {
+  const list = [
+    ct(1, "2024-03-01", "2025-02-28", { baseWage: 3_000_000 }),
+    ct(2, "2025-03-01", "2026-02-28", { baseWage: 3_500_000 }),
+    ct(3, "2026-03-01", null, { baseWage: 4_000_000 }),
+  ];
+
+  it("시작한 계약이 있으면 지배 계약 그대로다 — 재직자의 화면은 달라지지 않는다", () => {
+    for (const at of ["2024-03-01", "2025-07-01", "2026-02-28", "2026-03-01", "2030-01-01"]) {
+      const shown = displayContract(list, d(at));
+      expect(shown.contract).toBe(governingContract(list, d(at)));
+      expect(shown.pending).toBe(false);
+    }
+  });
+
+  it("입사 전(시작한 계약이 없음)이면 가장 먼저 시작할 계약 — 만료일을 지정한 계약이 빈칸으로 나오지 않는다", () => {
+    // 내일(11/24) 입사하는 직원을 오늘(11/23) 본다. 계약은 1년짜리로 이미 써 뒀다
+    const hire = [ct(7, "2026-11-24", "2027-11-23", { baseWage: 1_600_000 })];
+    expect(governingContract(hire, d("2026-11-23"))).toBeNull();
+    const shown = displayContract(hire, d("2026-11-23"));
+    expect(shown.contract!.id).toBe(7);
+    expect(shown.contract!.endDate).toEqual(d("2027-11-23"));
+    expect(shown.pending).toBe(true);
+    // 입사일이 오면 그 계약이 지배 계약이 되고 표시는 그대로 이어진다
+    const after = displayContract(hire, d("2026-11-24"));
+    expect(after.contract!.id).toBe(7);
+    expect(after.pending).toBe(false);
+  });
+
+  it("앞으로 시작할 계약이 여럿이면 가장 이른 것 — 넘겨받은 순서와 무관하다", () => {
+    const future = [ct(9, "2027-12-01", null), ct(8, "2026-12-01", "2027-11-30")];
+    expect(displayContract(future, d("2026-11-23")).contract!.id).toBe(8);
+    expect(displayContract([...future].reverse(), d("2026-11-23")).contract!.id).toBe(8);
+  });
+
+  it("같은 날 시작하는 계약이 둘이면 나중에 만든 것 — 그날이 오면 지배할 계약과 같다", () => {
+    const dup = [ct(5, "2026-12-01", "2027-11-30"), ct(6, "2026-12-01", null)];
+    const shown = displayContract(dup, d("2026-11-23"));
+    expect(shown.contract!.id).toBe(6);
+    expect(shown.contract).toBe(governingContract(dup, d("2026-12-01")));
+  });
+
+  it("현재 계약이 있으면 발효 예정 계약으로 건너뛰지 않는다 — 미리 써 둔 재계약의 만료일이 먼저 보이면 안 된다", () => {
+    const withRenewal = [ct(2, "2025-03-01", "2026-12-31"), ct(4, "2027-01-01", "2027-12-31")];
+    const shown = displayContract(withRenewal, d("2026-11-23"));
+    expect(shown.contract!.id).toBe(2);
+    expect(shown.pending).toBe(false);
+  });
+
+  it("계약이 하나도 없으면 null — 화면은 직원 카드로 물러난다", () => {
+    expect(displayContract([], d("2026-11-23"))).toEqual({ contract: null, pending: false });
   });
 });
 
