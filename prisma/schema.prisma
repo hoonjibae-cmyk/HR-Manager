@@ -290,6 +290,7 @@ model Employee {
   leaveApproverOf   Department[]       @relation("DeptLeaveApprover")
   severanceBases    SeveranceMonthlyBase[]
   dayOffs           DayOff[]
+  unpaidLeaves      UnpaidLeave[]
   vacationAssignments VacationAssignment[]
   vacationSubmissions VacationSubmission[]
   attachedFiles     AttachedFile[]
@@ -476,6 +477,36 @@ model DayOff {
 
   @@unique([employeeId, date])
   @@index([date])
+}
+
+/// 무급휴직 — 급여를 지급하지 않는 휴직 기간(개인 사정 등). lib/unpaid-leave.ts
+///
+/// **연차가 아니다** — `LeaveTransaction`(연차 원장)에 넣지 않는다(넣으면 잔여가 줄어든다).
+/// 그 달 급여는 **역일수**로 일할한다: (그 달 재직 역일수 − 무급휴직 역일수) ÷ 그 달 역일수.
+/// 월중 입·퇴사 일할과 같은 방식이라 한 달 안에 둘이 겹쳐도 한 번에 계산된다.
+/// 퇴직급여(DC 부담금·충당금)는 그 달 급여에서 파생되므로 줄어든 만큼 함께 줄어든다.
+/// 연차 발생·근속에는 손대지 않는다(2026-11 결정).
+///
+/// 유니크 제약을 걸지 않는다 — 겹침은 등록할 때 막고(lib/unpaid-leave.ts), 계산은 겹쳐도
+/// 같은 날을 한 번만 센다. 제약 추가는 `prisma db push` 가 'data loss' 로 멈춘다(uploadId 전례).
+model UnpaidLeave {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  /// 무급휴직 첫날 (포함)
+  startDate DateTime
+  /// 무급휴직 마지막 날 (포함) — 복귀일의 전날
+  endDate   DateTime
+  /// 사유 — **내부 기록용**이다. 명세서·세무 자료에 싣지 않는다
+  reason    String?
+  /// 등록한 관리자
+  createdBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId, startDate])
 }
 
 /// 경영지원 알림 설정 — 계약 종료 예고 · 생일 (단일 행, id=1)

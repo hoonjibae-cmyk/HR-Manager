@@ -6,6 +6,7 @@ import { logoImg, stampImg, type DocCompany, type DocEmployee } from "./document
 import { carryoverNotice, type CarryoverInfo } from "./leave-payout";
 import { ratioPctLabel, nonCompeteNonTaxOf } from "./non-compete";
 import { recordSplit, type BizPayer } from "./ratio-employee";
+import { readUnpaidLeaveMeta, unpaidSpansLabelKo } from "./unpaid-leave";
 import {
   summarizeIncentive,
   summarizeRevenueShare,
@@ -424,6 +425,9 @@ export function payslipHtml(args: {
     typeof bd?.baseApplied === "number" ? bd.baseApplied : null;
   const ratio = p.prorationRatio ?? 1;
   const isMonthlyLike = p.payScheme === "MONTHLY" || p.payScheme === "INCENTIVE";
+  // 무급휴직 — **이 달 산정에 실제로 쓴** 기간·일수(급여 기록에 남긴 근거). 지금의 휴직 등록을 다시 읽지 않는다 —
+  // 산정한 뒤에 기간을 고쳤어도 이 명세서의 금액은 산정 때의 것이라, 문구도 그때 것이어야 식이 맞는다.
+  const unpaid = readUnpaidLeaveMeta(bd);
 
   const basisLines: string[] = [];
   if (blend && p.payScheme !== "RATIO") {
@@ -431,7 +435,9 @@ export function payslipHtml(args: {
       .map((s: any) => `${s.days}일 × ${won(s.baseWage)}원`)
       .join(" &nbsp;+&nbsp; ");
     basisLines.push(
-      `<b>월중 계약 변경</b> — 적용 ${isHourly ? "시급" : "월 기본급"}(역일수 가중평균): ( ${segTxt} ) ÷ ${blend.totalDays}일 = <b>${won(blend.baseWage)}원</b>`
+      `<b>월중 계약 변경</b> — 적용 ${isHourly ? "시급" : "월 기본급"}(역일수 가중평균): ( ${segTxt} ) ÷ ${blend.totalDays}일 = <b>${won(blend.baseWage)}원</b>` +
+        // 무급휴직이 낀 달의 일수는 '급여가 지급된 날' 이다 — 그 말이 없으면 구간 일수의 합이 왜 한 달이 아닌지 알 수 없다
+        (unpaid ? ` <span class="muted">(무급휴직일을 뺀, 급여가 지급된 날 기준)</span>` : "")
     );
   } else if (!blend && p.payScheme !== "RATIO" && Array.isArray(bd?.notes)) {
     // 구조화 데이터가 없는 과거 기록: 산정 당시 남긴 가중 노트를 그대로 표시
@@ -460,7 +466,81 @@ export function payslipHtml(args: {
         `. 약정시간을 초과한 실근로만 통상시급 ${won(p.hourlyWage)}원 기준으로 추가 가산됩니다.`
     );
   }
-  if (isMonthlyLike && ratio < 1) {
+  /**
+   * 월급제 일할의 식 두 줄 — 월중 입·퇴사와 무급휴직이 **같은 식**을 쓴다(머리말만 다르다).
+   * `lead` 는 「…(N일/M일」 까지 — 닫는 괄호와 그 뒤는 여기서 붙인다.
+   *
+   * 곱하는 값(계약 월 급여총액)과 결과(기본급 항목)를 한 등식에 적으면 안 된다 —
+   * 포괄임금·식대 포함 체계에서는 총액을 일할한 뒤 약정 연장·야간·식대를 갈라 실으므로
+   * "기본급 4,600,000 × 28/31 = 3,704,399" 처럼 **수학적으로 틀린 식**이 찍혔다.
+   * 일할 결과는 총액대로 적고, 기본급은 '항목을 가른 잔액' 임을 따로 밝힌다.
+   * 총액이 그대로 기본급이 되는 경우(가를 항목이 없음)에만 예전 한 줄 표기를 쓴다.
+   */
+  const proratedLines = (lead: string, activeDays: number, daysInMonth: number, ratioWord: string) => {
+    const baseForCalc = baseApplied ?? (blend ? blend.baseWage : null);
+    if (baseForCalc != null) {
+      const prorated = Math.round((baseForCalc * activeDays) / daysInMonth);
+      if (prorated === p.baseP) {
+        basisLines.push(
+          `${lead}): ${blend ? "적용 " : ""}기본급 ${won(baseForCalc)}원 × ${activeDays}/${daysInMonth} = <b>${won(p.baseP)}원</b>`
+        );
+      } else {
+        // 총액에서 갈라져 나간 항목들 — 실제로 있는 것만 적는다
+        const carved = [
+          fx?.otHours ? "약정 연장근로수당" : "",
+          fx?.nightHours ? "약정 야간근로수당" : "",
+          p.mealP ? "식대(비과세)" : "",
+          p.carP ? "차량유지비(비과세)" : "",
+          p.nonCompeteP ? "경업금지 보상금" : "",
+        ].filter(Boolean);
+        basisLines.push(
+          `${lead}): ` +
+            `${blend ? "적용 " : ""}월 급여총액 ${won(baseForCalc)}원 × ${activeDays}/${daysInMonth} = <b>${won(prorated)}원</b>` +
+            (carved.length ? ` <span class="muted">(${carved.join("·")} 포함)</span>` : "")
+        );
+        basisLines.push(
+          `이 총액에서 ${carved.length ? carved.join("·") + "을(를) " : ""}각 항목으로 갈라 실은 잔액이 기본급 <b>${won(p.baseP)}원</b>입니다 — 항목 합계는 일할한 총액과 일치합니다.`
+        );
+      }
+    } else {
+      basisLines.push(
+        `${lead}, ${ratioWord} ${(ratio * 100).toFixed(1)}%) → 기본급 <b>${won(p.baseP)}원</b>`
+      );
+    }
+    basisLines.push(
+      `직책수당 등 월 정액 수당도 동일 비율(${activeDays}/${daysInMonth})로 일할 지급됩니다.`
+    );
+  };
+
+  if (unpaid) {
+    // ── 무급휴직 — 역일수 일할. 기간과 일수를 그대로 적어 명세서만 보고 검산할 수 있게 한다 ──
+    // 사유는 적지 않는다(내부 기록이다). 월중 입·퇴사와 겹친 달은 재직일수를 함께 적는다.
+    const span = unpaidSpansLabelKo(unpaid.spans);
+    const what = `무급휴직 ${span ? `${span}(${unpaid.days}일)` : `${unpaid.days}일`}`;
+    const within =
+      unpaid.employedDays < unpaid.daysInMonth ? `이 달 재직 ${unpaid.employedDays}일 중 ` : "";
+    if (isMonthlyLike) {
+      proratedLines(
+        `<b>무급휴직 일할계산</b> — ${within}${what}을 뺀 지급 대상 (${unpaid.paidDays}일/${unpaid.daysInMonth}일`,
+        unpaid.paidDays,
+        unpaid.daysInMonth,
+        "지급 비율"
+      );
+      basisLines.push(
+        `무급휴직 기간에는 급여가 지급되지 않으며, 달력의 날 수(역일수)로 일할합니다 — 월중 입·퇴사와 같은 방식입니다.`
+      );
+    } else if (isHourly) {
+      basisLines.push(
+        `<b>무급휴직</b> — ${within}${what}. 시급제는 실제 근로시간으로 지급하므로 이 기간에는 지급되는 시간이 없고, ` +
+          `월 정액 수당이 있으면 ${unpaid.paidDays}/${unpaid.daysInMonth} 로 일할 지급됩니다.`
+      );
+    } else {
+      // 완전비율제(근로계약) — 그 달 수강료 입금액으로 정해지는 급여라 일할하지 않는다
+      basisLines.push(
+        `<b>무급휴직</b> — ${within}${what}. 비율급은 그 달 수강료 입금액을 기준으로 산정하므로 일할하지 않습니다.`
+      );
+    }
+  } else if (isMonthlyLike && ratio < 1) {
     // 재직기간 재구성 — 기록 당시 비율과 일치할 때만 일수·기간을 표기
     const monthStart = new Date(Date.UTC(p.year, p.month - 1, 1));
     const monthEnd = new Date(Date.UTC(p.year, p.month, 0));
@@ -473,47 +553,13 @@ export function payslipHtml(args: {
       from <= to ? Math.floor((to.getTime() - from.getTime()) / 86400000) + 1 : 0;
     const matches =
       activeDays > 0 && Math.abs(activeDays / daysInMonth - ratio) < 0.005;
-    const baseForCalc = baseApplied ?? (blend ? blend.baseWage : null);
     if (matches) {
       const period = `${p.month}월 ${from.getUTCDate()}일 ~ ${p.month}월 ${to.getUTCDate()}일`;
-      if (baseForCalc != null) {
-        /*
-         * 곱하는 값(계약 월 급여총액)과 결과(기본급 항목)를 한 등식에 적으면 안 된다 —
-         * 포괄임금·식대 포함 체계에서는 총액을 일할한 뒤 약정 연장·야간·식대를 갈라 실으므로
-         * "기본급 4,600,000 × 28/31 = 3,704,399" 처럼 **수학적으로 틀린 식**이 찍혔다.
-         * 일할 결과는 총액대로 적고, 기본급은 '항목을 가른 잔액' 임을 따로 밝힌다.
-         * 총액이 그대로 기본급이 되는 경우(가를 항목이 없음)에만 예전 한 줄 표기를 쓴다.
-         */
-        const prorated = Math.round((baseForCalc * activeDays) / daysInMonth);
-        if (prorated === p.baseP) {
-          basisLines.push(
-            `<b>월중 입·퇴사 일할계산</b> — 재직 ${period} (${activeDays}일/${daysInMonth}일): ${blend ? "적용 " : ""}기본급 ${won(baseForCalc)}원 × ${activeDays}/${daysInMonth} = <b>${won(p.baseP)}원</b>`
-          );
-        } else {
-          // 총액에서 갈라져 나간 항목들 — 실제로 있는 것만 적는다
-          const carved = [
-            fx?.otHours ? "약정 연장근로수당" : "",
-            fx?.nightHours ? "약정 야간근로수당" : "",
-            p.mealP ? "식대(비과세)" : "",
-            p.carP ? "차량유지비(비과세)" : "",
-            p.nonCompeteP ? "경업금지 보상금" : "",
-          ].filter(Boolean);
-          basisLines.push(
-            `<b>월중 입·퇴사 일할계산</b> — 재직 ${period} (${activeDays}일/${daysInMonth}일): ` +
-              `${blend ? "적용 " : ""}월 급여총액 ${won(baseForCalc)}원 × ${activeDays}/${daysInMonth} = <b>${won(prorated)}원</b>` +
-              (carved.length ? ` <span class="muted">(${carved.join("·")} 포함)</span>` : "")
-          );
-          basisLines.push(
-            `이 총액에서 ${carved.length ? carved.join("·") + "을(를) " : ""}각 항목으로 갈라 실은 잔액이 기본급 <b>${won(p.baseP)}원</b>입니다 — 항목 합계는 일할한 총액과 일치합니다.`
-          );
-        }
-      } else {
-        basisLines.push(
-          `<b>월중 입·퇴사 일할계산</b> — 재직 ${period} (${activeDays}일/${daysInMonth}일, 재직비율 ${(ratio * 100).toFixed(1)}%) → 기본급 <b>${won(p.baseP)}원</b>`
-        );
-      }
-      basisLines.push(
-        `직책수당 등 월 정액 수당도 동일 비율(${activeDays}/${daysInMonth})로 일할 지급됩니다.`
+      proratedLines(
+        `<b>월중 입·퇴사 일할계산</b> — 재직 ${period} (${activeDays}일/${daysInMonth}일`,
+        activeDays,
+        daysInMonth,
+        "재직비율"
       );
     } else {
       basisLines.push(

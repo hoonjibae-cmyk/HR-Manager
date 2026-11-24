@@ -4,6 +4,7 @@
 
 import { ScheduleDay, isContractorContract } from "./constants";
 import { hoursLabel } from "./format";
+import { unpaidLeaveCalcNote, type UnpaidLeaveMeta } from "./unpaid-leave";
 
 /** 근속연수 계산 등에서 쓰는 4.345주/월 */
 export const WEEKS_PER_MONTH = 4.345;
@@ -182,7 +183,17 @@ export interface MonthlyInput {
   weeklyHolidayHours?: number | null; // 시급제 주휴시간(월 합계) — 시간기록표 기반. 지정 시 스케줄 추정 대신 사용
   /** 시간기록표 근거 (명세서 표기용 — 금액 계산에는 쓰지 않는다) */
   timesheet?: TimesheetMeta | null;
-  prorationRatio?: number; // 일할계산 비율(월중 입/퇴사). 1=만근월. 월급·수당·추정근로시간에 적용
+  /**
+   * 일할계산 비율 — **그 달 급여가 나가는 역일수 ÷ 그 달 역일수**. 1=만근월.
+   * 월중 입·퇴사와 무급휴직을 한 비율에 담는다(재직 역일수 − 무급휴직 역일수. lib/unpaid-leave.ts).
+   * 월급·월 정액 수당·추정근로시간에 적용한다.
+   */
+  prorationRatio?: number;
+  /**
+   * 그 달 무급휴직 근거 (표기용 — 금액은 `prorationRatio` 가 이미 정한다).
+   * 있으면 산정 근거가 「재직비율」이 아니라 무급휴직 일수·기간으로 적힌다.
+   */
+  unpaidLeave?: UnpaidLeaveMeta | null;
   extraHours?: number; // 법내연장(월): 소정 외이나 1일8h·주40h 이내 — 가산 없음(×1.0)
   overtimeHours?: number; // 법정 연장근로(월): 1일8h·주40h 초과분 — ×1.5
   nightHours?: number; // 야간근로(월, 22~06시) — +0.5 가산
@@ -668,11 +679,26 @@ export function computePayroll(
     );
   }
 
-  // --- 일할계산 비율 (월중 입/퇴사). 비율제는 매출 기반이라 미적용 ---
+  // --- 일할계산 비율 (월중 입/퇴사·무급휴직). 비율제는 매출 기반이라 미적용 ---
   const rawRatio = month.prorationRatio ?? 1;
   const prorate =
     emp.payScheme === "RATIO" ? 1 : Math.min(Math.max(rawRatio, 0), 1);
-  if (prorate < 1) notes.push(`일할계산 적용 (재직비율 ${(prorate * 100).toFixed(1)}%)`);
+  // 무급휴직이 낀 달은 '재직비율' 이라고 적지 않는다 — 재직은 했고 급여만 안 나간 날이다.
+  // 무엇이 줄었는지는 급여형태마다 다르다(완전비율제는 그대로, 시급제 실근로 기록은 수당만).
+  const unpaid = month.unpaidLeave ?? null;
+  if (unpaid)
+    notes.push(
+      unpaidLeaveCalcNote(
+        unpaid,
+        emp.payScheme === "RATIO"
+          ? "RATIO"
+          : emp.payScheme === "HOURLY" &&
+              !isEstimatedHourly({ payScheme: emp.payScheme, workedHours: month.workedHours })
+            ? "HOURLY_ACTUAL"
+            : "PRORATED"
+      )
+    );
+  else if (prorate < 1) notes.push(`일할계산 적용 (재직비율 ${(prorate * 100).toFixed(1)}%)`);
 
   // --- 포괄임금 분해 (월급제/인센티브) — 계약서 제4조와 같은 계산을 쓴다 ---
   const inclusive = inclusiveWageBreakdown({

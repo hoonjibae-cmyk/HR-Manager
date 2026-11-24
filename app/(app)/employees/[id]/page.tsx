@@ -31,6 +31,9 @@ import EmployeeDeleteButton from "@/components/EmployeeDeleteButton";
 import { nonCompeteRequired, nonCompeteRatioRequired, ratioPctLabel } from "@/lib/non-compete";
 import { bizPayerMissing } from "@/lib/ratio-employee";
 import { bizIncomeDestination, maskAccount } from "@/lib/bank-account";
+import UnpaidLeaveCard from "@/components/UnpaidLeaveCard";
+import { spanDays } from "@/lib/unpaid-leave";
+import { unpaidImpactsOfEmployee } from "@/lib/unpaid-leave-service";
 
 export const dynamic = "force-dynamic";
 
@@ -59,9 +62,14 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         select: { id: true, name: true, mime: true, size: true, note: true, uploadedAt: true },
         orderBy: { uploadedAt: "asc" },
       },
+      // 무급휴직 — 최근 것부터. 그 달 급여가 역일수로 일할된다(lib/unpaid-leave.ts)
+      unpaidLeaves: { orderBy: [{ startDate: "desc" }, { id: "desc" }] },
     },
   });
   if (!emp) notFound();
+  // 휴직이 걸친 달(그리고 휴직으로 일할해 산정해 둔 달)의 급여 상태 — 다시 산정해야 하는 달을 카드가 늘 띄운다.
+  // 지우거나 옮긴 휴직의 옛 달도 잡는다(그 달 급여는 여전히 일할된 채라 덜 지급된 상태다).
+  const unpaidImpacts = await unpaidImpactsOfEmployee(emp, emp.unpaidLeaves);
 
   const { summary, comp } = await leaveSummaryFor(id);
   const sched = parseSchedule(emp.schedule);
@@ -643,6 +651,27 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
               </ul>
             )}
           </div>
+
+          {/* 무급휴직 — 급여 바로 아래에 둔다(등록하면 그 달 급여가 일할된다). 위탁계약은 대상이 아니라
+              기록이 없으면 카드를 내지 않는다(이미 있는 기록은 지울 수 있게 보여 준다). */}
+          {(!isContractorContract(emp) || emp.unpaidLeaves.length > 0) && (
+            <UnpaidLeaveCard
+              employeeId={id}
+              hireDate={emp.hireDate.toISOString().slice(0, 10)}
+              resignDate={emp.resignDate ? emp.resignDate.toISOString().slice(0, 10) : null}
+              contractor={isContractorContract(emp)}
+              ratio={emp.payScheme === "RATIO"}
+              leaves={emp.unpaidLeaves.map((l) => ({
+                id: l.id,
+                startDate: l.startDate.toISOString().slice(0, 10),
+                endDate: l.endDate.toISOString().slice(0, 10),
+                days: spanDays(l.startDate, l.endDate),
+                reason: l.reason ?? "",
+                createdBy: l.createdBy ?? "",
+              }))}
+              impacts={unpaidImpacts}
+            />
+          )}
 
           <div className="card p-5">
             <h2 className="font-bold text-slate-800 mb-3">증명서 발급</h2>

@@ -338,7 +338,7 @@ const WEEKS_PER_MONTH = 4.345;
  *  · **위탁계약·완전비율제** — 퇴직급여 대상이 아니라 추산하지 않는다.
  *
  * ⚠ **추산은 만근 가정**이다. 결근·중도 입퇴사·그 달만의 조정은 반영되지 않는다.
- * 일할계산은 호출부가 `prorate` 로 넘긴다.
+ * 일할계산(월중 입·퇴사·무급휴직)은 호출부가 `prorate` 로 넘긴다.
  */
 export function estimateContractBase(
   t: ContractWageTerms,
@@ -347,8 +347,13 @@ export function estimateContractBase(
     weeklyContractual?: number;
     /** 주휴시간 — 시급제 환산에 쓴다 */
     weeklyHoliday?: number;
-    /** 재직비율 (월중 입·퇴사). 1 이면 만근 */
+    /**
+     * 그 달 지급 비율 — 월중 입·퇴사, 그리고 **무급휴직**(lib/unpaid-leave.ts `monthPayDays().ratio`).
+     * 급여가 그 비율로 일할되므로 추산도 같은 비율을 써야 급여에서 뽑은 값과 맞는다. 1 이면 만근
+     */
     prorate?: number;
+    /** 비율에 붙일 말 — 무급휴직이 낀 달은 「재직비율」이 아니라 무엇을 뺀 비율인지 적는다 */
+    prorateLabel?: string;
   } = {}
 ): ContractBaseEstimate {
   const prorate = Math.min(Math.max(opts.prorate ?? 1, 0), 1);
@@ -400,7 +405,7 @@ export function estimateContractBase(
   const base = Math.round(full * prorate);
   const note =
     prorate < 1
-      ? `계약 추산: ${how} = ${won(full)}원 × 재직비율 ${(prorate * 100).toFixed(1)}% = ${won(base)}원`
+      ? `계약 추산: ${how} = ${won(full)}원 × ${opts.prorateLabel || "재직비율"} ${(prorate * 100).toFixed(1)}% = ${won(base)}원`
       : `계약 추산: ${how} = ${won(base)}원`;
   return { base, note, excluded: false };
 }

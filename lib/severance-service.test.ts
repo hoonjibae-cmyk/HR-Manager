@@ -382,3 +382,79 @@ describe("누계에 추산으로 메운 달이 함께 잡힌다", () => {
     expect(r.cumulative).toBe(0);
   });
 });
+
+describe("무급휴직 — 급여가 일할된 달은 적립도 함께 줄어든다", () => {
+  /** 300만(식대 20만 포함) 계약 · 11/16~11/30 무급 → 급여가 15/30 로 일할된 기록 */
+  const halfMonth = {
+    baseP: 1_400_000,
+    mealP: 100_000,
+    positionP: 0,
+    breakdown: JSON.stringify({
+      notes: [],
+      unpaidLeave: {
+        days: 15,
+        daysInMonth: 30,
+        employedDays: 30,
+        paidDays: 15,
+        spans: [{ from: "2026-11-16", to: "2026-11-30", days: 15 }],
+      },
+    }),
+  };
+
+  it("★ DC 부담금 = 일할된 급여 ÷ 12 — 만근 달의 절반이다", async () => {
+    employees.push(emp());
+    payrolls.push(rec(2026, 10, { baseP: 2_800_000, mealP: 200_000, positionP: 0 }));
+    payrolls.push(rec(2026, 11, halfMonth));
+    const oct = (await severanceMonth(2026, 10)).rows[0];
+    const nov = (await severanceMonth(2026, 11)).rows[0];
+    expect(oct.amount).toBe(250_000); // 3,000,000 ÷ 12
+    expect(nov.status).toBe("DC");
+    expect(nov.base).toBe(1_500_000);
+    expect(nov.amount).toBe(125_000);
+    // 누계도 그 달 금액으로 쌓인다
+    expect(nov.cumulativeDc - oct.cumulativeDc).toBe(125_000);
+  });
+
+  it("줄어든 까닭을 행에 남긴다 — 조용히 줄어들면 적립이 왜 모자란지 알 수 없다", async () => {
+    employees.push(emp());
+    payrolls.push(rec(2026, 11, halfMonth));
+    const row = (await severanceMonth(2026, 11)).rows[0];
+    expect(row.unpaidNote).toBe("무급휴직 11/16~11/30(15일)");
+  });
+
+  it("휴직이 없는 달에는 붙지 않는다", async () => {
+    employees.push(emp());
+    payrolls.push(rec(2026, 11));
+    expect((await severanceMonth(2026, 11)).rows[0].unpaidNote).toBeNull();
+  });
+
+  it("한 달을 통째로 쉬어 급여가 0원이면 그 달 적립도 0원이다 — '급여 미산정' 으로 세지 않는다", async () => {
+    employees.push(emp());
+    payrolls.push(
+      rec(2026, 11, {
+        baseP: 0,
+        mealP: 0,
+        positionP: 0,
+        breakdown: JSON.stringify({
+          unpaidLeave: { days: 30, daysInMonth: 30, employedDays: 30, paidDays: 0, spans: [{ from: "2026-11-01", to: "2026-11-30", days: 30 }] },
+        }),
+      })
+    );
+    const { rows, totals } = await severanceMonth(2026, 11);
+    expect(rows[0].amount).toBe(0);
+    expect(rows[0].noPayroll).toBe(false);
+    expect(rows[0].unpaidNote).toBe("무급휴직 11/1~11/30(30일)");
+    expect(totals.noPayrollCount).toBe(0);
+  });
+
+  it("관리자가 기준급여를 지정한 달은 지정값이 이긴다 — 달리 쌓아야 하는 휴직(육아휴직 등)의 길", async () => {
+    employees.push(emp());
+    payrolls.push(rec(2026, 11, halfMonth));
+    bases.push(base(2026, 11, { base: 3_000_000, source: "MANUAL", note: "육아휴직 — 휴직 전 임금 기준" }));
+    const row = (await severanceMonth(2026, 11)).rows[0];
+    expect(row.baseSource).toBe("MANUAL");
+    expect(row.amount).toBe(250_000);
+    // 지정값은 급여에서 온 것이 아니라 휴직 표시를 붙이지 않는다
+    expect(row.unpaidNote).toBeNull();
+  });
+});

@@ -87,6 +87,11 @@ interface Rec {
   emailedAt: string | null;
   /** 그 달 재직 기간이 없는데 관리자가 직접 올린 행 — 배치 산정이 내리지 않는다 */
   manualAdd?: boolean;
+  /**
+   * 무급휴직 표시(서버가 붙인다 — lib/unpaid-leave-service.ts). `applied` 는 이 기록을 산정할 때 쓴 휴직,
+   * `stale` 은 **산정한 뒤에 휴직 등록이 바뀌어 다시 산정해야 한다**는 뜻이다. 휴직과 무관한 행은 null.
+   */
+  unpaid?: { applied: string | null; appliedDays: number; stale: boolean; now: string | null } | null;
   employee: {
     name: string;
     empNo: string;
@@ -381,6 +386,10 @@ export default function PayrollClient({ today }: { today: string }) {
             w.bizPayerMissing?.length
               ? `별도 사업장(사업소득 지급처) 정보가 비어 있습니다: ${w.bizPayerMissing.join("·")}\n→ 설정 → 회사 정보에 넣으세요. 상한 초과분은 '별도 사업장 사업소득' 시트에 따로 실렸습니다.`
               : "",
+            // 산정한 뒤에 무급휴직 등록이 바뀐 사람 — 시트의 금액이 지금 등록과 다르다
+            w.unpaidStale?.length
+              ? `무급휴직이 급여에 반영되지 않은 ${w.unpaidStale.length}명: ${w.unpaidStale.join(", ")}\n→ 「급여 일괄 산정」을 다시 누른 뒤 받으세요(발송 완료된 행은 잠금 해제 먼저).`
+              : "",
           ].filter(Boolean);
           if (msgs.length) alert("⚠️ 확인이 필요합니다\n\n" + msgs.join("\n\n"));
         }
@@ -429,6 +438,10 @@ export default function PayrollClient({ today }: { today: string }) {
             // 모르고 지나가지 않게 알린다(막지는 않는다 — 한 통장으로 받는 것도 정상이다)
             w.bizToSalaryAccount?.length
               ? `사업소득용 계좌가 없어 급여(근로소득) 계좌로 보내는 ${w.bizToSalaryAccount.length}명: ${w.bizToSalaryAccount.join(", ")}\n→ 근로소득과 다른 통장으로 받게 하려면 직원 정보 → 수정의 「사업소득용 계좌」를 넣은 뒤 다시 받으세요.`
+              : "",
+            // 산정한 뒤에 무급휴직 등록이 바뀐 사람 — 쉰 날의 급여까지 실려 있을 수 있다 (막지는 않는다)
+            w.unpaidStale?.length
+              ? `무급휴직이 급여에 반영되지 않은 ${w.unpaidStale.length}명: ${w.unpaidStale.join(", ")}\n→ 이 파일의 금액은 휴직 등록 전(또는 수정 전) 기준입니다. 「급여 일괄 산정」을 다시 누른 뒤 받으세요.`
               : "",
             // 돈이 실제로 나가는 파일이라 여기서 한 번 더 걸리게 한다 (막지는 않는다)
             w.resigned?.count
@@ -600,6 +613,11 @@ export default function PayrollClient({ today }: { today: string }) {
       ),
     [recs, today]
   );
+
+  // 무급휴직 등록이 급여에 반영되지 않은 행 — 퇴직자 경고와 같은 원칙으로 **거른 것과 무관하게** 센다.
+  // 휴직을 등록·수정·삭제해도 이미 산정한 기록은 저절로 바뀌지 않아, 그대로 이체하면 쉰 날의 급여까지 나가거나
+  // (새로 등록) 지운 휴직만큼 덜 나간다(삭제·축소).
+  const unpaidStale = React.useMemo(() => recs.filter((r) => r.unpaid?.stale), [recs]);
 
   const filtered = React.useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -974,6 +992,30 @@ export default function PayrollClient({ today }: { today: string }) {
         </div>
       )}
 
+      {/* 무급휴직 미반영 — 산정한 뒤에 휴직을 등록·수정·삭제한 행. 행의 표시는 스크롤해야 보이므로 위에 한 줄로 둔다.
+          다시 산정하면 사라진다(발송된 행은 잠금 해제를 먼저 거쳐야 한다). */}
+      {unpaidStale.length > 0 && (
+        <div className="card p-3 mb-5 border-rose-200 bg-rose-50/60 text-sm text-rose-900">
+          <b>⚠️ 무급휴직이 급여에 반영되지 않은 직원 {unpaidStale.length}명</b> — 산정한 뒤에 휴직 등록이 바뀌었습니다
+          <div className="text-xs text-rose-700 mt-1 space-y-0.5">
+            {unpaidStale.map((r) => (
+              <div key={r.id}>
+                · <b>{r.employee.name}</b> — 산정에 쓴 값: {r.unpaid?.applied ?? "무급휴직 없음"} → 지금 등록:{" "}
+                {r.unpaid?.now ?? "무급휴직 없음"}
+                {r.status === "SENT" && <span className="ml-1">(명세서 발송 완료)</span>}
+              </div>
+            ))}
+          </div>
+          <div className="text-xs text-rose-700/80 mt-1">
+            <b>급여 일괄 산정</b>을 다시 눌러야 지급액이 바뀝니다 — 그대로 이체하면 지금 등록과 다른 금액이 나갑니다
+            (새로 등록한 휴직이면 쉰 날의 급여까지, 지우거나 줄인 휴직이면 그만큼 덜).
+            {unpaidStale.some((r) => r.status === "SENT") && (
+              <> 발송 완료된 행은 <b>발송 잠금 해제</b>를 먼저 거쳐야 다시 산정됩니다.</>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 퇴사 정산이 아직 안 실린 사람 — 미사용분 지급(놓치면 체불)과 초과사용 공제(근거 확인 필요)를
           버튼 배지만으로 두면 지나친다. 퇴사 정산 줄만 골라 늘 위에 띄운다(기간 만료는 버튼 배지로 충분하다). */}
       {resignPayoutNotice && (
@@ -1169,6 +1211,26 @@ export default function PayrollClient({ today }: { today: string }) {
                     </div>
                     {r.prorationRatio < 1 && (r.payScheme === "MONTHLY" || r.payScheme === "INCENTIVE") && (
                       <div className="text-[10px] text-amber-600 mt-0.5">일할 {(r.prorationRatio * 100).toFixed(0)}%</div>
+                    )}
+                    {/* 무급휴직 — 이 기록을 산정할 때 쓴 기간·일수. 왜 일할이 걸렸는지가 행에 드러나야 한다
+                        (재직 중인 사람의 '일할 50%' 는 그것만으로는 입·퇴사로 읽힌다) */}
+                    {r.unpaid?.applied && (
+                      <div
+                        className="text-[10px] text-amber-700 mt-0.5 whitespace-nowrap"
+                        title="등록된 무급휴직만큼 역일수로 일할했습니다(월중 입·퇴사와 같은 방식). 기간은 직원 상세의 무급휴직에서 고칩니다."
+                      >
+                        {r.unpaid.applied}
+                      </div>
+                    )}
+                    {r.unpaid?.stale && (
+                      <div className="mt-0.5">
+                        <span
+                          className="pill bg-rose-100 text-rose-800 text-[10px] whitespace-nowrap"
+                          title={`산정한 뒤에 무급휴직 등록이 바뀌었습니다. 지금 등록: ${r.unpaid.now ?? "무급휴직 없음"} — 급여 일괄 산정을 다시 눌러야 반영됩니다.`}
+                        >
+                          무급휴직 미반영 · 다시 산정
+                        </span>
+                      </div>
                     )}
                     {/* 재직 기간이 없는데 올라와 있는 행 — 왜 여기 있는지가 행에 드러나야 한다 */}
                     {r.manualAdd && (
@@ -1490,6 +1552,12 @@ export default function PayrollClient({ today }: { today: string }) {
             <b>기본값이 자동으로 채워지고</b>, 편집창에서 그 달만 다르게 고칠 수 있습니다.
             실비(±)·기타공제도 편집창에서 입력합니다.
             &nbsp;· 월중 입·퇴사자는 <b>일할계산</b>이 자동 적용됩니다.
+          </p>
+          <p>
+            · <b>무급휴직</b>: 직원 상세의 <b>무급휴직</b>에 기간을 등록하면 그 달 급여가 <b>역일수</b>로 일할됩니다
+            (그 달 재직일수 − 무급휴직일수) ÷ 그 달 일수 — 월중 입·퇴사와 같은 방식. 기본급과 월 정액 수당에 걸리고,
+            완전비율제는 매출 기준이라 그대로입니다. 한 달을 통째로 쉬어도 재직자라 <b>0원 행으로 남습니다</b>.
+            산정한 뒤에 휴직을 등록·수정하면 행에 <b>무급휴직 미반영</b>이 뜨므로 <b>급여 일괄 산정</b>을 다시 누르세요.
           </p>
         </div>
         </details>

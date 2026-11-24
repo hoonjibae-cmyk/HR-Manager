@@ -376,4 +376,14 @@ describe("estimateContractBase — 급여 레코드가 없던 달 메우기", ()
     expect(estimateContractBase(terms(), { prorate: -1 }).base).toBe(0);
     expect(estimateContractBase(terms(), { prorate: 3 }).base).toBe(3_600_000);
   });
+
+  it("무급휴직이 낀 달은 지급 비율로 일할하고, 무엇을 뺀 비율인지 근거에 적는다", () => {
+    const e = estimateContractBase(terms(), {
+      prorate: 0.5,
+      prorateLabel: "지급 비율(무급휴직 11/16~11/30(15일) 제외)",
+    });
+    expect(e.base).toBe(1_800_000);
+    expect(e.note).toContain("지급 비율(무급휴직 11/16~11/30(15일) 제외) 50.0%");
+    expect(e.note).not.toContain("재직비율");
+  });
 });

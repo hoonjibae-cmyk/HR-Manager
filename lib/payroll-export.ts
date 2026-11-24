@@ -26,6 +26,7 @@ import * as XLSX from "xlsx-js-style";
 import { variableOvertimeOf } from "./payroll";
 import { recordSplit } from "./ratio-employee";
 import { nonCompeteNonTaxOf } from "./non-compete";
+import { readUnpaidLeaveMeta, unpaidLeaveNote } from "./unpaid-leave";
 
 export interface ExportPayrollRecord {
   incomeType: string;
@@ -53,7 +54,10 @@ export interface ExportPayrollRecord {
    * 그 사실도 함께 적는다(아래 `breakdown`).
    */
   nonCompeteP?: number | null;
-  /** 산출 근거(JSON) — 보상금을 비과세로 처리해 산정한 달인지(`nonCompeteNonTax`)만 읽는다 */
+  /**
+   * 산출 근거(JSON) — 보상금을 비과세로 처리해 산정한 달인지(`nonCompeteNonTax`)와
+   * 그 달 산정에 쓴 무급휴직(`unpaidLeave`)을 읽는다
+   */
   breakdown?: string | null;
   incentiveP: number;
   bonusP: number;
@@ -193,6 +197,11 @@ export function buildExportRow(r: ExportPayrollRecord, payDate: string, status =
       ? ` · 경업금지 보상금 ${nonCompete.toLocaleString("ko-KR")}원 포함` +
         (nonCompeteNonTaxOf(r.breakdown) ? "(비과세 처리)" : "")
       : "";
+  // 무급휴직 — 세전급여가 왜 계약 월 급여보다 적은지가 시트에 있어야 한다. 세무대리인이 보수 변동·휴직
+  // 신고를 판단할 때도 기간이 필요하다(표시만 있으면 날짜를 따로 묻게 된다 — 재직 상태 열과 같은 이유).
+  // **그 달 산정에 실제로 쓴** 기간을 적는다(지금의 휴직 등록이 아니라 — 금액과 같은 근거여야 한다).
+  const unpaid = readUnpaidLeaveMeta(r.breakdown);
+  const unpaidNote = unpaid ? ` · ${unpaidLeaveNote(unpaid)}` : "";
   return {
     name: `${r.employee.name}선생님`,
     payDate,
@@ -213,7 +222,9 @@ export function buildExportRow(r: ExportPayrollRecord, payDate: string, status =
         ? "3.3% 적용"
         : split.biz
         ? "4대보험(근로소득) · 상한 초과분 별도 시트"
-        : "4대보험(근로소득)") + ncNote,
+        : "4대보험(근로소득)") +
+      ncNote +
+      unpaidNote,
     id: r.employee.rrn || "",
     status,
   };

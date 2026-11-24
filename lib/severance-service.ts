@@ -21,6 +21,7 @@ import {
   type SeveranceStatus,
   type SeverancePayItems,
 } from "./severance";
+import { readUnpaidLeaveMeta, unpaidLeaveNote } from "./unpaid-leave";
 
 /** 산정 조건 (없으면 만들어 준다 — 화면에서 수정) */
 export async function getSeverancePolicy(): Promise<SeverancePolicy & { id: number }> {
@@ -101,6 +102,12 @@ export interface SeveranceRow {
   excluded: Array<[string, number, string]>;
   /** 법정 하한 미달 소지 경고 (없으면 null) */
   warning: string | null;
+  /**
+   * 이 달 급여를 **무급휴직으로 일할해** 산정했으면 그 한 줄(`무급휴직 11/16~11/30(15일)`). 아니면 null.
+   * 산정기준 임금이 계약 월 급여보다 적은 까닭이 화면에 남아야 한다 — 조용히 줄어들면 적립이 왜 모자란지 알 수 없다.
+   * 그 달 **급여 기록에 남은 근거**에서 읽는다(지정·추산값에는 붙이지 않는다 — 그 값은 급여에서 온 것이 아니다).
+   */
+  unpaidNote: string | null;
 
   /** 이 달 인센티브 퇴직유보금 — 퇴직급여의 다른 갈래라 나란히 보여준다 */
   retention: number;
@@ -272,6 +279,11 @@ export async function severanceMonth(year: number, month: number) {
       included: cur.source === "PAYROLL" ? b.included : [],
       excluded: cur.source === "PAYROLL" ? b.excluded : [],
       warning,
+      unpaidNote: (() => {
+        if (cur.source !== "PAYROLL") return null;
+        const meta = readUnpaidLeaveMeta(cur.rec?.breakdown);
+        return meta ? unpaidLeaveNote(meta) : null;
+      })(),
       retention: cur.rec?.retentionD ?? 0,
       cumulative: cumulativeProvision + cumulativeDc,
       cumulativeProvision,

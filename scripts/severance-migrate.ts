@@ -27,6 +27,7 @@ import {
   monthlyAccrual,
   type SeverancePolicy,
 } from "../lib/severance";
+import { monthPayDays, unpaidLeaveMetaOf, unpaidLeaveNote } from "../lib/unpaid-leave";
 
 const APPLY = process.env.APPLY === "1";
 const REDO = process.env.REDO === "1";
@@ -46,6 +47,24 @@ function prorateOf(hire: Date, resign: Date | null, y: number, m: number): numbe
   if (to < from) return 0;
   const worked = (to.getTime() - from.getTime()) / 86400000 + 1;
   return Math.min(Math.max(worked / days, 0), 1);
+}
+
+/**
+ * 그 달의 **지급 비율** — 재직비율에서 무급휴직까지 뺀다(급여 산정과 같은 함수 — lib/unpaid-leave.ts).
+ * 추산은 '그 달 급여가 있었다면 나왔을 산정기준' 이라, 급여가 일할되는 만큼 같이 줄어야 한다.
+ * 무급휴직이 없는 달은 재직비율 그대로다.
+ */
+function payRatioOf(
+  hire: Date,
+  resign: Date | null,
+  y: number,
+  m: number,
+  leaves: Array<{ startDate: Date; endDate: Date }>
+): { ratio: number; label?: string } {
+  const pd = monthPayDays(y, m, hire, resign, leaves);
+  const meta = unpaidLeaveMetaOf(pd);
+  if (!meta) return { ratio: prorateOf(hire, resign, y, m) };
+  return { ratio: pd.ratio, label: `지급 비율(${unpaidLeaveNote(meta)} 제외)` };
 }
 
 async function main() {
@@ -68,7 +87,11 @@ async function main() {
   })) as unknown as SeverancePolicy;
 
   const emps = await prisma.employee.findMany({
-    include: { contracts: { orderBy: { startDate: "asc" } } },
+    include: {
+      contracts: { orderBy: { startDate: "asc" } },
+      // 무급휴직 — 그 기간은 급여가 없었으므로 추산에서도 같은 비율로 뺀다
+      unpaidLeaves: { select: { startDate: true, endDate: true } },
+    },
     orderBy: [{ department: "asc" }, { name: "asc" }],
   });
 
@@ -122,13 +145,16 @@ async function main() {
         continue;
       }
 
-      // 퇴사 후의 달은 만들지 않는다
-      const prorate = prorateOf(e.hireDate, e.resignDate, y, m);
-      if (prorate <= 0) {
+      // 퇴사 후의 달은 만들지 않는다 (재직 판정 — 무급휴직과 무관하다)
+      if (prorateOf(e.hireDate, e.resignDate, y, m) <= 0) {
         m += 1;
         if (m > 12) (m = 1), (y += 1);
         continue;
       }
+      // 지급 비율 — 재직비율에서 무급휴직을 뺀다. 한 달을 통째로 쉰 달은 0 이라 아래에서 건너뛴다
+      // (산정기준이 0 인 달은 쌓을 것이 없다).
+      const pay = payRatioOf(e.hireDate, e.resignDate, y, m, e.unpaidLeaves);
+      const prorate = pay.ratio;
 
       // **그 달을 지배한 계약**의 보수조건으로 추산한다 (계약이 진실 — 직원 카드는 거울일 뿐)
       const c = governingContract(e.contracts, monthEnd(y, m));
@@ -157,7 +183,12 @@ async function main() {
             nonCompetePay: e.nonCompetePay,
           };
 
-      const est = estimateContractBase(terms, { weeklyContractual, weeklyHoliday, prorate });
+      const est = estimateContractBase(terms, {
+        weeklyContractual,
+        weeklyHoliday,
+        prorate,
+        prorateLabel: pay.label,
+      });
       if (est.excluded || est.base <= 0) {
         m += 1;
         if (m > 12) (m = 1), (y += 1);

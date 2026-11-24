@@ -9,6 +9,7 @@ import { prisma } from "@/lib/db";
 import { getCompany } from "@/lib/repo";
 import { buildPayrollExportWorkbook } from "@/lib/payroll-export";
 import { logActivity } from "@/lib/activity";
+import { unpaidStaleNames } from "@/lib/unpaid-leave-service";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,8 @@ export async function GET(req: Request) {
   // 비율제 근로자의 상한 초과분이 있는데 별도 사업장 정보가 비어 있으면 화면이 알린다
   // (시트는 내준다 — 세무사가 먼저 숫자를 봐야 하는 경우가 있다. 다만 지급처 이름이 비어 있다고 적힌다)
   const bizPayerMissing = bizRows.length && !company.bizPayer ? company.bizPayerMissing : [];
+  // 산정한 뒤에 무급휴직 등록이 바뀐 사람 — 시트의 금액이 지금 등록과 다르다(다시 산정해야 맞는다)
+  const unpaidStale = await unpaidStaleNames(year, month, records);
 
   // 되돌리기 어려운 작업은 아니지만, 세무사에게 무엇을 언제 넘겼는지는 남겨 둔다
   await logActivity({
@@ -61,7 +64,7 @@ export async function GET(req: Request) {
       "Cache-Control": "no-store",
       // 화면이 경고를 띄울 수 있게 (헤더는 ASCII 만 가능해 base64 로 싣는다)
       "X-Export-Warnings": Buffer.from(
-        JSON.stringify({ mismatches, missingId, bizPayerMissing }),
+        JSON.stringify({ mismatches, missingId, bizPayerMissing, unpaidStale }),
         "utf8"
       ).toString("base64"),
     },

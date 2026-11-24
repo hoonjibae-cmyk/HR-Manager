@@ -43,6 +43,9 @@ export const ACTION_LABEL: Record<string, string> = {
   LEAVE_CARRYOVER: "연차 이월 처리",
   LEAVE_IMPORT: "연차 사용내역 일괄 등록",
   LEAVE_COMP_GRANT: "대휴 부여",
+  UNPAID_LEAVE_CREATE: "무급휴직 등록",
+  UNPAID_LEAVE_UPDATE: "무급휴직 수정",
+  UNPAID_LEAVE_DELETE: "무급휴직 삭제",
   MAKEUP_CREATE: "보강계획 사전신청",
   MAKEUP_UPDATE: "보강 실근무 확인",
   MAKEUP_DELETE: "보강 신청 삭제",
@@ -76,6 +79,10 @@ export const SENSITIVE_ACTIONS = [
   "CONTRACT_UPDATE",
   "CONTRACT_DELETE",
   "EMPLOYEE_DELETE",
+  // 무급휴직 — 등록·수정·삭제가 그 달 급여와 퇴직급여 적립을 바꾼다
+  "UNPAID_LEAVE_CREATE",
+  "UNPAID_LEAVE_UPDATE",
+  "UNPAID_LEAVE_DELETE",
 ];
 
 export interface LogInput {

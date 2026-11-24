@@ -12,6 +12,7 @@ import { logActivity } from "@/lib/activity";
 import { resignedSummary } from "@/lib/payroll-roster";
 import { kstTodayYmd } from "@/lib/format";
 import { bizPayerMissingMessage } from "@/lib/ratio-employee";
+import { unpaidStaleNames } from "@/lib/unpaid-leave-service";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +61,9 @@ export async function GET(req: Request) {
       { status: 400 }
     );
 
+  // 산정한 뒤에 무급휴직 등록이 바뀐 사람 — 쉬는 동안의 급여가 그대로 실려 있을 수 있다(막지는 않고 알린다)
+  const unpaidStale = await unpaidStaleNames(year, month, records);
+
   // 실제로 돈이 나가는 파일이라 언제 누구 앞으로 얼마를 뽑았는지는 남겨 둔다
   await logActivity({
     action: "PAYROLL_EXPORT",
@@ -92,6 +96,8 @@ export async function GET(req: Request) {
           bizExcluded,
           // 별도 사업장 파일에서 사업소득용 계좌가 없어 급여 계좌로 보내는 사람 — 통장을 가르려면 직원 정보에 넣어야 한다
           bizToSalaryAccount,
+          // 무급휴직 등록이 급여에 반영되지 않은 사람 — 다시 산정하지 않으면 쉰 날의 급여까지 이체된다
+          unpaidStale,
           count: rows.length,
           total,
           // 여기가 돈이 실제로 나가는 자리다 — 오늘 기준 이미 퇴직한 사람이 파일에
