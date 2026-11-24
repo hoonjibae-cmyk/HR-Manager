@@ -95,6 +95,7 @@ export default async function Dashboard() {
     nonCompeteP: p.nonCompeteP,
     incentiveP: p.incentiveP,
     bonusP: p.bonusP,
+    leavePayP: p.leavePayP,
     unusedLeaveP: p.unusedLeaveP,
     extraP: p.extraP,
     overtimeP: p.overtimeP,

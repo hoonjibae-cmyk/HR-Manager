@@ -42,6 +42,8 @@ const payItemsOf = (r: any): SeverancePayItems => ({
   nonCompeteP: r.nonCompeteP ?? 0,
   // 비율제 근로자의 상한 초과분 — 별도 사업장 몫이라 산정기준 임금에서 빠진다
   bizIncomeP: r.bizIncomeP ?? 0,
+  // 유급휴직 급여·휴업수당 — 그 기간의 기본급 대신 나간 임금이라 산정기준에 든다
+  leavePayP: r.leavePayP ?? 0,
   unusedLeaveP: r.unusedLeaveP ?? 0,
   incentiveP: r.incentiveP ?? 0,
   bonusP: r.bonusP ?? 0,
@@ -103,8 +105,9 @@ export interface SeveranceRow {
   /** 법정 하한 미달 소지 경고 (없으면 null) */
   warning: string | null;
   /**
-   * 이 달 급여를 **무급휴직으로 일할해** 산정했으면 그 한 줄(`무급휴직 11/16~11/30(15일)`). 아니면 null.
-   * 산정기준 임금이 계약 월 급여보다 적은 까닭이 화면에 남아야 한다 — 조용히 줄어들면 적립이 왜 모자란지 알 수 없다.
+   * 이 달 급여를 **휴직·휴업으로 일할해** 산정했으면 그 한 줄(`무급휴직 11/16~11/30(15일)` ·
+   * `휴업 11/16~11/30(15일) 휴업수당 1,050,000원(70%)`). 아니면 null.
+   * 산정기준 임금이 계약 월 급여와 다른 까닭이 화면에 남아야 한다 — 조용히 줄어들면 적립이 왜 모자란지 알 수 없다.
    * 그 달 **급여 기록에 남은 근거**에서 읽는다(지정·추산값에는 붙이지 않는다 — 그 값은 급여에서 온 것이 아니다).
    */
   unpaidNote: string | null;

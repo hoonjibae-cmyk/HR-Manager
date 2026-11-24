@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   monthPayDays,
-  unpaidDaysBetween,
+  leaveDaysBetween,
   unpaidLeaveMetaOf,
   readUnpaidLeaveMeta,
   unpaidLeaveStale,
@@ -132,22 +132,22 @@ describe("monthPayDays — 그 달 지급 일수 (역일수)", () => {
   });
 });
 
-describe("unpaidDaysBetween — 구간 안의 무급휴직 일수 (월중 계약 변경 가중용)", () => {
+describe("leaveDaysBetween — 구간 안의 무급휴직 일수 (월중 계약 변경 가중용)", () => {
   const l = [leave("2026-11-10", "2026-11-20"), leave("2026-11-18", "2026-11-22")];
   it("구간으로 자르고 겹침은 한 번만", () => {
-    expect(unpaidDaysBetween(d("2026-11-01"), d("2026-11-15"), l)).toBe(6); // 10~15
-    expect(unpaidDaysBetween(d("2026-11-16"), d("2026-11-30"), l)).toBe(7); // 16~22
-    expect(unpaidDaysBetween(d("2026-11-01"), d("2026-11-30"), l)).toBe(13); // 10~22
+    expect(leaveDaysBetween(d("2026-11-01"), d("2026-11-15"), l)).toBe(6); // 10~15
+    expect(leaveDaysBetween(d("2026-11-16"), d("2026-11-30"), l)).toBe(7); // 16~22
+    expect(leaveDaysBetween(d("2026-11-01"), d("2026-11-30"), l)).toBe(13); // 10~22
   });
   it("★ 구간별 합이 그 달 전체와 같다 — 가중의 분모가 지급 일수와 맞아떨어진다", () => {
     const whole = monthPayDays(2026, 11, HIRE, null, l).unpaidDays;
-    const a = unpaidDaysBetween(d("2026-11-01"), d("2026-11-15"), l);
-    const b = unpaidDaysBetween(d("2026-11-16"), d("2026-11-30"), l);
+    const a = leaveDaysBetween(d("2026-11-01"), d("2026-11-15"), l);
+    const b = leaveDaysBetween(d("2026-11-16"), d("2026-11-30"), l);
     expect(a + b).toBe(whole);
   });
   it("휴직이 없거나 구간이 뒤집혀 있으면 0", () => {
-    expect(unpaidDaysBetween(d("2026-11-01"), d("2026-11-30"), [])).toBe(0);
-    expect(unpaidDaysBetween(d("2026-11-30"), d("2026-11-01"), l)).toBe(0);
+    expect(leaveDaysBetween(d("2026-11-01"), d("2026-11-30"), [])).toBe(0);
+    expect(leaveDaysBetween(d("2026-11-30"), d("2026-11-01"), l)).toBe(0);
   });
 });
 

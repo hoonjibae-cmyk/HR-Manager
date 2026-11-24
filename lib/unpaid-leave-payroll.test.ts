@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { computePayroll, DEFAULT_RATES_2025, type EmployeePayInput, type TaxBracketRow } from "./payroll";
 import { applyMidMonthBlend, type MonthContractTerms } from "./payroll-service";
-import { monthPayDays, unpaidLeaveMetaOf, unpaidDaysBetween } from "./unpaid-leave";
+import { monthPayDays, unpaidLeaveMetaOf, leaveDaysBetween } from "./unpaid-leave";
 import type { ScheduleDay } from "./constants";
 
 const d = (s: string) => new Date(`${s}T00:00:00.000Z`);
@@ -201,8 +201,8 @@ describe("월중 계약 변경 + 무급휴직 — 구간 일수는 '급여가 �
 
   /** 11월: 1~15일 300만, 16~30일 400만. 휴직을 뺀 구간 일수(서비스 `wageSegmentsFor` 가 하는 일) */
   function novSegs(leaves: ReturnType<typeof leave>[]): MonthContractTerms {
-    const a = 15 - unpaidDaysBetween(d("2026-11-01"), d("2026-11-15"), leaves);
-    const b = 15 - unpaidDaysBetween(d("2026-11-16"), d("2026-11-30"), leaves);
+    const a = 15 - leaveDaysBetween(d("2026-11-01"), d("2026-11-15"), leaves);
+    const b = 15 - leaveDaysBetween(d("2026-11-16"), d("2026-11-30"), leaves);
     return { segs: [seg(a, 3_000_000), seg(b, 4_000_000)], futureStart: null };
   }
 

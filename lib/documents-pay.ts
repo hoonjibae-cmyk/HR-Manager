@@ -6,7 +6,15 @@ import { logoImg, stampImg, type DocCompany, type DocEmployee } from "./document
 import { carryoverNotice, type CarryoverInfo } from "./leave-payout";
 import { ratioPctLabel, nonCompeteNonTaxOf } from "./non-compete";
 import { recordSplit, type BizPayer } from "./ratio-employee";
-import { readUnpaidLeaveMeta, unpaidSpansLabelKo } from "./unpaid-leave";
+import {
+  readUnpaidLeaveMeta,
+  unpaidSpansLabelKo,
+  leaveSpansByKind,
+  leaveWordOf,
+  leavePayRows,
+  leavePayDetailLines,
+  LEAVE_KIND_LABEL,
+} from "./unpaid-leave";
 import {
   summarizeIncentive,
   summarizeRevenueShare,
@@ -39,6 +47,11 @@ export interface DocPayroll {
   nonCompeteP?: number;
   incentiveP: number;
   bonusP: number;
+  /**
+   * 유급휴직 급여·휴업수당 — 휴직·휴업 기간에 정상 급여 대신 따로 지급한 몫(없던 기록은 0).
+   * 줄 이름(휴업수당 / 유급휴직 급여)과 계산식은 산정 때 남긴 근거(`breakdown.unpaidLeave`)에서 읽는다.
+   */
+  leavePayP?: number;
   unusedLeaveP: number;
   /** 연차미사용수당 일수 — 명세서 각주에 계산식을 적기 위해서만 쓴다. 음수 = 초과 사용 정산 */
   unusedLeaveDays?: number | null;
@@ -239,9 +252,14 @@ export function payslipHtml(args: {
   // 빠진 항목이 무엇인지 명세서만 보고 알 수 있어야 한다. 과세로 산정한 달은 예전 그대로 아무 표시도 없다
   const ncLabel = nonCompeteNonTaxOf(p.breakdown) ? "경업금지 보상금(비과세)" : "경업금지 보상금";
 
+  // 유급휴직 급여·휴업수당 — 기본급 바로 아래에 구분별로 적는다(그 기간의 기본급 대신 나간 돈이다).
+  // 줄 이름은 산정 때 남긴 근거에서 읽고, 근거와 금액이 맞지 않으면 한 줄로 적는다(`leavePayRows`)
+  const leaveRows = leavePayRows(readUnpaidLeaveMeta(p.breakdown), p.leavePayP ?? 0);
+
   const payRows = (
     [
       [baseLabel, p.baseP - bizPart],
+      ...leaveRows,
       ["추가근로수당", p.extraP],
       ["연장근로수당", p.overtimeP],
       ["야간근로수당", p.nightP],
@@ -425,9 +443,13 @@ export function payslipHtml(args: {
     typeof bd?.baseApplied === "number" ? bd.baseApplied : null;
   const ratio = p.prorationRatio ?? 1;
   const isMonthlyLike = p.payScheme === "MONTHLY" || p.payScheme === "INCENTIVE";
-  // 무급휴직 — **이 달 산정에 실제로 쓴** 기간·일수(급여 기록에 남긴 근거). 지금의 휴직 등록을 다시 읽지 않는다 —
-  // 산정한 뒤에 기간을 고쳤어도 이 명세서의 금액은 산정 때의 것이라, 문구도 그때 것이어야 식이 맞는다.
+  // 휴직·휴업 — **이 달 산정에 실제로 쓴** 기간·일수와 유급 구간의 지급 조건(급여 기록에 남긴 근거).
+  // 지금의 등록을 다시 읽지 않는다 — 산정한 뒤에 기간·비율을 고쳤어도 이 명세서의 금액은 산정 때의 것이라,
+  // 문구도 그때 것이어야 식이 맞는다.
   const unpaid = readUnpaidLeaveMeta(bd);
+  // 유급휴직·휴업이 낀 달인가 — 무급휴직만인 달은 v1.63 의 문구 그대로 적는다
+  const hasPaidLeave = !!unpaid?.spans.some((sp) => sp.kind);
+  const leaveWord = leaveWordOf(unpaid);
 
   const basisLines: string[] = [];
   if (blend && p.payScheme !== "RATIO") {
@@ -437,7 +459,11 @@ export function payslipHtml(args: {
     basisLines.push(
       `<b>월중 계약 변경</b> — 적용 ${isHourly ? "시급" : "월 기본급"}(역일수 가중평균): ( ${segTxt} ) ÷ ${blend.totalDays}일 = <b>${won(blend.baseWage)}원</b>` +
         // 무급휴직이 낀 달의 일수는 '급여가 지급된 날' 이다 — 그 말이 없으면 구간 일수의 합이 왜 한 달이 아닌지 알 수 없다
-        (unpaid ? ` <span class="muted">(무급휴직일을 뺀, 급여가 지급된 날 기준)</span>` : "")
+        (unpaid
+          ? ` <span class="muted">(${
+              hasPaidLeave ? `${leaveWord}일을 뺀, 정상 급여가 지급된 날 기준` : "무급휴직일을 뺀, 급여가 지급된 날 기준"
+            })</span>`
+          : "")
     );
   } else if (!blend && p.payScheme !== "RATIO" && Array.isArray(bd?.notes)) {
     // 구조화 데이터가 없는 과거 기록: 산정 당시 남긴 가중 노트를 그대로 표시
@@ -513,32 +539,54 @@ export function payslipHtml(args: {
   };
 
   if (unpaid) {
-    // ── 무급휴직 — 역일수 일할. 기간과 일수를 그대로 적어 명세서만 보고 검산할 수 있게 한다 ──
+    // ── 휴직·휴업 — 역일수 일할. 기간과 일수를 그대로 적어 명세서만 보고 검산할 수 있게 한다 ──
     // 사유는 적지 않는다(내부 기록이다). 월중 입·퇴사와 겹친 달은 재직일수를 함께 적는다.
-    const span = unpaidSpansLabelKo(unpaid.spans);
-    const what = `무급휴직 ${span ? `${span}(${unpaid.days}일)` : `${unpaid.days}일`}`;
+    // 구분이 섞인 달은 구분마다 기간을 갈라 적는다 — 「무급휴직 11월 3일(1일), 휴업 11월 16일 ~ 11월 30일(15일)」
+    const groups = leaveSpansByKind(unpaid.spans);
+    const what = groups.length
+      ? groups
+          .map(
+            (g) =>
+              `${LEAVE_KIND_LABEL[g.kind]} ${unpaidSpansLabelKo(g.spans)}(${
+                groups.length === 1 ? unpaid.days : g.days
+              }일)`
+          )
+          .join(", ")
+      : `무급휴직 ${unpaid.days}일`;
     const within =
       unpaid.employedDays < unpaid.daysInMonth ? `이 달 재직 ${unpaid.employedDays}일 중 ` : "";
+    const hasUnpaidKind = unpaid.spans.some((sp) => !sp.kind);
     if (isMonthlyLike) {
       proratedLines(
-        `<b>무급휴직 일할계산</b> — ${within}${what}을 뺀 지급 대상 (${unpaid.paidDays}일/${unpaid.daysInMonth}일`,
+        `<b>${leaveWord} 일할계산</b> — ${within}${what}을 뺀 지급 대상 (${unpaid.paidDays}일/${unpaid.daysInMonth}일`,
         unpaid.paidDays,
         unpaid.daysInMonth,
         "지급 비율"
       );
       basisLines.push(
-        `무급휴직 기간에는 급여가 지급되지 않으며, 달력의 날 수(역일수)로 일할합니다 — 월중 입·퇴사와 같은 방식입니다.`
+        !hasPaidLeave
+          ? `무급휴직 기간에는 급여가 지급되지 않으며, 달력의 날 수(역일수)로 일할합니다 — 월중 입·퇴사와 같은 방식입니다.`
+          : `${leaveWord} 기간의 기본급·수당은 달력의 날 수(역일수)로 일할해 빼고(월중 입·퇴사와 같은 방식), ` +
+              (hasUnpaidKind ? `무급휴직 기간에는 급여가 없으며 ` : "") +
+              `${hasUnpaidKind ? "유급휴직·휴업 " : "그 "}기간의 급여는 아래와 같이 따로 지급합니다.`
       );
     } else if (isHourly) {
       basisLines.push(
-        `<b>무급휴직</b> — ${within}${what}. 시급제는 실제 근로시간으로 지급하므로 이 기간에는 지급되는 시간이 없고, ` +
-          `월 정액 수당이 있으면 ${unpaid.paidDays}/${unpaid.daysInMonth} 로 일할 지급됩니다.`
+        `<b>${leaveWord}</b> — ${within}${what}. 시급제는 실제 근로시간으로 지급하므로 이 기간에는 지급되는 시간이 없고, ` +
+          `월 정액 수당이 있으면 ${unpaid.paidDays}/${unpaid.daysInMonth} 로 일할 지급됩니다.` +
+          (hasPaidLeave ? ` 그 기간의 급여는 아래와 같이 따로 지급합니다.` : "")
       );
     } else {
       // 완전비율제(근로계약) — 그 달 수강료 입금액으로 정해지는 급여라 일할하지 않는다
       basisLines.push(
-        `<b>무급휴직</b> — ${within}${what}. 비율급은 그 달 수강료 입금액을 기준으로 산정하므로 일할하지 않습니다.`
+        `<b>${leaveWord}</b> — ${within}${what}. 비율급은 그 달 수강료 입금액을 기준으로 산정하므로 일할하지 않습니다.` +
+          (hasPaidLeave ? ` 그 기간의 급여는 아래와 같이 따로 지급합니다.` : "")
       );
+    }
+    // 유급 구간의 계산식 — 구간마다 한 줄(원급여 × 비율 = 지급액, 또는 지정한 금액)
+    for (const line of leavePayDetailLines(unpaid)) {
+      const cut = line.indexOf(" — ");
+      basisLines.push(cut > 0 ? `<b>${esc(line.slice(0, cut))}</b>${esc(line.slice(cut))}` : esc(line));
     }
   } else if (isMonthlyLike && ratio < 1) {
     // 재직기간 재구성 — 기록 당시 비율과 일치할 때만 일수·기간을 표기
@@ -569,7 +617,7 @@ export function payslipHtml(args: {
   }
   const basisBlock = basisLines.length
     ? `<div style="border:1px solid #cbd5e1;border-radius:8px;padding:6px 10px;margin:8px 0 2px;background:#f8fafc">
-        <div class="small" style="color:#334155"><b>◾ 기본급 산출 근거</b></div>
+        <div class="small" style="color:#334155"><b>◾ ${hasPaidLeave ? "급여 산출 근거" : "기본급 산출 근거"}</b></div>
         ${basisLines.map((l) => `<div class="small">· ${l}</div>`).join("\n        ")}
       </div>`
     : "";

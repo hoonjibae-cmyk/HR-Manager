@@ -298,11 +298,11 @@ export default function SeveranceTable({
                         {won(r.base)}
                       </span>
                     )}
-                    {/* 무급휴직으로 일할된 달 — 기준급여가 왜 줄었는지가 표에서 바로 보여야 한다 */}
+                    {/* 휴직·휴업으로 일할된 달 — 기준급여가 왜 달라졌는지가 표에서 바로 보여야 한다 */}
                     {r.unpaidNote && (
                       <div
                         className="text-[11px] text-amber-600 whitespace-nowrap"
-                        title="이 달 급여가 무급휴직만큼 역일수로 일할돼 산정기준 임금도 함께 줄었습니다"
+                        title="이 달 정상 급여가 휴직·휴업만큼 역일수로 일할돼 산정기준 임금도 함께 달라졌습니다 (유급휴직 급여·휴업수당은 산정기준에 듭니다)"
                       >
                         {r.unpaidNote}
                       </div>
@@ -618,10 +618,11 @@ function DetailPanel({
               </div>
             )}
 
-            {/* 무급휴직으로 줄어든 달 — 왜 줄었는지와, 달리 쌓아야 하는 휴직이면 어떻게 하는지를 함께 적는다 */}
+            {/* 휴직·휴업으로 달라진 달 — 왜 달라졌는지와, 달리 쌓아야 하는 기간이면 어떻게 하는지를 함께 적는다 */}
             {row.unpaidNote && (
               <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 mb-4 leading-relaxed">
-                <b>{row.unpaidNote}</b> — 이 달 급여가 역일수로 일할돼 산정기준 임금이 그만큼 줄었습니다.
+                <b>{row.unpaidNote}</b> — 이 달 정상 급여가 역일수로 일할돼 산정기준 임금이 그만큼 달라졌습니다
+                (유급휴직 급여·휴업수당은 산정기준에 듭니다).
                 <div className="mt-1.5 text-amber-700">{UNPAID_SEVERANCE_NOTE}</div>
               </div>
             )}

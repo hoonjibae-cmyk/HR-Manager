@@ -112,7 +112,13 @@ export const RETENTION_RATE = 1 / 12;
 
 /** 한 달 안에서 특정 계약 조건이 적용된 구간 (역일수 기준) */
 export interface WageSegment {
-  days: number; // 해당 월 중 이 조건이 적용된 역일수 (재직기간과 교차한 일수)
+  days: number; // 해당 월 중 이 조건으로 **정상 급여가 나간** 역일수 (재직기간과 교차한 일수 − 휴직·휴업일)
+  /**
+   * 그 조건이 적용된 날짜 구간(`YYYY-MM-DD`, 둘 다 포함. 재직 기간 안으로 자른 것) — 휴직·휴업일을 빼기 **전**이다.
+   * 유급휴직·휴업의 원급여를 그 날짜의 계약 조건으로 세는 데 쓴다(`settleLeavePay`). 가중 계산에는 쓰지 않는다.
+   */
+  from?: string;
+  to?: string;
   baseWage: number; // 월급제=월기본급, 시급제=시급
   positionAllow: number;
   mealAllow: number;
@@ -184,16 +190,22 @@ export interface MonthlyInput {
   /** 시간기록표 근거 (명세서 표기용 — 금액 계산에는 쓰지 않는다) */
   timesheet?: TimesheetMeta | null;
   /**
-   * 일할계산 비율 — **그 달 급여가 나가는 역일수 ÷ 그 달 역일수**. 1=만근월.
-   * 월중 입·퇴사와 무급휴직을 한 비율에 담는다(재직 역일수 − 무급휴직 역일수. lib/unpaid-leave.ts).
-   * 월급·월 정액 수당·추정근로시간에 적용한다.
+   * 일할계산 비율 — **그 달 정상 급여가 나가는 역일수 ÷ 그 달 역일수**. 1=만근월.
+   * 월중 입·퇴사와 휴직·휴업을 한 비율에 담는다(재직 역일수 − 휴직·휴업 역일수. lib/unpaid-leave.ts).
+   * 월급·월 정액 수당·추정근로시간에 적용한다. 유급휴직·휴업일도 여기서는 빠진다 — 그 날의 돈은 `leavePay` 다.
    */
   prorationRatio?: number;
   /**
-   * 그 달 무급휴직 근거 (표기용 — 금액은 `prorationRatio` 가 이미 정한다).
-   * 있으면 산정 근거가 「재직비율」이 아니라 무급휴직 일수·기간으로 적힌다.
+   * 그 달 휴직·휴업 근거 (표기용 — 금액은 `prorationRatio` 와 `leavePay` 가 이미 정한다).
+   * 있으면 산정 근거가 「재직비율」이 아니라 휴직·휴업 일수·기간으로 적힌다.
    */
   unpaidLeave?: UnpaidLeaveMeta | null;
+  /**
+   * 유급휴직 급여·휴업수당(원) — 휴직·휴업 기간의 급여를 원급여 대비 비율(또는 직접 넣은 금액)로 따로
+   * 지급하는 몫. **서비스가 정해서 넘긴다**(그 날짜의 계약 조건이 있어야 원급여가 나온다 —
+   * `settleLeavePay`, lib/unpaid-leave.ts). 엔진은 지급 항목으로 싣기만 한다.
+   */
+  leavePay?: number;
   extraHours?: number; // 법내연장(월): 소정 외이나 1일8h·주40h 이내 — 가산 없음(×1.0)
   overtimeHours?: number; // 법정 연장근로(월): 1일8h·주40h 초과분 — ×1.5
   nightHours?: number; // 야간근로(월, 22~06시) — +0.5 가산
@@ -259,6 +271,11 @@ export interface PayrollResult {
   nonCompeteNonTaxP: number;
   incentiveP: number;
   bonusP: number;
+  /**
+   * 유급휴직 급여·휴업수당 — 휴직·휴업 기간에 정상 급여 대신 따로 지급한 몫(없으면 0). 과세 근로소득이고
+   * 임금이라 퇴직급여 산정기준에 든다. 통상시급에는 영향이 없다(통상시급은 월 금액끼리 나눈 값이다).
+   */
+  leavePayP: number;
   unusedLeaveP: number;
   gross: number;
   /**
@@ -516,6 +533,76 @@ export function inclusiveWageBreakdown(t: InclusiveWageTerms): InclusiveWageBrea
   };
 }
 
+/* ───────────── 유급휴직·휴업의 원급여 ───────────── */
+
+/** 원급여를 낼 수 없는 까닭 */
+export type LeaveWageBasisGap = "CONTRACTOR" | "RATIO" | "NO_SCHEDULE";
+
+export interface LeaveWageBasis {
+  /** 월 기준액(원) — 휴직·휴업이 없었다면 한 달에 받았을 계약상 임금. 낼 수 없으면 0 */
+  monthly: number;
+  /** 기준액에서 뺀 경업금지 보상금(월) — 화면이 '왜 월 지급 총액보다 적은지' 를 적는다 */
+  nonCompeteExcluded: number;
+  /** 낼 수 없는 까닭 — 있으면 비율 지급을 쓸 수 없다(금액을 직접 넣는다) */
+  gap: LeaveWageBasisGap | null;
+}
+
+/**
+ * 유급휴직·휴업의 **원급여(월 기준액)** — 「원급여의 70%」가 무엇의 70% 인가.
+ *
+ *   유급휴직 급여·휴업수당 = 월 기준액 × (그 기간 역일수 ÷ 그 달 역일수) × 지급 비율
+ *
+ * 휴직·휴업이 없었다면 한 달에 받았을 **계약상 월 임금**이다. 그래서 비율 100% 면 정상 급여(일할)와 더해
+ * 휴직이 없던 달과 같은 금액이 된다.
+ *  · 월급제·인센티브 = 월 지급 총액(식대·차량유지비·포괄임금 약정분 포함) − 경업금지 보상금 + 직책수당
+ *  · 시급제 = 시급 × (주 소정 + 주휴) × 4.345 + 식대·차량유지비·직책수당(시급제는 별도 가산이다)
+ *  · 완전비율제 — 매출에 달려 정해진 월 임금이 없다 → 낼 수 없다(금액 지정만)
+ *
+ * **경업금지 보상금은 넣지 않는다.** 근로의 대가가 아니라 임금으로 다루지 않는다는 원칙이고(통상시급·퇴직급여
+ * 산정기준과 같다 — v1.59.3), 휴업수당·유급휴직 급여는 임금이다. 보상금 자체는 근로계약서 제8조 ② 대로
+ * 일할한다 — 쉰 날의 몫은 정상 급여와 함께 빠진다. 다르게 주려면 금액을 직접 넣는다.
+ * **인센티브·상여·그 달 발생한 연장수당도 넣지 않는다**(달마다 다른 돈이라 '월 급여' 가 아니다).
+ *
+ * 퇴직급여의 계약 추산(`estimateContractBase`, lib/severance.ts)과 **같은 금액**이다 — 둘 다 '계약서에 합의된
+ * 월 급여총액' 이라 갈리면 안 된다(테스트로 묶어 둔다).
+ */
+export function leaveWageBasis(
+  emp: Pick<
+    EmployeePayInput,
+    | "payScheme"
+    | "isContractor"
+    | "ratioEmployee"
+    | "baseWage"
+    | "positionAllow"
+    | "mealAllow"
+    | "carAllow"
+    | "nonCompetePay"
+    | "schedule"
+  >
+): LeaveWageBasis {
+  if (isContractorContract(emp)) return { monthly: 0, nonCompeteExcluded: 0, gap: "CONTRACTOR" };
+  if (emp.payScheme === "RATIO") return { monthly: 0, nonCompeteExcluded: 0, gap: "RATIO" };
+  const position = Math.max(round0(emp.positionAllow || 0), 0);
+  if (emp.payScheme === "HOURLY") {
+    const { weeklyContractual, weeklyHoliday } = computeWeeklyHours(emp.schedule);
+    // 근로시간표가 비면 월 급여를 어림할 길이 없다 — 수당만으로 원급여를 지어내지 않는다
+    if (weeklyContractual <= 0) return { monthly: 0, nonCompeteExcluded: 0, gap: "NO_SCHEDULE" };
+    return {
+      monthly:
+        round0((emp.baseWage || 0) * (weeklyContractual + weeklyHoliday) * WEEKS_PER_MONTH) +
+        Math.max(round0(emp.mealAllow || 0), 0) +
+        Math.max(round0(emp.carAllow || 0), 0) +
+        position,
+      nonCompeteExcluded: 0,
+      gap: null,
+    };
+  }
+  const total = Math.max(round0(emp.baseWage || 0), 0);
+  // 보상금은 총액 안의 몫이라 총액보다 클 수 없다(입력 검사가 먼저 막는다 — lib/non-compete.ts)
+  const nc = Math.min(Math.max(round0(emp.nonCompetePay || 0), 0), total);
+  return { monthly: total - nc + position, nonCompeteExcluded: nc, gap: null };
+}
+
 /* ───────────── 포괄임금 약정분 ↔ 그 달 변동분 가르기 ───────────── */
 
 /**
@@ -679,12 +766,13 @@ export function computePayroll(
     );
   }
 
-  // --- 일할계산 비율 (월중 입/퇴사·무급휴직). 비율제는 매출 기반이라 미적용 ---
+  // --- 일할계산 비율 (월중 입/퇴사·휴직·휴업). 비율제는 매출 기반이라 미적용 ---
   const rawRatio = month.prorationRatio ?? 1;
   const prorate =
     emp.payScheme === "RATIO" ? 1 : Math.min(Math.max(rawRatio, 0), 1);
-  // 무급휴직이 낀 달은 '재직비율' 이라고 적지 않는다 — 재직은 했고 급여만 안 나간 날이다.
+  // 휴직·휴업이 낀 달은 '재직비율' 이라고 적지 않는다 — 재직은 했고 정상 급여만 안 나간 날이다.
   // 무엇이 줄었는지는 급여형태마다 다르다(완전비율제는 그대로, 시급제 실근로 기록은 수당만).
+  // 유급휴직 급여·휴업수당이 있으면 같은 줄이 그 금액을 함께 적는다(아래 leavePayP).
   const unpaid = month.unpaidLeave ?? null;
   if (unpaid)
     notes.push(
@@ -1005,6 +1093,12 @@ export function computePayroll(
   const carP = ratioCarP ?? round0((emp.carAllow || 0) * prorate);
   const bonusP = month.bonus ?? 0;
 
+  // --- 유급휴직 급여·휴업수당 ---
+  // 휴직·휴업일의 정상 급여는 위에서 일할로 이미 빠졌다(`prorate`). 그 기간의 급여를 원급여 대비 비율이나
+  // 직접 넣은 금액으로 **따로** 준다 — 금액은 서비스가 그 날짜의 계약 조건으로 정해 넘긴다(lib/unpaid-leave.ts).
+  // 위탁계약은 근로자가 아니라 휴직·휴업 자체가 없다(등록도 막는다).
+  const leavePayP = contractor ? 0 : Math.max(round0(month.leavePay ?? 0), 0);
+
   // --- 연차미사용수당 = 1일 통상임금(통상시급 × 1일 소정근로시간) × 미사용일수 ---
   // 위탁계약은 연차(§60) 자체가 없어 미사용수당도 없다.
   // 1일 소정근로시간은 근로시간표에서 뽑는다(주 소정 ÷ 근무일수, 상한 8) — 휴게 30분 체계라
@@ -1026,6 +1120,7 @@ export function computePayroll(
     nonCompeteP +
     incentiveP +
     bonusP +
+    leavePayP +
     unusedLeaveP;
 
   // 비과세 총액 (식대 + 차량유지비 + 기타).
@@ -1140,6 +1235,7 @@ export function computePayroll(
     nonCompeteNonTaxP,
     incentiveP,
     bonusP,
+    leavePayP,
     unusedLeaveP,
     gross,
     bizIncomeP,

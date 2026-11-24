@@ -32,7 +32,8 @@ import { nonCompeteRequired, nonCompeteRatioRequired, ratioPctLabel } from "@/li
 import { bizPayerMissing } from "@/lib/ratio-employee";
 import { bizIncomeDestination, maskAccount } from "@/lib/bank-account";
 import UnpaidLeaveCard from "@/components/UnpaidLeaveCard";
-import { spanDays } from "@/lib/unpaid-leave";
+import { spanDays, leaveKindOf } from "@/lib/unpaid-leave";
+import { leaveWageBasis } from "@/lib/payroll";
 import { unpaidImpactsOfEmployee } from "@/lib/unpaid-leave-service";
 
 export const dynamic = "force-dynamic";
@@ -62,7 +63,8 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         select: { id: true, name: true, mime: true, size: true, note: true, uploadedAt: true },
         orderBy: { uploadedAt: "asc" },
       },
-      // 무급휴직 — 최근 것부터. 그 달 급여가 역일수로 일할된다(lib/unpaid-leave.ts)
+      // 휴직·휴업(무급휴직·유급휴직·휴업) — 최근 것부터. 그 달 정상 급여가 역일수로 일할되고,
+      // 유급휴직·휴업은 그 기간의 급여를 비율·금액으로 따로 지급한다(lib/unpaid-leave.ts)
       unpaidLeaves: { orderBy: [{ startDate: "desc" }, { id: "desc" }] },
     },
   });
@@ -132,6 +134,19 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         ratioEmployee: emp.ratioEmployee,
         ratioWageCap: emp.ratioWageCap ?? null,
       };
+  // 유급휴직·휴업의 원급여(월 기준액) — 휴직·휴업 카드가 「원급여의 70%」가 얼마인지 미리 보여 준다.
+  // 보수 카드와 같은 계약(지배 계약, 입사 전이면 첫 계약)으로 낸 어림값이다 — 실제 산정은 그 달의 계약으로 한다.
+  const leaveBasis = leaveWageBasis({
+    payScheme: terms.payScheme as any,
+    isContractor: terms.isContractor,
+    ratioEmployee: terms.ratioEmployee,
+    baseWage: terms.baseWage,
+    positionAllow: terms.positionAllow,
+    mealAllow: terms.mealAllow,
+    carAllow: terms.carAllow,
+    nonCompetePay: terms.nonCompetePay,
+    schedule: sched,
+  });
   // 비율제 근로계약(4대보험 근로자) — 같은 '완전비율제' 라도 위탁과 서식·공제·연차가 다르다
   const ratioWorker = isRatioEmployee(terms);
   const isMonthlyScheme = terms.payScheme === "MONTHLY" || terms.payScheme === "INCENTIVE";
@@ -652,7 +667,7 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
             )}
           </div>
 
-          {/* 무급휴직 — 급여 바로 아래에 둔다(등록하면 그 달 급여가 일할된다). 위탁계약은 대상이 아니라
+          {/* 휴직·휴업 — 급여 바로 아래에 둔다(등록하면 그 달 급여가 일할된다). 위탁계약은 대상이 아니라
               기록이 없으면 카드를 내지 않는다(이미 있는 기록은 지울 수 있게 보여 준다). */}
           {(!isContractorContract(emp) || emp.unpaidLeaves.length > 0) && (
             <UnpaidLeaveCard
@@ -661,11 +676,15 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
               resignDate={emp.resignDate ? emp.resignDate.toISOString().slice(0, 10) : null}
               contractor={isContractorContract(emp)}
               ratio={emp.payScheme === "RATIO"}
+              basis={leaveBasis}
               leaves={emp.unpaidLeaves.map((l) => ({
                 id: l.id,
                 startDate: l.startDate.toISOString().slice(0, 10),
                 endDate: l.endDate.toISOString().slice(0, 10),
                 days: spanDays(l.startDate, l.endDate),
+                kind: leaveKindOf(l.kind),
+                payRate: l.payRate,
+                payAmount: l.payAmount,
                 reason: l.reason ?? "",
                 createdBy: l.createdBy ?? "",
               }))}

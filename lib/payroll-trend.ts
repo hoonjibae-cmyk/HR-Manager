@@ -25,6 +25,8 @@ export interface TrendRecord {
   nonCompeteP?: number;
   incentiveP: number;
   bonusP: number;
+  /** 유급휴직 급여·휴업수당 — 휴직·휴업 기간에 정상 급여 대신 따로 지급한 몫(없던 기록은 0) */
+  leavePayP?: number;
   unusedLeaveP: number;
   extraP: number;
   overtimeP: number;
@@ -56,6 +58,9 @@ export const TREND_ITEM_LABEL: Record<string, string> = {
   INCENTIVE: "인센티브",
   OVERTIME: "오버타임수당",
   BONUS: "상여",
+  // 그 기간의 기본급 대신 나간 돈이지만 '계약 기본급' 에 섞지 않는다 — 휴업이 있던 달에 기본급이 왜 줄었는지,
+  // 그 대신 얼마가 나갔는지가 그래프에서 갈라 보여야 한다. 없는 기간에는 계열 자체가 생기지 않는다
+  LEAVE_PAY: "휴업수당·유급휴직 급여",
   UNUSED_LEAVE: "연차미사용수당",
 };
 
@@ -102,6 +107,7 @@ export function grossOf(r: TrendRecord): number {
     r.holidayP +
     r.incentiveP +
     r.bonusP +
+    (r.leavePayP ?? 0) +
     r.unusedLeaveP
   );
 }
@@ -115,6 +121,7 @@ function splitOf(r: TrendRecord, mode: TrendMode): Array<[string, number]> {
         ["INCENTIVE", r.incentiveP],
         ["OVERTIME", overtimeOf(r)],
         ["BONUS", r.bonusP],
+        ["LEAVE_PAY", r.leavePayP ?? 0],
         ["UNUSED_LEAVE", r.unusedLeaveP],
       ];
     case "SCHEME":

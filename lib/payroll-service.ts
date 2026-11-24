@@ -2,6 +2,7 @@ import { prisma } from "./db";
 import {
   computePayroll,
   blendWageTerms,
+  leaveWageBasis,
   type MonthlyInput,
   type WageSegment,
   type EmployeePayInput,
@@ -22,10 +23,14 @@ import { withNonCompeteNonTax } from "./non-compete";
 import { employeesWithMonthTerms } from "./contracts";
 import {
   monthPayDays,
-  unpaidDaysBetween,
+  leaveDaysBetween,
+  settleLeavePay,
+  leaveZeroBasis,
+  LEAVE_ZERO_BASIS_NOTE,
   unpaidLeaveMetaOf,
   readUnpaidLeaveMeta,
   type UnpaidLeaveSpan,
+  type WageBasisPiece,
 } from "./unpaid-leave";
 import { unpaidLeavesInMonth, spansFromMeta } from "./unpaid-leave-service";
 
@@ -71,8 +76,8 @@ async function hourlyHolidayWorkFor(
 /**
  * 월중 입/퇴사 일할계산 비율 = 해당 월 재직 역일수 / 해당 월 총 역일수.
  *
- * **재직 판정이다 — 무급휴직을 빼지 않는다.** 이 값이 0 인가로 '그 달 시트에 오르는가' 를 가르고
- * (`employedInMonth` 와 같은 판정이어야 한다), 무급휴직까지 뺀 **지급 비율**은 `monthPayDays()`
+ * **재직 판정이다 — 휴직·휴업을 빼지 않는다.** 이 값이 0 인가로 '그 달 시트에 오르는가' 를 가르고
+ * (`employedInMonth` 와 같은 판정이어야 한다), 휴직·휴업까지 뺀 **지급 비율**은 `monthPayDays()`
  * (lib/unpaid-leave.ts)가 낸다. 둘을 한 함수로 합치면 한 달을 통째로 쉰 재직자가 시트에서 사라진다.
  */
 export function prorationRatioFor(
@@ -99,12 +104,15 @@ export function prorationRatioFor(
  * 해당 월에 각 계약 조건이 적용된 역일수 구간을 산출 (월중 계약 갱신 일할가중용).
  * - 계약 i 의 적용기간은 [시작일, 다음 계약 시작일 전날] — 갱신 계약이 이전 계약을 대체.
  * - 재직기간(입사~퇴사)과 교차한 일수만 집계해 입/퇴사 일할계산과 이중 적용을 방지.
- * - **무급휴직일은 구간 일수에서 뺀다** — 일수는 '그 조건으로 급여가 나간 날' 이어야 한다.
+ * - **휴직·휴업일은 구간 일수에서 뺀다**(구분 무관 — 유급휴직·휴업일의 돈은 따로 선다) — 일수는
+ *   '그 조건으로 정상 급여가 나간 날' 이어야 한다.
  *   가중 기본급 × 지급 비율 = Σ(조건ᵢ × 지급일수ᵢ) ÷ 그 달 역일수 가 되어, 옛 조건인 날만 쉬었는데
  *   새 조건의 급여까지 깎이는 일이 없다. 0일이 된 구간도 **지우지 않는다** — 지우면 한 구간만 남아
  *   가중을 건너뛰고 그 달 말일 계약(쉰 쪽) 조건으로 계산된다.
  *   `unpaid` 를 넘기지 않으면 지금 등록된 휴직을 읽는다. 공제만 다시 낼 때는 그 기록을 산정할 때의
  *   휴직을 넘긴다(`updateDeductions`).
+ * - 구간마다 **날짜(`from`·`to`)를 함께 싣는다** — 유급휴직·휴업의 원급여를 그 날짜의 조건으로 센다
+ *   (`leaveBasisPieces`). 이쪽은 휴직·휴업일을 빼기 전의 날짜다.
  * - DRAFT 계약은 제외.
  */
 export interface MonthContractTerms {
@@ -171,9 +179,11 @@ export async function wageSegmentsFor(
       const days =
         Math.floor((to.getTime() - from.getTime()) / 86400000) +
         1 -
-        unpaidDaysBetween(from, to, unpaidMap.get(emp.id) ?? []);
+        leaveDaysBetween(from, to, unpaidMap.get(emp.id) ?? []);
       segs.push({
         days,
+        from: from.toISOString().slice(0, 10),
+        to: to.toISOString().slice(0, 10),
         baseWage: c.baseWage,
         positionAllow: c.positionAllow,
         mealAllow: c.mealAllow,
@@ -188,6 +198,36 @@ export async function wageSegmentsFor(
       result.set(emp.id, { segs, futureStart: future?.startDate ?? null });
   }
   return result;
+}
+
+/**
+ * 유급휴직·휴업의 원급여를 세는 **계약 구간별 월 기준액** — 그 달 안에서 계약이 바뀌면 둘 이상이다.
+ *
+ * 구간의 조건(월 지급 총액·수당·보상금)을 `payInput` 위에 얹어 `leaveWageBasis()` 를 부른다 — 급여형태·
+ * 근로시간표처럼 구간이 싣지 않는 값은 그 달 조건을 그대로 쓴다(월중 가중 `blendWageTerms` 와 같은 전제).
+ * 날짜가 없는 구간(옛 호출부)은 넘어간다 — 그 날은 `settleLeavePay` 가 fallback 으로 센다.
+ */
+export function leaveBasisPieces(
+  payInput: EmployeePayInput,
+  entry: MonthContractTerms | undefined
+): WageBasisPiece[] {
+  const out: WageBasisPiece[] = [];
+  for (const s of entry?.segs ?? []) {
+    if (!s.from || !s.to) continue;
+    out.push({
+      from: s.from,
+      to: s.to,
+      monthly: leaveWageBasis({
+        ...payInput,
+        baseWage: s.baseWage,
+        positionAllow: s.positionAllow,
+        mealAllow: s.mealAllow,
+        carAllow: s.carAllow,
+        nonCompetePay: s.nonCompetePay ?? null,
+      }).monthly,
+    });
+  }
+  return out;
 }
 
 /** 저장된 인센티브 학생 명단 → 엔진 입력용 */
@@ -464,7 +504,7 @@ export async function runPayrollMonth(
     year,
     month
   );
-  // 무급휴직 — 그 달에 걸친 것만. 지급 비율과 월중 계약 가중(구간 일수)이 **같은 휴직**을 봐야 한다
+  // 휴직·휴업 — 그 달에 걸친 것만. 지급 비율과 월중 계약 가중(구간 일수)이 **같은 등록**을 봐야 한다
   const unpaidMap = await unpaidLeavesInMonth(
     emps.map((e) => e.id),
     year,
@@ -541,7 +581,7 @@ export async function runPayrollMonth(
       mInput.holidayHours = holidayWork.hours;
       mInput.holidayOverHours = holidayWork.overHours;
     }
-    // 재직비율 — **시트에 오르는가**는 이 값으로만 정한다(무급휴직과 무관하다)
+    // 재직비율 — **시트에 오르는가**는 이 값으로만 정한다(휴직·휴업과 무관하다)
     const employedRatio = prorationRatioFor(
       year,
       month,
@@ -552,9 +592,9 @@ export async function runPayrollMonth(
     // 남긴다(기본급은 일할 0% 라 0 원이고, 직접 넣은 항목만 지급된다).
     const manualAdd = manualIds.has(emp.id) && !employedInMonth(emp, year, month);
     if (employedRatio === 0 && !manualAdd) continue;
-    // 지급 비율 — 재직 역일수에서 무급휴직 역일수를 뺀다(lib/unpaid-leave.ts).
+    // 지급 비율 — 재직 역일수에서 휴직·휴업 역일수를 뺀다(lib/unpaid-leave.ts).
     // 한 달을 통째로 쉬어도 재직자라 건너뛰지 않는다: 0원 행으로 남아야 세무 자료에서 사람이 사라지지 않고,
-    // 상여·연차수당처럼 따로 줄 몫을 넣을 자리가 있다. 휴직이 없는 달은 재직비율 그대로다.
+    // 상여·연차수당처럼 따로 줄 몫을 넣을 자리가 있다. 휴직·휴업이 없는 달은 재직비율 그대로다.
     const payDays = monthPayDays(
       year,
       month,
@@ -562,14 +602,23 @@ export async function runPayrollMonth(
       emp.resignDate,
       unpaidMap.get(emp.id) ?? []
     );
-    const unpaidMeta = unpaidLeaveMetaOf(payDays);
-    mInput.prorationRatio = unpaidMeta ? payDays.ratio : employedRatio;
-    // 호출부가 실어 보낸 값은 쓰지 않는다 — 근거는 언제나 지금 등록된 휴직에서 다시 세운다
-    mInput.unpaidLeave = unpaidMeta;
 
     // 월중 계약 갱신 시 기본급(시급)·수당을 역일수 가중평균으로 치환
     const payInput = empToPayInput(emp);
+    // 유급휴직·휴업의 원급여 — **가중하기 전에** 계약 구간별로 뽑는다(쉰 날짜의 계약 조건으로 센다.
+    // 가중 평균은 '정상 급여가 나간 날' 로 낸 값이라 쉰 날의 조건이 아니다). 계약 구간에 덮이지 않은 날은
+    // 그 달 조건(카드·말일 계약)으로 센다.
+    const basisPieces = leaveBasisPieces(payInput, segMap.get(emp.id));
+    const basisFallback = leaveWageBasis(payInput).monthly;
     const blend = applyMidMonthBlend(payInput, segMap.get(emp.id));
+
+    // 휴직·휴업 — 정상 급여의 지급 비율과, 유급 구간의 지급액(유급휴직 급여·휴업수당)
+    const settled = settleLeavePay(payDays, basisPieces, basisFallback);
+    const unpaidMeta = unpaidLeaveMetaOf(settled);
+    mInput.prorationRatio = unpaidMeta ? payDays.ratio : employedRatio;
+    // 호출부가 실어 보낸 값은 쓰지 않는다 — 근거와 금액은 언제나 지금 등록된 휴직·휴업에서 다시 세운다
+    mInput.unpaidLeave = unpaidMeta;
+    mInput.leavePay = settled.leavePay;
 
     // 학생 명단은 두 갈래다 — 매출 열이 있으면 매출 기준, 없으면 회차 비례 가중 인원.
     // 매출 기준이면 그 달 매출 합계가 곧 산정 기준이므로 classRevenue 로 넣는다
@@ -689,6 +738,7 @@ export async function runPayrollMonth(
       nonCompeteP: r.nonCompeteP,
       incentiveP: r.incentiveP,
       bonusP: r.bonusP,
+      leavePayP: r.leavePayP,
       unusedLeaveP: r.unusedLeaveP,
       gross: r.gross,
       bizIncomeP: r.bizIncomeP,
@@ -698,7 +748,13 @@ export async function runPayrollMonth(
       // 배치 재실행 시 기타공제 세부 항목 보존 (합계 otherD 는 fin 에서 보존됨)
       otherItems: existing?.otherItems ?? null,
       breakdown: JSON.stringify({
-        notes: blend ? [blend.note, ...r.notes] : r.notes,
+        notes: [
+          ...(blend ? [blend.note] : []),
+          ...r.notes,
+          // 비율 지급인데 원급여를 낼 수 없어 0원이 된 휴직·휴업 — 조용히 0원이 나가지 않게 근거에 남긴다
+          // (급여 화면이 같은 판정으로 그 행에 띄운다)
+          ...(leaveZeroBasis(unpaidMeta) ? [LEAVE_ZERO_BASIS_NOTE] : []),
+        ],
         taxableGross: r.taxableGross,
         // 명세서 '기본급 산출 근거' 표기용: 이 달 계산에 실제 사용된 기본급(시급)과
         // 월중 계약변경 가중 내역
@@ -742,9 +798,10 @@ export async function runPayrollMonth(
                   : {}),
               }
             : null,
-        // 무급휴직 근거 — **이 달 산정에 실제로 쓴** 일수·기간. 명세서·세무 자료·화면이 지금의 휴직 등록이
-        // 아니라 이 값을 적고, 급여 화면은 이 값과 지금 등록을 견줘 「다시 산정 필요」를 띄운다.
-        // 휴직이 없는 달은 키를 두지 않는다(그런 기록은 예전과 같은 모양이다)
+        // 휴직·휴업 근거 — **이 달 산정에 실제로 쓴** 일수·기간, 그리고 유급 구간의 원급여·비율·지급액.
+        // 명세서·세무 자료·화면이 지금의 등록이 아니라 이 값을 적고, 급여 화면은 이 값과 지금 등록을 견줘
+        // 「다시 산정 필요」를 띄운다. 휴직·휴업이 없는 달은 키를 두지 않는다(그런 기록은 예전과 같은 모양이다).
+        // 키 이름이 unpaidLeave 인 것은 v1.63(무급휴직만 있던 때)의 기록을 그대로 읽기 위해서다
         ...(unpaidMeta ? { unpaidLeave: unpaidMeta } : {}),
         // 시간기록표 근거 — 명세서의 체류/휴게/순 근로/연차 구분 표기용
         timesheet: mInput.timesheet ?? null,
@@ -920,8 +977,8 @@ export async function updateDeductions(payrollId: number, patch: DeductionPatch)
   if (deductMode === "AUTO") {
     const [rates, tax] = await Promise.all([getActiveRates(), getTaxTable()]);
     // 월중 계약 갱신이 있었던 달이면 동일한 가중 조건으로 재산출.
-    // 무급휴직은 **이 기록을 산정할 때 쓴 것**을 넘긴다 — 저장된 지급 비율(prorationRatio)과 짝이 맞아야 한다.
-    // 그 사이 휴직 등록이 바뀌었다면 급여 화면이 「다시 산정 필요」로 따로 알린다.
+    // 휴직·휴업은 **이 기록을 산정할 때 쓴 것**을 넘긴다 — 저장된 지급 비율(prorationRatio)과 짝이 맞아야 한다.
+    // 그 사이 등록이 바뀌었다면 급여 화면이 「다시 산정 필요」로 따로 알린다.
     const payInput = empToPayInput(rec.employee);
     const unpaidMeta = readUnpaidLeaveMeta(rec.breakdown);
     const segMap = await wageSegmentsFor(
@@ -940,13 +997,20 @@ export async function updateDeductions(payrollId: number, patch: DeductionPatch)
         overtimeHours: rec.overtimeHours,
         nightHours: rec.nightHours,
         holidayHours: rec.holidayHours,
+        // 휴일 8시간 초과분·명단 기반 가중 인원도 산정 때와 같이 넘긴다 — 빠지면 재산출한 과세 급여가
+        // 저장된 지급액보다 적어져 자동 공제가 덜 떼인다
+        holidayOverHours: rec.holidayOverHours,
         studentCount: rec.studentCount,
+        studentUnits: rec.studentUnits,
         classRevenue: rec.classRevenue,
         bonus: rec.bonus,
         incentiveManual: rec.incentiveManual,
         unusedLeaveDays: rec.unusedLeaveDays,
         prorationRatio: rec.prorationRatio,
         unpaidLeave: unpaidMeta,
+        // 유급휴직 급여·휴업수당은 **산정 때 정한 금액**을 그대로 — 여기서 다시 정하면 그 사이 바뀐
+        // 등록·계약으로 저장된 지급액과 다른 금액에서 공제가 나온다
+        leavePay: rec.leavePayP,
       },
       rates,
       tax

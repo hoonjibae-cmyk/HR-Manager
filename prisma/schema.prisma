@@ -479,10 +479,16 @@ model DayOff {
   @@index([date])
 }
 
-/// 무급휴직 — 급여를 지급하지 않는 휴직 기간(개인 사정 등). lib/unpaid-leave.ts
+/// 휴직·휴업 — 정상 급여가 나가지 않는 기간. lib/unpaid-leave.ts
+///
+/// 구분(`kind`)이 셋이다: **무급휴직**(UNPAID — 급여 없음) · **유급휴직**(PAID) · **휴업**(SHUTDOWN —
+/// 사용자 귀책이면 근로기준법 §46 휴업수당). 유급휴직·휴업은 그 기간의 급여를 **원급여 대비 비율**
+/// (`payRate`) 또는 **직접 넣은 금액**(`payAmount`)으로 따로 지급한다(v1.64).
+/// ⚠ **모델 이름이 `UnpaidLeave` 인 것은 처음에 무급휴직만 담았기 때문이다**(v1.63). 테이블이 이미 배포돼
+/// 이름을 바꾸지 않았다 — 유급휴직·휴업도 여기에 담는다.
 ///
 /// **연차가 아니다** — `LeaveTransaction`(연차 원장)에 넣지 않는다(넣으면 잔여가 줄어든다).
-/// 그 달 급여는 **역일수**로 일할한다: (그 달 재직 역일수 − 무급휴직 역일수) ÷ 그 달 역일수.
+/// 그 달 정상 급여는 **역일수**로 일할한다: (그 달 재직 역일수 − 휴직·휴업 역일수) ÷ 그 달 역일수.
 /// 월중 입·퇴사 일할과 같은 방식이라 한 달 안에 둘이 겹쳐도 한 번에 계산된다.
 /// 퇴직급여(DC 부담금·충당금)는 그 달 급여에서 파생되므로 줄어든 만큼 함께 줄어든다.
 /// 연차 발생·근속에는 손대지 않는다(2026-11 결정).
@@ -494,10 +500,17 @@ model UnpaidLeave {
   employeeId Int
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
-  /// 무급휴직 첫날 (포함)
+  /// 첫날 (포함)
   startDate DateTime
-  /// 무급휴직 마지막 날 (포함) — 복귀일의 전날
+  /// 마지막 날 (포함) — 복귀일의 전날
   endDate   DateTime
+  /// UNPAID(무급휴직) | PAID(유급휴직) | SHUTDOWN(휴업). 옛 행(v1.63)은 기본값으로 무급휴직이 된다
+  kind      String   @default("UNPAID")
+  /// 원급여 대비 지급 비율 (0.7 = 70%). 유급휴직·휴업에서 비율로 줄 때. 무급휴직·금액 지정이면 null
+  payRate   Float?
+  /// 직접 넣은 지급액(원) — **그 기간 전체의 총액**이다(달을 걸치면 역일수로 나눠 싣는다).
+  /// 있으면 비율 대신 이 금액을 준다. 무급휴직·비율 지급이면 null
+  payAmount Int?
   /// 사유 — **내부 기록용**이다. 명세서·세무 자료에 싣지 않는다
   reason    String?
   /// 등록한 관리자
@@ -604,6 +617,9 @@ model PayrollRecord {
   nonCompeteP    Int @default(0)
   incentiveP     Int @default(0) // 인센티브
   bonusP         Int @default(0) // 상여
+  /// 유급휴직 급여·휴업수당 — 휴직·휴업 기간의 급여를 원급여 대비 비율(또는 직접 넣은 금액)로 따로
+  /// 지급한 몫. 그 기간의 정상 급여(기본급·수당)는 일할로 빠져 있다. 과세 근로소득. lib/unpaid-leave.ts
+  leavePayP      Int @default(0)
   unusedLeaveP   Int @default(0) // 연차미사용수당
   gross          Int @default(0) // 지급액 계
   /// 비율제 근로계약으로 산정한 기록(스냅샷) — 같은 RATIO 라도 위탁/근로를 기록만 보고 가른다

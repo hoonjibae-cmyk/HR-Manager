@@ -56,7 +56,7 @@ export interface ExportPayrollRecord {
   nonCompeteP?: number | null;
   /**
    * 산출 근거(JSON) — 보상금을 비과세로 처리해 산정한 달인지(`nonCompeteNonTax`)와
-   * 그 달 산정에 쓴 무급휴직(`unpaidLeave`)을 읽는다
+   * 그 달 산정에 쓴 휴직·휴업(`unpaidLeave` — 무급휴직·유급휴직·휴업)을 읽는다
    */
   breakdown?: string | null;
   incentiveP: number;
@@ -187,6 +187,8 @@ export function buildExportRow(r: ExportPayrollRecord, payDate: string, status =
   // 세전급여 = 총계에서 따로 열이 있는 항목들을 뺀 나머지
   // (기본급·주휴·직책수당·식대·차량유지비 + **포괄임금 약정분**이 여기 뭉쳐 들어간다.
   //  약정분은 계약된 월 급여의 일부이므로 오버타임이 아니라 급여 쪽에 있어야 맞다 — 원래 시트가 그렇다)
+  // **유급휴직 급여·휴업수당(`leavePayP`)도 여기 들어간다** — 그 기간의 기본급 대신 나간 임금이라 열을 따로 두지
+  // 않고, 얼마가 그 돈인지는 비고에 적는다(아래 leaveNote. 열을 더하면 원래 시트의 열 관계가 달라진다)
   const basePay = gross - incentive - overtimePay - unusedLeavePay - bonus;
   // 경업금지 보상금 — 세전급여에 들어 있는 금액을 비고에 밝힌다(보상금은 언제나 이 회사가 지급하므로 본표 몫이다).
   // 회사 설정으로 **비과세 처리해 산정한 달**이면 그 사실을 함께 적는다(v1.59) — 세무대리인이 원천징수·4대보험
@@ -197,9 +199,11 @@ export function buildExportRow(r: ExportPayrollRecord, payDate: string, status =
       ? ` · 경업금지 보상금 ${nonCompete.toLocaleString("ko-KR")}원 포함` +
         (nonCompeteNonTaxOf(r.breakdown) ? "(비과세 처리)" : "")
       : "";
-  // 무급휴직 — 세전급여가 왜 계약 월 급여보다 적은지가 시트에 있어야 한다. 세무대리인이 보수 변동·휴직
+  // 휴직·휴업 — 세전급여가 왜 계약 월 급여와 다른지가 시트에 있어야 한다. 세무대리인이 보수 변동·휴직
   // 신고를 판단할 때도 기간이 필요하다(표시만 있으면 날짜를 따로 묻게 된다 — 재직 상태 열과 같은 이유).
-  // **그 달 산정에 실제로 쓴** 기간을 적는다(지금의 휴직 등록이 아니라 — 금액과 같은 근거여야 한다).
+  // 유급휴직·휴업이면 **세전급여 안에 든 유급휴직 급여·휴업수당의 금액**도 함께 적는다
+  // (`휴업 11/16~11/30(15일) 휴업수당 1,050,000원(70%)`).
+  // **그 달 산정에 실제로 쓴** 기간·금액을 적는다(지금의 등록이 아니라 — 금액과 같은 근거여야 한다).
   const unpaid = readUnpaidLeaveMeta(r.breakdown);
   const unpaidNote = unpaid ? ` · ${unpaidLeaveNote(unpaid)}` : "";
   return {
@@ -444,11 +448,12 @@ export function buildPayrollExportWorkbook(args: {
   for (let r = totalRow + 1; r < aoa.length; r++)
     put(r, 0, { font: { sz: 10, bold: true, color: { rgb: RED } } });
 
-  // 기타(비고) 칸 — 경업금지 보상금 금액이 붙으면 길어진다. 가장 긴 비고에 맞춰 넓힌다(한글은 두 칸으로 센다).
-  // 좁은 채로 두면 옆 칸(ID)에 가려 보상금 금액이 안 보인다. 보상금이 없는 달은 예전 폭(15) 그대로다.
+  // 기타(비고) 칸 — 경업금지 보상금·휴직·휴업(기간과 휴업수당 금액)이 붙으면 길어진다. 가장 긴 비고에 맞춰
+  // 넓힌다(한글은 두 칸으로 센다).
+  // 좁은 채로 두면 옆 칸(ID)에 가려 보상금·휴업수당 금액이 안 보인다. 그런 줄이 없는 달은 예전 폭(15) 그대로다.
   const noteWidth = (t: string) => Array.from(t).reduce((n, ch) => n + (ch.charCodeAt(0) > 0x2e7f ? 2 : 1), 0);
-  const noteWch = rows.some((r) => r.note.includes("경업금지 보상금"))
-    ? Math.min(Math.max(15, ...rows.map((r) => noteWidth(r.note) + 2)), 70)
+  const noteWch = rows.some((r) => /경업금지 보상금|휴직|휴업/.test(r.note))
+    ? Math.min(Math.max(15, ...rows.map((r) => noteWidth(r.note) + 2)), 100)
     : 15;
   ws["!cols"] = [
     { wch: 14 }, // 이름

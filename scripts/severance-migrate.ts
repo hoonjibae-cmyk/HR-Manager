@@ -27,7 +27,13 @@ import {
   monthlyAccrual,
   type SeverancePolicy,
 } from "../lib/severance";
-import { monthPayDays, unpaidLeaveMetaOf, unpaidLeaveNote } from "../lib/unpaid-leave";
+import {
+  monthPayDays,
+  settleLeavePay,
+  unpaidLeaveMetaOf,
+  unpaidLeaveNote,
+  type MonthPayDays,
+} from "../lib/unpaid-leave";
 
 const APPLY = process.env.APPLY === "1";
 const REDO = process.env.REDO === "1";
@@ -50,21 +56,21 @@ function prorateOf(hire: Date, resign: Date | null, y: number, m: number): numbe
 }
 
 /**
- * 그 달의 **지급 비율** — 재직비율에서 무급휴직까지 뺀다(급여 산정과 같은 함수 — lib/unpaid-leave.ts).
- * 추산은 '그 달 급여가 있었다면 나왔을 산정기준' 이라, 급여가 일할되는 만큼 같이 줄어야 한다.
- * 무급휴직이 없는 달은 재직비율 그대로다.
+ * 그 달의 **지급 비율** — 재직비율에서 휴직·휴업까지 뺀다(급여 산정과 같은 함수 — lib/unpaid-leave.ts).
+ * 추산은 '그 달 급여가 있었다면 나왔을 산정기준' 이라, 정상 급여가 일할되는 만큼 같이 줄어야 한다.
+ * 휴직·휴업이 없는 달은 재직비율 그대로다. 유급휴직·휴업의 지급액은 그 달 계약 조건이 있어야 나오므로
+ * 일수(`pd`)를 함께 돌려주고 부르는 쪽이 정한다(`settleLeavePay`).
  */
 function payRatioOf(
   hire: Date,
   resign: Date | null,
   y: number,
   m: number,
-  leaves: Array<{ startDate: Date; endDate: Date }>
-): { ratio: number; label?: string } {
+  leaves: Array<{ startDate: Date; endDate: Date; kind?: string | null; payRate?: number | null; payAmount?: number | null }>
+): { ratio: number; pd: MonthPayDays | null } {
   const pd = monthPayDays(y, m, hire, resign, leaves);
-  const meta = unpaidLeaveMetaOf(pd);
-  if (!meta) return { ratio: prorateOf(hire, resign, y, m) };
-  return { ratio: pd.ratio, label: `지급 비율(${unpaidLeaveNote(meta)} 제외)` };
+  if (!unpaidLeaveMetaOf(pd)) return { ratio: prorateOf(hire, resign, y, m), pd: null };
+  return { ratio: pd.ratio, pd };
 }
 
 async function main() {
@@ -89,8 +95,9 @@ async function main() {
   const emps = await prisma.employee.findMany({
     include: {
       contracts: { orderBy: { startDate: "asc" } },
-      // 무급휴직 — 그 기간은 급여가 없었으므로 추산에서도 같은 비율로 뺀다
-      unpaidLeaves: { select: { startDate: true, endDate: true } },
+      // 휴직·휴업 — 그 기간의 정상 급여는 없었으므로 추산에서도 같은 비율로 빼고,
+      // 유급휴직 급여·휴업수당은 급여 산정과 같은 식으로 더한다
+      unpaidLeaves: { select: { startDate: true, endDate: true, kind: true, payRate: true, payAmount: true } },
     },
     orderBy: [{ department: "asc" }, { name: "asc" }],
   });
@@ -145,13 +152,13 @@ async function main() {
         continue;
       }
 
-      // 퇴사 후의 달은 만들지 않는다 (재직 판정 — 무급휴직과 무관하다)
+      // 퇴사 후의 달은 만들지 않는다 (재직 판정 — 휴직·휴업과 무관하다)
       if (prorateOf(e.hireDate, e.resignDate, y, m) <= 0) {
         m += 1;
         if (m > 12) (m = 1), (y += 1);
         continue;
       }
-      // 지급 비율 — 재직비율에서 무급휴직을 뺀다. 한 달을 통째로 쉰 달은 0 이라 아래에서 건너뛴다
+      // 지급 비율 — 재직비율에서 휴직·휴업을 뺀다. 한 달을 통째로 무급으로 쉰 달은 0 이라 아래에서 건너뛴다
       // (산정기준이 0 인 달은 쌓을 것이 없다).
       const pay = payRatioOf(e.hireDate, e.resignDate, y, m, e.unpaidLeaves);
       const prorate = pay.ratio;
@@ -183,22 +190,31 @@ async function main() {
             nonCompetePay: e.nonCompetePay,
           };
 
+      // 유급휴직 급여·휴업수당 — 원급여는 그 달 계약의 월 급여총액(일할하지 않은 추산값)이다.
+      // 급여 엔진의 `leaveWageBasis` 와 같은 금액이라(테스트로 묶어 둔다) 실제 급여로 산정한 달과 갈리지 않는다.
+      const settled = pay.pd
+        ? settleLeavePay(pay.pd, [], estimateContractBase(terms, { weeklyContractual, weeklyHoliday }).base)
+        : null;
+      const leaveMeta = settled ? unpaidLeaveMetaOf(settled) : null;
       const est = estimateContractBase(terms, {
         weeklyContractual,
         weeklyHoliday,
         prorate,
-        prorateLabel: pay.label,
+        prorateLabel: leaveMeta ? `지급 비율(${unpaidLeaveNote(leaveMeta)} 제외)` : undefined,
       });
-      if (est.excluded || est.base <= 0) {
+      const leavePay = settled?.leavePay ?? 0;
+      const base = est.base + leavePay;
+      if (est.excluded || base <= 0) {
         m += 1;
         if (m > 12) (m = 1), (y += 1);
         continue;
       }
 
-      const note = c ? est.note : `${est.note} ※ 그 달 계약 이력이 없어 직원 카드 기준`;
-      writes.push({ employeeId: e.id, year: y, month: m, base: est.base, note });
+      const estNote = leavePay > 0 ? `${est.note} + 유급휴직 급여·휴업수당 ${won(leavePay)}원` : est.note;
+      const note = c ? estNote : `${estNote} ※ 그 달 계약 이력이 없어 직원 카드 기준`;
+      writes.push({ employeeId: e.id, year: y, month: m, base, note });
       made++;
-      sum += monthlyAccrual(est.base, policy);
+      sum += monthlyAccrual(base, policy);
 
       m += 1;
       if (m > 12) (m = 1), (y += 1);
