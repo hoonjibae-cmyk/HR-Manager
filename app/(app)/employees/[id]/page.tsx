@@ -32,7 +32,7 @@ import { nonCompeteRequired, nonCompeteRatioRequired, ratioPctLabel } from "@/li
 import { bizPayerMissing } from "@/lib/ratio-employee";
 import { bizIncomeDestination, maskAccount } from "@/lib/bank-account";
 import UnpaidLeaveCard from "@/components/UnpaidLeaveCard";
-import { spanDays, leaveKindOf } from "@/lib/unpaid-leave";
+import { spanDays, leaveKindOf, leavePayBasisOf } from "@/lib/unpaid-leave";
 import { leaveWageBasis } from "@/lib/payroll";
 import { unpaidImpactsOfEmployee } from "@/lib/unpaid-leave-service";
 
@@ -134,7 +134,8 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
         ratioEmployee: emp.ratioEmployee,
         ratioWageCap: emp.ratioWageCap ?? null,
       };
-  // 유급휴직·휴업의 원급여(월 기준액) — 휴직·휴업 카드가 「원급여의 70%」가 얼마인지 미리 보여 준다.
+  // 유급휴직·휴업의 원급여 재료(월 기준액 · 통상시급 · 1일 환산시간) — 휴직·휴업 카드가 「원급여의 70%」가
+  // 얼마인지 미리 보여 준다(역일수 기준·소정근로일 기준 둘 다).
   // 보수 카드와 같은 계약(지배 계약, 입사 전이면 첫 계약)으로 낸 어림값이다 — 실제 산정은 그 달의 계약으로 한다.
   const leaveBasis = leaveWageBasis({
     payScheme: terms.payScheme as any,
@@ -146,6 +147,10 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
     carAllow: terms.carAllow,
     nonCompetePay: terms.nonCompetePay,
     schedule: sched,
+    // 소정근로일 기준의 통상시급은 포괄임금 약정시간까지 봐야 급여 엔진과 같은 값이 된다 — 보수 카드와 같은 계약에서 읽는다
+    fixedBaseHours: shown ? shown.fixedBaseHours ?? null : emp.fixedBaseHours,
+    fixedOtHours: shown ? shown.fixedOtHours ?? null : emp.fixedOtHours,
+    fixedNightHours: shown ? shown.fixedNightHours ?? null : emp.fixedNightHours,
   });
   // 비율제 근로계약(4대보험 근로자) — 같은 '완전비율제' 라도 위탁과 서식·공제·연차가 다르다
   const ratioWorker = isRatioEmployee(terms);
@@ -685,6 +690,8 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
                 kind: leaveKindOf(l.kind),
                 payRate: l.payRate,
                 payAmount: l.payAmount,
+                // 비율 지급일 때만 뜻이 있다 — 기준이 없는 옛 행은 역일수 기준
+                payBasis: l.payRate != null ? leavePayBasisOf(l.payBasis) : null,
                 reason: l.reason ?? "",
                 createdBy: l.createdBy ?? "",
               }))}

@@ -13,6 +13,8 @@ import {
   leaveWordOf,
   leavePayRows,
   leavePayDetailLines,
+  hasWorkdayBasis,
+  LEAVE_WORKDAY_PAYSLIP_NOTE,
   LEAVE_KIND_LABEL,
 } from "./unpaid-leave";
 import {
@@ -588,6 +590,8 @@ export function payslipHtml(args: {
       const cut = line.indexOf(" — ");
       basisLines.push(cut > 0 ? `<b>${esc(line.slice(0, cut))}</b>${esc(line.slice(cut))}` : esc(line));
     }
+    // 소정근로일 기준 — 「통상임금」「평일 n일」이 무엇인지 한 번 풀어 적는다(식만으로는 왜 날 수가 다른지 모른다)
+    if (hasWorkdayBasis(unpaid)) basisLines.push(esc(LEAVE_WORKDAY_PAYSLIP_NOTE));
   } else if (isMonthlyLike && ratio < 1) {
     // 재직기간 재구성 — 기록 당시 비율과 일치할 때만 일수·기간을 표기
     const monthStart = new Date(Date.UTC(p.year, p.month - 1, 1));

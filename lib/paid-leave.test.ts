@@ -101,28 +101,30 @@ describe("구분·지급 방식", () => {
 
   it("★ 금액이 있으면 금액이 이긴다", () => {
     expect(leavePayTermsOf({ kind: "PAID", payRate: 0.7, payAmount: 500_000 })).toEqual({ mode: "AMOUNT", amount: 500_000 });
-    expect(leavePayTermsOf({ kind: "SHUTDOWN", payRate: 0.7 })).toEqual({ mode: "RATE", rate: 0.7 });
+    // 비율 지급에는 산정 기준이 함께 실린다(v1.65) — 기준이 없는 행은 역일수 기준이다
+    expect(leavePayTermsOf({ kind: "SHUTDOWN", payRate: 0.7 })).toEqual({ mode: "RATE", rate: 0.7, basis: "CALENDAR" });
   });
 
   it("유급 구분인데 조건이 비면 0% 로 읽는다 — 지어내 채우지 않는다", () => {
-    expect(leavePayTermsOf({ kind: "PAID" })).toEqual({ mode: "RATE", rate: 0 });
-    expect(leavePayTermsOf({ kind: "SHUTDOWN", payAmount: 0 })).toEqual({ mode: "RATE", rate: 0 });
+    expect(leavePayTermsOf({ kind: "PAID" })).toEqual({ mode: "RATE", rate: 0, basis: "CALENDAR" });
+    expect(leavePayTermsOf({ kind: "SHUTDOWN", payAmount: 0 })).toEqual({ mode: "RATE", rate: 0, basis: "CALENDAR" });
   });
 
   it("비율은 0~1 로 묶고 소수 넷째 자리(만분율)로 맞춘다", () => {
-    expect(leavePayTermsOf({ kind: "PAID", payRate: 1.5 })).toEqual({ mode: "RATE", rate: 1 });
-    expect(leavePayTermsOf({ kind: "PAID", payRate: -0.1 })).toEqual({ mode: "RATE", rate: 0 });
-    expect(leavePayTermsOf({ kind: "PAID", payRate: 0.66666 })).toEqual({ mode: "RATE", rate: 0.6667 });
+    expect(leavePayTermsOf({ kind: "PAID", payRate: 1.5 })).toMatchObject({ mode: "RATE", rate: 1 });
+    expect(leavePayTermsOf({ kind: "PAID", payRate: -0.1 })).toMatchObject({ mode: "RATE", rate: 0 });
+    expect(leavePayTermsOf({ kind: "PAID", payRate: 0.66666 })).toMatchObject({ mode: "RATE", rate: 0.6667 });
     expect(ratePercentLabel(0.7)).toBe("70%");
     expect(ratePercentLabel(0.6667)).toBe("66.67%");
     expect(ratePercentLabel(1)).toBe("100%");
   });
 
   it("저장할 때 쓰지 않는 조건을 지운다 — 무급이면 둘 다, 금액 지정이면 비율, 비율 지급이면 금액", () => {
-    expect(normalizeLeaveTerms({ kind: "UNPAID", payRate: 0.7, payAmount: 1 })).toEqual({ kind: "UNPAID", payRate: null, payAmount: null });
-    expect(normalizeLeaveTerms({ payRate: 0.7 })).toEqual({ kind: "UNPAID", payRate: null, payAmount: null });
-    expect(normalizeLeaveTerms({ kind: "PAID", payAmount: 800_000 })).toEqual({ kind: "PAID", payRate: null, payAmount: 800_000 });
-    expect(normalizeLeaveTerms({ kind: "SHUTDOWN", payRate: 0.7, payAmount: null })).toEqual({ kind: "SHUTDOWN", payRate: 0.7, payAmount: null });
+    // 산정 기준(payBasis)은 v1.65 에 생겼다 — 기준을 주지 않으면 null(역일수 기준)이다. lib/leave-workday.test.ts
+    expect(normalizeLeaveTerms({ kind: "UNPAID", payRate: 0.7, payAmount: 1 })).toEqual({ kind: "UNPAID", payRate: null, payAmount: null, payBasis: null });
+    expect(normalizeLeaveTerms({ payRate: 0.7 })).toEqual({ kind: "UNPAID", payRate: null, payAmount: null, payBasis: null });
+    expect(normalizeLeaveTerms({ kind: "PAID", payAmount: 800_000 })).toEqual({ kind: "PAID", payRate: null, payAmount: 800_000, payBasis: null });
+    expect(normalizeLeaveTerms({ kind: "SHUTDOWN", payRate: 0.7, payAmount: null })).toEqual({ kind: "SHUTDOWN", payRate: 0.7, payAmount: null, payBasis: null });
   });
 
   it("한 줄 요약", () => {
@@ -321,7 +323,8 @@ describe("settleLeavePay — 원급여 × 지급 비율", () => {
 
 describe("leaveWageBasis — 원급여(월 기준액)", () => {
   it("월급제 = 월 지급 총액 + 직책수당 (식대는 총액 안에 있다)", () => {
-    expect(leaveWageBasis(monthly())).toEqual({ monthly: 3_000_000, nonCompeteExcluded: 0, gap: null });
+    // 소정근로일 기준의 재료(통상시급·1일 환산시간)도 함께 돌려준다(v1.65) — lib/leave-workday.test.ts
+    expect(leaveWageBasis(monthly())).toMatchObject({ monthly: 3_000_000, nonCompeteExcluded: 0, gap: null });
     expect(leaveWageBasis(monthly({ positionAllow: 100_000 })).monthly).toBe(3_100_000);
   });
 
@@ -340,7 +343,15 @@ describe("leaveWageBasis — 원급여(월 기준액)", () => {
 
   it("시급제인데 근로시간표가 비면 낼 수 없다 — 수당만으로 원급여를 지어내지 않는다", () => {
     const b = leaveWageBasis(monthly({ payScheme: "HOURLY", baseWage: 12_000, schedule: [] }));
-    expect(b).toEqual({ monthly: 0, nonCompeteExcluded: 0, gap: "NO_SCHEDULE" });
+    expect(b).toEqual({
+      monthly: 0,
+      nonCompeteExcluded: 0,
+      gap: "NO_SCHEDULE",
+      hourlyBase: 0,
+      hourlyHours: 0,
+      dailyHours: 0,
+      dailyGap: "NO_SCHEDULE",
+    });
   });
 
   it("완전비율제·위탁은 낼 수 없다", () => {
@@ -383,10 +394,11 @@ describe("leaveWageBasis — 원급여(월 기준액)", () => {
         { days: 0, baseWage: 9_000_000, positionAllow: 0, mealAllow: 0, carAllow: 0 },
       ],
     };
-    expect(leaveBasisPieces(monthly(), entry)).toEqual([
+    expect(leaveBasisPieces(monthly(), entry)).toMatchObject([
       { from: "2026-11-01", to: "2026-11-15", monthly: 3_000_000 },
       { from: "2026-11-16", to: "2026-11-30", monthly: 3_300_000 },
     ]);
+    expect(leaveBasisPieces(monthly(), entry)).toHaveLength(2);
     expect(leaveBasisPieces(monthly(), undefined)).toEqual([]);
   });
 });

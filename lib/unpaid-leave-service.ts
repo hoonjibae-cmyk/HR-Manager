@@ -22,8 +22,18 @@ import {
 const monthFirst = (y: number, m: number) => new Date(Date.UTC(y, m - 1, 1));
 const monthLast = (y: number, m: number) => new Date(Date.UTC(y, m, 0));
 
-/** 계산에 쓰는 열 — 날짜와 구분·지급 조건. **셋 다 읽어야 한다** — 구분을 빠뜨리면 유급휴직이 무급으로 계산된다 */
-const LEAVE_SELECT = { startDate: true, endDate: true, kind: true, payRate: true, payAmount: true } as const;
+/**
+ * 계산에 쓰는 열 — 날짜와 구분·지급 조건·산정 기준. **다 읽어야 한다** — 구분을 빠뜨리면 유급휴직이 무급으로,
+ * 산정 기준을 빠뜨리면 소정근로일 기준으로 등록한 휴업이 역일수 기준으로 계산된다(같은 70% 인데 금액이 다르다)
+ */
+const LEAVE_SELECT = {
+  startDate: true,
+  endDate: true,
+  kind: true,
+  payRate: true,
+  payAmount: true,
+  payBasis: true,
+} as const;
 
 /** 그 달에 하루라도 걸친 휴직·휴업 — 직원별로 묶는다 */
 export async function unpaidLeavesInMonth(
@@ -50,6 +60,7 @@ export async function unpaidLeavesInMonth(
       kind: r.kind,
       payRate: r.payRate,
       payAmount: r.payAmount,
+      payBasis: r.payBasis,
     });
     out.set(r.employeeId, arr);
   }

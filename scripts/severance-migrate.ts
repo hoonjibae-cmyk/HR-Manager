@@ -19,7 +19,7 @@
 
 import { prisma } from "../lib/db";
 import { parseSchedule, isContractorContract, PAY_SCHEME_LABEL } from "../lib/constants";
-import { computeWeeklyHours } from "../lib/payroll";
+import { computeWeeklyHours, leaveWageBasis } from "../lib/payroll";
 import { governingContract, paySchemeOfTemplate } from "../lib/contracts";
 import {
   estimateContractBase,
@@ -66,7 +66,14 @@ function payRatioOf(
   resign: Date | null,
   y: number,
   m: number,
-  leaves: Array<{ startDate: Date; endDate: Date; kind?: string | null; payRate?: number | null; payAmount?: number | null }>
+  leaves: Array<{
+    startDate: Date;
+    endDate: Date;
+    kind?: string | null;
+    payRate?: number | null;
+    payAmount?: number | null;
+    payBasis?: string | null;
+  }>
 ): { ratio: number; pd: MonthPayDays | null } {
   const pd = monthPayDays(y, m, hire, resign, leaves);
   if (!unpaidLeaveMetaOf(pd)) return { ratio: prorateOf(hire, resign, y, m), pd: null };
@@ -97,7 +104,10 @@ async function main() {
       contracts: { orderBy: { startDate: "asc" } },
       // 휴직·휴업 — 그 기간의 정상 급여는 없었으므로 추산에서도 같은 비율로 빼고,
       // 유급휴직 급여·휴업수당은 급여 산정과 같은 식으로 더한다
-      unpaidLeaves: { select: { startDate: true, endDate: true, kind: true, payRate: true, payAmount: true } },
+      // (산정 기준까지 읽는다 — 소정근로일 기준으로 등록한 휴업을 역일수 기준으로 세면 금액이 다르다)
+      unpaidLeaves: {
+        select: { startDate: true, endDate: true, kind: true, payRate: true, payAmount: true, payBasis: true },
+      },
     },
     orderBy: [{ department: "asc" }, { name: "asc" }],
   });
@@ -192,8 +202,23 @@ async function main() {
 
       // 유급휴직 급여·휴업수당 — 원급여는 그 달 계약의 월 급여총액(일할하지 않은 추산값)이다.
       // 급여 엔진의 `leaveWageBasis` 와 같은 금액이라(테스트로 묶어 둔다) 실제 급여로 산정한 달과 갈리지 않는다.
+      // 소정근로일 기준의 재료(통상시급·1일 환산시간)는 급여 엔진과 같은 함수로 낸다 — 포괄임금 약정시간은
+      // 그 달 계약의 값(없으면 직원 카드)을 쓴다.
+      const daily = leaveWageBasis({
+        ...terms,
+        payScheme: terms.payScheme as any,
+        schedule,
+        fixedBaseHours: c ? c.fixedBaseHours : e.fixedBaseHours,
+        fixedOtHours: c ? c.fixedOtHours : e.fixedOtHours,
+        fixedNightHours: c ? c.fixedNightHours : e.fixedNightHours,
+      });
       const settled = pay.pd
-        ? settleLeavePay(pay.pd, [], estimateContractBase(terms, { weeklyContractual, weeklyHoliday }).base)
+        ? settleLeavePay(pay.pd, [], {
+            monthly: estimateContractBase(terms, { weeklyContractual, weeklyHoliday }).base,
+            hourlyBase: daily.hourlyBase,
+            hourlyHours: daily.hourlyHours,
+            dailyHours: daily.dailyHours,
+          })
         : null;
       const leaveMeta = settled ? unpaidLeaveMetaOf(settled) : null;
       const est = estimateContractBase(terms, {

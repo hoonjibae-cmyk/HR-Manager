@@ -9,7 +9,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { currentHrUser, isAuthed } from "@/lib/auth";
 import { logActivity } from "@/lib/activity";
-import { isContractorContract } from "@/lib/constants";
+import { isContractorContract, parseSchedule } from "@/lib/constants";
+import { computeWeeklyHours } from "@/lib/payroll";
 import {
   unpaidLeaveError,
   normalizeLeaveTerms,
@@ -64,6 +65,8 @@ export async function PATCH(req: Request, { params }: Params) {
     kind: "kind" in body ? body.kind : leave.kind,
     payRate: sentRate ? body.payRate : sentAmount && !blank(body.payAmount) ? null : leave.payRate,
     payAmount: sentAmount ? body.payAmount : sentRate && !blank(body.payRate) ? null : leave.payAmount,
+    // 산정 기준은 보내지 않으면 그대로 둔다(비율만 고치는 요청). 금액 지정·무급으로 바뀌면 저장할 때 지워진다
+    payBasis: "payBasis" in body ? body.payBasis : leave.payBasis,
   };
   const others = await prisma.unpaidLeave.findMany({
     where: { employeeId: emp.id, id: { not: leave.id } },
@@ -74,6 +77,7 @@ export async function PATCH(req: Request, { params }: Params) {
     resignDate: emp.resignDate,
     contractor: isContractorContract(emp),
     ratio: emp.payScheme === "RATIO",
+    noSchedule: computeWeeklyHours(parseSchedule(emp.schedule)).weeklyContractual <= 0,
     others,
   });
   if (err) return NextResponse.json({ error: err }, { status: 400 });
@@ -107,6 +111,7 @@ export async function PATCH(req: Request, { params }: Params) {
         kind: leave.kind,
         payRate: leave.payRate,
         payAmount: leave.payAmount,
+        payBasis: leave.payBasis,
         reason: leave.reason,
       },
       after: { startDate: ymd(startDate), endDate: ymd(endDate), ...terms, reason },
@@ -148,6 +153,7 @@ export async function DELETE(_req: Request, { params }: Params) {
       kind: leave.kind,
       payRate: leave.payRate,
       payAmount: leave.payAmount,
+      payBasis: leave.payBasis,
       reason: leave.reason,
       createdBy: leave.createdBy,
       impacts,

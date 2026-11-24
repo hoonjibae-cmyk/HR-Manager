@@ -38,6 +38,39 @@
 // 비율은 **원급여(계약 월 급여) 대비**라 연장수당·상여가 많았던 사람은 법정 기준보다 적게 나올 수 있다 —
 // 그래서 금액을 직접 넣는 길을 함께 둔다(화면이 같은 말을 한다: `SHUTDOWN_BASIS_NOTE`).
 //
+// ### 비율 지급의 산정 기준이 둘이다 (v1.65 — `payBasis`)
+// 같은 「70%」라도 **무엇의 70% 인가**가 다르다. 건마다 고른다(기본은 역일수 기준 — 옛 행은 그대로다).
+//
+//   역일수 기준(CALENDAR)   : 원급여 = 월 기준액 × 그 기간 역일수 ÷ 그 달 역일수
+//   소정근로일 기준(WORKDAY) : 원급여 = 통상시급 × 1일 환산시간 × 그 기간의 평일(월~금) 수
+//                              통상시급 = 월 급여 ÷ 월 유급시간,  1일 환산시간 = 주 소정근로시간 ÷ 5 (상한 8)
+//
+//  · 역일수 기준은 월급을 달력의 날 수로 나눈다 — **주휴일·휴일의 몫이 들어 있어** 100% 면 평소 급여와 같다.
+//  · 소정근로일 기준은 **통상임금**으로 센다(1일 통상임금 × 일할 날 수). 주휴일·토요일의 몫이 없어 100% 여도
+//    평소 한 달 급여보다 적다. 평일에 든 공휴일은 센다(유급휴일이다 — §55②).
+//    1일 환산시간을 「주 소정 ÷ 5」로 두고 평일을 세므로 근무 요일이 어떻게 짜여 있든 **한 주에 주 소정근로시간만큼**
+//    이 된다(단시간근로자의 1일 소정근로시간 환산 — 근로기준법 시행령 별표 2 와 같은 방식).
+//  · 통상시급은 급여 엔진의 통상시급과 **같은 값**이다(`leaveWageBasis` 의 `hourlyBase ÷ hourlyHours`) —
+//    월급제는 (월 지급 총액 − 경업금지 보상금) ÷ (기본급 산정시간 + 1.5×약정 시간외 + 0.5×약정 야간), 시급제는 시급.
+//    **반올림하지 않은 값으로 곱하고 원급여에서 한 번 반올림한다** — 통상시급을 먼저 반올림하면 날 수만큼 오차가 불어난다.
+//  · 근로시간표가 비면 1일 환산시간을 낼 수 없다 — 등록 검사가 막고, 지나오면 0원 + 「원급여 없음」으로 띄운다.
+//
+// ⚠ **소정근로일 기준에는 주휴일 몫이 없다 — 사용자 귀책 휴업(§46)이면 그만큼 모자랄 수 있다.**
+// 고용노동부 행정해석은 휴업기간에 든 날을 이렇게 가른다고 검색된다(2026-11):
+//   - 무급휴무일(토요일 등) — 근로제공 의무가 없어 달리 정한 바 없으면 휴업수당 지급의무가 없다
+//     (근로기준정책과-1448, 2015.4.10.)
+//   - 유급휴일(주휴일 등) — 휴업기간에 포함하여 휴업수당을 산정한다(「휴업수당제도 해석 기준」 2009,
+//     법제처 국가법령정보센터의 중앙부처 1차 해석 「휴업기간 중 유급휴일 계산 방법」)
+// 이 기준은 토요일을 빼는 것까지는 그 해석과 같고, **주휴일을 세지 않는 점이 다르다**(2026-11 협의 건이 그렇게
+// 산정됐다 — 당사자가 합의한 금액이라 그 산식을 그대로 옮겼다). 주휴일 몫이 들어가는 쪽은 역일수 기준이다.
+// 주휴일 쪽 해석은 **검색 결과의 인용으로만 확인했다** — 원문 페이지(law.go.kr 등)는 이 작업 환경에서 열리지 않아
+// 직접 대조하지 못했다. 화면은 단정하지 않고 「확인해 주세요」로 적는다(`LEAVE_WORKDAY_BASIS_NOTE`).
+// 어느 쪽이 맞는지는 앱이 정하지 않는다 — 휴업의 성격(사용자 귀책인지, 합의된 휴직인지)과 노무 자문의 몫이다.
+//
+// 2026-11 실제 협의 건이 이 기준이다(월 3,200,000원 · 주 18시간 → 월 유급 93.852시간 · 1일 3.6시간 · 70%):
+//   11/7~11/30 평일 16일 → 1,374,760원,  12/1~12/31 평일 23일 → 1,976,218원,  1/1~1/22 평일 16일 → 1,374,760원
+// 테스트(lib/leave-workday.test.ts)가 이 세 금액을 원 단위로 못박아 둔다.
+//
 // ## 재직 판정과 섞지 않는다
 // **시트에 누가 오르는가**는 여전히 재직 기간 하나로 정한다(`employedInMonth` ≡ `prorationRatioFor > 0`).
 // 한 달을 통째로 쉬어도 그 사람은 재직자라 시트에 **0원 행으로 남는다** — 빠지면 그 달 4대보험·세무 자료에서
@@ -77,6 +110,28 @@ const dayNoOfYmd = (s: string) => {
 };
 const won = (n: number) => `${Math.round(n).toLocaleString()}원`;
 
+/** 월~금인가 — 공휴일은 가리지 않는다(평일에 든 공휴일은 유급휴일이라 센다) */
+const isWeekdayNo = (n: number) => {
+  const dow = dateOf(n).getUTCDay();
+  return dow >= 1 && dow <= 5;
+};
+/** [lo, hi](둘 다 포함) 안의 평일(월~금) 수 */
+function weekdaysWithin(lo: number, hi: number): number {
+  let c = 0;
+  for (let n = lo; n <= hi; n++) if (isWeekdayNo(n)) c += 1;
+  return c;
+}
+
+/**
+ * 원 단위 반올림 — **곱셈·나눗셈의 부동소수점 오차를 먼저 걷어낸다**(소수 6자리에서 한 번 반올림).
+ * 통상시급은 나눗셈이라 2진수로 정확히 안 담긴다 — 참값이 ….5 인 금액이 ….4999999 로 나와 1원이 갈리는 일을 막는다
+ * (`floor10`, lib/payroll.ts 과 같은 성질).
+ */
+const roundWon = (x: number) => (Number.isFinite(x) ? Math.round(Math.round(x * 1e6) / 1e6) : 0);
+
+/** 시간 표기 — 소수 셋째 자리까지, 끝의 0 은 뗀다(93.852 · 209 · 3.6). `hoursLabel`(lib/format.ts)과 같다 */
+const hoursText = (h: number) => String(Number((Number.isFinite(h) ? h : 0).toFixed(3)));
+
 /* ───────────── 구분 ───────────── */
 
 /** 휴직·휴업의 구분 — 저장은 문자열(`UnpaidLeave.kind`). 없거나 모르는 값은 무급휴직으로 읽는다 */
@@ -115,6 +170,26 @@ export const DEFAULT_SHUTDOWN_RATE = 0.7;
 /** 유급휴직 비율의 기본값 — 급여를 그대로 주는 휴직 */
 export const DEFAULT_PAID_LEAVE_RATE = 1;
 
+/**
+ * 비율 지급의 **산정 기준** — 「원급여의 70%」에서 원급여를 어떻게 내는가.
+ *  · CALENDAR 역일수 기준   — 월 기준액 × 그 기간 역일수 ÷ 그 달 역일수 (주휴일·휴일 몫 포함)
+ *  · WORKDAY  소정근로일 기준 — 통상시급 × 1일 환산시간(주 소정 ÷ 5) × 그 기간의 평일 수 (주휴일·토요일 몫 제외)
+ * 저장은 문자열(`UnpaidLeave.payBasis`) — **없거나 모르는 값은 역일수 기준**이다(v1.64 의 행에는 기준이 없다.
+ * 지어내 소정근로일 기준으로 읽으면 이미 산정한 금액이 달라진다).
+ */
+export type LeavePayBasis = "CALENDAR" | "WORKDAY";
+
+export const LEAVE_PAY_BASES: readonly LeavePayBasis[] = ["CALENDAR", "WORKDAY"];
+
+export const LEAVE_PAY_BASIS_LABEL: Record<LeavePayBasis, string> = {
+  CALENDAR: "역일수 기준",
+  WORKDAY: "소정근로일 기준",
+};
+
+export function leavePayBasisOf(v: unknown): LeavePayBasis {
+  return v === "WORKDAY" ? "WORKDAY" : "CALENDAR";
+}
+
 /** 비율을 만분율(정수)로 — 0.7 → 7000. 소수 넷째 자리(% 로는 둘째 자리)까지만 쓴다 */
 const rateBp = (rate: number) => Math.round(rate * 10000);
 
@@ -137,12 +212,14 @@ export interface UnpaidLeaveSpan {
   payRate?: number | null;
   /** 직접 넣은 지급액(원) — **그 건 기간 전체의 총액**. 있으면 비율 대신 이 금액을 준다 */
   payAmount?: number | null;
+  /** 비율 지급의 산정 기준 — "WORKDAY" 면 소정근로일 기준, 없으면 역일수 기준 */
+  payBasis?: string | null;
 }
 
 /** 한 건을 어떻게 지급하는가 */
 export type LeavePayTerms =
   | { mode: "NONE" }
-  | { mode: "RATE"; rate: number }
+  | { mode: "RATE"; rate: number; basis: LeavePayBasis }
   | { mode: "AMOUNT"; amount: number };
 
 /**
@@ -155,13 +232,18 @@ export function leavePayTermsOf(l: {
   kind?: unknown;
   payRate?: unknown;
   payAmount?: unknown;
+  payBasis?: unknown;
 }): LeavePayTerms {
   if (!isPaidLeaveKind(leaveKindOf(l.kind))) return { mode: "NONE" };
   const amount =
     typeof l.payAmount === "number" && Number.isFinite(l.payAmount) ? Math.round(l.payAmount) : 0;
   if (amount > 0) return { mode: "AMOUNT", amount };
   const rate = typeof l.payRate === "number" && Number.isFinite(l.payRate) ? l.payRate : 0;
-  return { mode: "RATE", rate: Math.min(Math.max(rateBp(rate) / 10000, 0), 1) };
+  return {
+    mode: "RATE",
+    rate: Math.min(Math.max(rateBp(rate) / 10000, 0), 1),
+    basis: leavePayBasisOf(l.payBasis),
+  };
 }
 
 /**
@@ -182,10 +264,24 @@ export interface UnpaidMonthSpan {
   amount?: number;
   /** 금액 지정 — 그 건 기간 전체의 금액(원). 이 달 몫과 다르면 달을 걸친 건이다 */
   amountTotal?: number;
-  /** (산정 뒤) 그 구간의 원급여(원) — 비율 지급일 때 */
+  /**
+   * 비율 지급의 산정 기준 — **소정근로일 기준일 때만** 있다. 없으면 역일수 기준이다
+   * (v1.64 가 남긴 기록에는 이 키가 없다 — 그 기록의 지문·표기가 한 글자도 달라지지 않는다).
+   */
+  basis?: "WORKDAY";
+  /** 소정근로일 기준 — 그 구간의 평일(월~금) 수. 날짜로 정해지므로 산정 전에도 있다 */
+  workdays?: number;
+  /** (산정 뒤) 그 구간의 원급여(원) — 비율 지급일 때. 소정근로일 기준이면 그 기간 평일분의 통상임금이다 */
   orig?: number;
-  /** (산정 뒤) 원급여를 낸 월 기준액 — 구간 안에서 계약 조건이 하나일 때만 */
+  /** (산정 뒤) 원급여를 낸 월 기준액 — 역일수 기준이고 구간 안에서 계약 조건이 하나일 때만 */
   monthly?: number;
+  /**
+   * (산정 뒤) 소정근로일 기준의 재료 — 구간 안에서 계약 조건이 하나일 때만.
+   * 통상시급 = `wage`(원) ÷ `hours`(시간), 1일 환산시간 = `dailyHours`. 명세서가 이 값으로 식을 적는다
+   */
+  wage?: number;
+  hours?: number;
+  dailyHours?: number;
   /** (산정 뒤) 이 달 지급액(원) */
   pay?: number;
 }
@@ -315,6 +411,8 @@ export function monthPayDays(
         amount: amountShare(terms.amount, p.from - p.start, p.to - p.start + 1, p.end - p.start + 1),
         amountTotal: terms.amount,
       });
+    else if (terms.mode === "RATE" && terms.basis === "WORKDAY")
+      spans.push({ ...base, rate: terms.rate, basis: "WORKDAY", workdays: weekdaysWithin(p.from, p.to) });
     else spans.push({ ...base, rate: terms.mode === "RATE" ? terms.rate : 0 });
   }
   const paidDays = employedDays - leaveDays;
@@ -331,12 +429,25 @@ export function monthPayDays(
 
 /* ───────────── 유급휴직 급여·휴업수당 ───────────── */
 
-/** 그 달 안에서 한 계약 조건이 적용된 날짜 구간과, 그 조건의 원급여(월 기준액) */
-export interface WageBasisPiece {
+/**
+ * 한 계약 조건의 **원급여 재료** — 두 산정 기준이 쓰는 값을 함께 싣는다(`leaveWageBasis`, lib/payroll.ts).
+ * 소정근로일 기준의 재료(`hourlyBase`·`hourlyHours`·`dailyHours`)가 없으면 그 기준은 0원이다(지어내지 않는다).
+ */
+export interface LeaveWageTerms {
+  /** 월 기준액(원) — 역일수 기준의 원급여를 낸다 */
+  monthly: number;
+  /** 통상시급의 분자(원) — 월급제·인센티브: 월 지급 총액 − 경업금지 보상금. 시급제: 시급 */
+  hourlyBase?: number;
+  /** 통상시급의 분모(시간) — 월 유급시간(기본급 산정시간 + 1.5×약정 시간외 + 0.5×약정 야간). 시급제: 1 */
+  hourlyHours?: number;
+  /** 1일 환산 소정근로시간 = 주 소정근로시간 ÷ 5 (상한 8) */
+  dailyHours?: number;
+}
+
+/** 그 달 안에서 한 계약 조건이 적용된 날짜 구간과, 그 조건의 원급여 재료 */
+export interface WageBasisPiece extends LeaveWageTerms {
   from: string;
   to: string;
-  /** 월 기준액(원) — `leaveWageBasis()` (lib/payroll.ts) */
-  monthly: number;
 }
 
 /** 지급액까지 정한 그 달 일수 */
@@ -345,26 +456,34 @@ export interface SettledPayDays extends MonthPayDays {
   leavePay: number;
 }
 
+const positive = (n: number | null | undefined) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0);
+
 /**
  * 유급 구간의 **원급여와 지급액을 정한다**.
  *
- *   원급여 = Σ(그 날짜의 월 기준액 × 날 수) ÷ 그 달 역일수      (원 단위 반올림)
- *   지급액 = 원급여 × 지급 비율                                  (원 단위 반올림)
+ *   역일수 기준    : 원급여 = Σ(그 날짜의 월 기준액 × 날 수) ÷ 그 달 역일수
+ *   소정근로일 기준 : 원급여 = Σ(그 날짜의 통상시급 × 1일 환산시간 × 평일 수),   통상시급 = hourlyBase ÷ hourlyHours
+ *   지급액 = 원급여 × 지급 비율                                  (둘 다 원 단위 반올림)
  *
  * 지급액을 **반올림한 원급여에서** 낸다 — 명세서가 「원급여 1,500,000원 × 70% = 1,050,000원」을 그대로 적으므로
  * 손으로 다시 곱해도 같은 수가 나와야 한다. 비율은 만분율 정수로 곱해 부동소수점 오차가 끼지 않는다
  * (0.7 은 2진수로 정확히 안 담긴다 — floor10 에서 겪은 것과 같은 성질).
+ * 소정근로일 기준의 통상시급은 **반올림하지 않고** 곱한다(원급여에서 한 번만 반올림) — 34,096.24원을 34,096원으로
+ * 먼저 자르면 16일치에 9원이 빠진다. 식은 「월 3,200,000원 ÷ 93.852시간 × …」으로 적어 그대로 다시 계산된다.
  *
- * `pieces` 는 그 달의 계약 구간이다(월중에 계약이 바뀌면 둘 이상). 덮이지 않은 날은 `fallbackMonthly` 로 센다.
+ * `pieces` 는 그 달의 계약 구간이다(월중에 계약이 바뀌면 둘 이상). 덮이지 않은 날은 `fallback` 으로 센다
+ * (숫자를 넘기면 월 기준액만 아는 것이다 — 소정근로일 기준 구간은 0원이 된다).
  * 금액 지정 구간은 `monthPayDays` 가 실어 둔 이 달 몫이 곧 지급액이다(계약과 무관).
  */
 export function settleLeavePay(
   pd: MonthPayDays,
   pieces: WageBasisPiece[],
-  fallbackMonthly: number
+  fallback: number | LeaveWageTerms
 ): SettledPayDays {
   const D = pd.daysInMonth;
   const whole = (n: number) => (Number.isFinite(n) ? Math.max(Math.round(n), 0) : 0);
+  const fb: LeaveWageTerms = typeof fallback === "number" ? { monthly: fallback } : fallback;
+  const ranges = pieces.map((p) => ({ lo: dayNoOfYmd(p.from), hi: dayNoOfYmd(p.to), terms: p as LeaveWageTerms }));
   let leavePay = 0;
   const spans = pd.spans.map((s): UnpaidMonthSpan => {
     if (!s.kind) return s;
@@ -374,27 +493,66 @@ export function settleLeavePay(
     }
     const lo = dayNoOfYmd(s.from);
     const hi = dayNoOfYmd(s.to);
+    const bp = rateBp(s.rate ?? 0);
+
+    if (s.basis === "WORKDAY") {
+      // 평일마다 그 날짜의 계약 조건을 찾는다(먼저 덮은 구간이 이긴다). 같은 조건끼리 날 수를 모아 한 번에 곱한다 —
+      // 하루씩 더하면 같은 값을 열여섯 번 더하는 사이 끝자리가 흔들린다
+      const groups = new Map<string, { t: LeaveWageTerms; n: number }>();
+      let workdays = 0;
+      for (let n = lo; n <= hi; n++) {
+        if (!isWeekdayNo(n)) continue;
+        workdays += 1;
+        const t = ranges.find((r) => r.lo <= n && n <= r.hi)?.terms ?? fb;
+        const key = `${positive(t.hourlyBase)}|${positive(t.hourlyHours)}|${positive(t.dailyHours)}`;
+        const g = groups.get(key);
+        if (g) g.n += 1;
+        else groups.set(key, { t, n: 1 });
+      }
+      let sum = 0;
+      for (const { t, n } of groups.values()) {
+        const wage = positive(t.hourlyBase);
+        const hours = positive(t.hourlyHours);
+        const daily = positive(t.dailyHours);
+        if (wage && hours && daily) sum += (wage * daily * n) / hours;
+      }
+      const orig = roundWon(sum);
+      const pay = Math.round((orig * bp) / 10000);
+      leavePay += pay;
+      const only = groups.size === 1 ? [...groups.values()][0].t : null;
+      const usable = only && positive(only.hourlyBase) && positive(only.hourlyHours) && positive(only.dailyHours);
+      return {
+        ...s,
+        workdays,
+        orig,
+        ...(usable
+          ? { wage: positive(only.hourlyBase), hours: positive(only.hourlyHours), dailyHours: positive(only.dailyHours) }
+          : {}),
+        pay,
+      };
+    }
+
     let covered = 0;
     let sum = 0;
     const monthlies = new Set<number>();
-    for (const p of pieces) {
-      const a = Math.max(lo, dayNoOfYmd(p.from));
-      const b = Math.min(hi, dayNoOfYmd(p.to));
+    for (const p of ranges) {
+      const a = Math.max(lo, p.lo);
+      const b = Math.min(hi, p.hi);
       if (a > b) continue;
       const n = Math.min(b - a + 1, s.days - covered);
       if (n <= 0) continue;
-      const m = whole(p.monthly);
+      const m = whole(p.terms.monthly);
       covered += n;
       sum += m * n;
       monthlies.add(m);
     }
     if (covered < s.days) {
-      const m = whole(fallbackMonthly);
+      const m = whole(fb.monthly);
       sum += m * (s.days - covered);
       monthlies.add(m);
     }
     const orig = D > 0 ? Math.round(sum / D) : 0;
-    const pay = Math.round((orig * rateBp(s.rate ?? 0)) / 10000);
+    const pay = Math.round((orig * bp) / 10000);
     leavePay += pay;
     return { ...s, orig, ...(monthlies.size === 1 ? { monthly: [...monthlies][0] } : {}), pay };
   });
@@ -410,14 +568,22 @@ export function settleLeavePay(
  */
 export function leaveZeroBasis(m: { spans: UnpaidMonthSpan[] } | null | undefined): boolean {
   return !!m?.spans.some(
-    (s) => s.kind && s.amount == null && rateBp(s.rate ?? 0) > 0 && s.orig != null && s.orig <= 0
+    (s) =>
+      s.kind &&
+      s.amount == null &&
+      rateBp(s.rate ?? 0) > 0 &&
+      s.orig != null &&
+      s.orig <= 0 &&
+      // 소정근로일 기준인데 그 구간에 평일이 하루도 없으면(주말뿐) 0원이 맞다 — 원급여를 못 낸 것이 아니다
+      !(s.basis === "WORKDAY" && (s.workdays ?? 0) <= 0)
   );
 }
 
 /** 산정 근거에 남기는 한 줄 — 위의 경우 */
 export const LEAVE_ZERO_BASIS_NOTE =
   "⚠️ 유급휴직·휴업을 원급여 대비 비율로 지급하도록 등록돼 있지만 원급여를 계산할 수 없어 0원으로 산정했습니다" +
-  "(완전비율제이거나 시급제 근로시간표가 비어 있습니다) — 직원 상세의 휴직·휴업에서 금액을 직접 넣어 주세요.";
+  "(완전비율제이거나, 시급제 근로시간표가 비어 있거나, 소정근로일 기준인데 근로시간표가 비어 있습니다) — " +
+  "직원 상세의 휴직·휴업에서 금액을 직접 넣어 주세요.";
 
 /* ───────────── 급여 기록에 남기는 근거 ───────────── */
 
@@ -479,18 +645,24 @@ export function readUnpaidLeaveMeta(breakdown: unknown): UnpaidLeaveMeta | null 
           const base: UnpaidMonthSpan = { from: s.from, to: s.to, days: num(s.days) ?? 0 };
           // 구분이 없는 구간은 무급휴직이다(v1.63 기록) — 지급 조건을 읽지 않는다
           if (!isPaidLeaveKind(s.kind)) return base;
-          const opt = (k: "rate" | "amount" | "amountTotal" | "orig" | "monthly" | "pay") => {
+          const opt = (
+            k: "rate" | "amount" | "amountTotal" | "workdays" | "orig" | "monthly" | "wage" | "hours" | "dailyHours" | "pay"
+          ) => {
             const v = num(s[k]);
             return v != null && v >= 0 ? { [k]: v } : {};
           };
+          // 기준 키가 없는 구간은 역일수 기준이다(v1.64 기록) — 소정근로일 기준의 재료를 읽지 않는다
+          const workday = s.basis === "WORKDAY";
           return {
             ...base,
             kind: s.kind,
             ...opt("rate"),
             ...opt("amount"),
             ...opt("amountTotal"),
+            ...(workday ? { basis: "WORKDAY" as const, ...opt("workdays") } : {}),
             ...opt("orig"),
             ...opt("monthly"),
+            ...(workday ? { ...opt("wage"), ...opt("hours"), ...opt("dailyHours") } : {}),
             ...opt("pay"),
           };
         })
@@ -514,10 +686,18 @@ export function readUnpaidLeaveMeta(breakdown: unknown): UnpaidLeaveMeta | null 
  * 유급 구간은 **구분과 지급 조건까지** 본다 — 날짜는 그대로인데 70% 를 100% 로 고친 것도 다시 산정해야 한다.
  * 금액 지정은 이 달 몫으로 견준다(기간을 늘리면서 총액을 맞춰 이 달 몫이 그대로면 이 달은 손댈 것이 없다).
  * 산정 결과(원급여·지급액)는 지문에 넣지 않는다 — 계약이 바뀌어 달라지는 것은 계약 수정의 몫이다.
+ * **산정 기준도 본다** — 같은 70% 라도 역일수 기준(`r7000`)과 소정근로일 기준(`w7000`)은 금액이 다르다.
+ * 역일수 기준의 지문은 v1.64 와 같다(그때 산정한 기록이 '바뀌었다' 로 읽히지 않는다).
  */
 const signatureOf = (s: UnpaidMonthSpan) =>
   `${s.from}~${s.to}` +
-  (s.kind ? `:${s.kind}:${s.amount != null ? `a${Math.round(s.amount)}` : `r${rateBp(s.rate ?? 0)}`}` : "");
+  (s.kind
+    ? `:${s.kind}:${
+        s.amount != null
+          ? `a${Math.round(s.amount)}`
+          : `${s.basis === "WORKDAY" ? "w" : "r"}${rateBp(s.rate ?? 0)}`
+      }`
+    : "");
 const signature = (spans: UnpaidMonthSpan[]) => spans.map(signatureOf).join(",");
 
 /**
@@ -581,11 +761,27 @@ function leavePayPhrase(kind: PaidLeaveKind, spans: UnpaidMonthSpan[]): string {
   const rate = spans[0]?.rate ?? 0;
   // 0% 는 돈이 나가지 않는 휴업이다 — 「휴업수당 0원」보다 「무급」이 바로 읽힌다
   if (oneRate && rateBp(rate) === 0) return "무급(0%)";
+  // 소정근로일 기준으로만 낸 묶음 — 같은 70% 라도 역일수 기준과 금액이 달라 기준을 함께 적는다.
+  // (역일수 기준의 표기는 v1.64 와 한 글자도 다르지 않다)
+  const allWorkday = byRate && spans.every((s) => s.basis === "WORKDAY");
+  const workdays = spans.reduce((a, s) => a + (s.workdays ?? 0), 0);
   if (spans.every((s) => s.pay != null)) {
     const total = spans.reduce((a, s) => a + (s.pay ?? 0), 0);
-    return `${LEAVE_PAY_LABEL[kind]} ${won(total)}` + (oneRate ? `(${ratePercentLabel(rate)})` : byAmount ? "(금액 지정)" : "");
+    return (
+      `${LEAVE_PAY_LABEL[kind]} ${won(total)}` +
+      (oneRate
+        ? allWorkday
+          ? `(통상임금의 ${ratePercentLabel(rate)} · 평일 ${workdays}일)`
+          : `(${ratePercentLabel(rate)})`
+        : byAmount
+          ? "(금액 지정)"
+          : "")
+    );
   }
-  if (oneRate) return `원급여의 ${ratePercentLabel(rate)} 지급`;
+  if (oneRate)
+    return allWorkday
+      ? `통상임금의 ${ratePercentLabel(rate)} 지급(소정근로일 기준 · 평일 ${workdays}일)`
+      : `원급여의 ${ratePercentLabel(rate)} 지급`;
   if (byAmount) return `${won(spans.reduce((a, s) => a + (s.amount ?? 0), 0))} 지급(금액 지정)`;
   return "";
 }
@@ -596,6 +792,7 @@ function leavePayPhrase(kind: PaidLeaveKind, spans: UnpaidMonthSpan[]): string {
  *   무급휴직 11/16~11/30(15일)
  *   휴업 11/16~11/30(15일) 휴업수당 1,050,000원(70%)
  *   무급휴직 11/3(1일) · 유급휴직 11/10~11/14(5일) 유급휴직 급여 400,000원(금액 지정)
+ *   휴업 11/7~11/30(24일) 휴업수당 1,374,760원(통상임금의 70% · 평일 16일)          ← 소정근로일 기준
  *
  * 산정을 거치지 않은 구간(지금 등록을 그대로 보일 때)은 금액 대신 조건을 적는다 — 「원급여의 70% 지급」.
  */
@@ -674,10 +871,35 @@ export function leavePayRows(m: UnpaidLeaveMeta | null, leavePayP: number): Arra
 }
 
 /**
+ * 명세서 「산출 근거」가 소정근로일 기준 구간 아래에 한 번 적는 풀이 — 「통상임금」「평일 16일」이 무엇인지.
+ * 직원이 읽는 문서라 계산 방식만 적는다(법적 판단·주의는 관리자 화면의 몫이다 — `LEAVE_WORKDAY_BASIS_NOTE`).
+ */
+export const LEAVE_WORKDAY_PAYSLIP_NOTE =
+  "통상임금은 통상시급(월 급여 ÷ 월 유급시간)에 1일 환산 소정근로시간(주 소정근로시간 ÷ 5)과 " +
+  "그 기간의 평일(월~금. 평일에 든 공휴일 포함) 수를 곱한 금액입니다.";
+
+/** 소정근로일 기준으로 낸 구간이 있는가 — 명세서가 위 풀이를 붙일지 정한다 */
+export function hasWorkdayBasis(m: { spans: UnpaidMonthSpan[] } | null | undefined): boolean {
+  return !!m?.spans.some((s) => s.kind && s.amount == null && s.basis === "WORKDAY" && rateBp(s.rate ?? 0) > 0);
+}
+
+/**
+ * 통상시급을 낸 식 — `월 3,200,000원 ÷ 93.852시간`. 시급제는 나눌 것이 없어 `시급 12,000원`.
+ * 화면의 미리보기와 명세서가 같은 표기를 쓴다.
+ */
+export function workdayWageText(wage: number, hours: number): string {
+  return hours === 1 ? `시급 ${won(wage)}` : `월 ${won(wage)} ÷ ${hoursText(hours)}시간`;
+}
+
+/**
  * 명세서 「산출 근거」에 적는 유급 구간의 계산식 — 구간마다 한 줄.
  *
  *   휴업수당 — 11월 16일 ~ 11월 30일(15일): 원급여 1,500,000원(월 3,000,000원 × 15/30일) × 70% = 1,050,000원
  *   유급휴직 급여 — 11월 10일 ~ 11월 14일(5일): 400,000원(지정한 금액)
+ *   휴업수당 — 11월 7일 ~ 11월 30일(24일): 통상임금 1,963,943원(월 3,200,000원 ÷ 93.852시간 × 1일 3.6시간 × 평일 16일) × 70% = 1,374,760원
+ *
+ * 소정근로일 기준의 식은 **통상시급을 반올림해 적지 않는다** — 「월 금액 ÷ 시간」을 그대로 적어야 손으로 다시
+ * 계산해도 같은 수가 나온다(34,096원으로 적으면 16일치에 9원이 어긋난다).
  */
 export function leavePayDetailLines(m: UnpaidLeaveMeta): string[] {
   const out: string[] = [];
@@ -696,6 +918,21 @@ export function leavePayDetailLines(m: UnpaidLeaveMeta): string[] {
     const rate = s.rate ?? 0;
     if (rateBp(rate) === 0) {
       out.push(`${LEAVE_KIND_LABEL[s.kind]} — ${when}: ${label} 없음(지급 비율 0%)`);
+      continue;
+    }
+    if (s.basis === "WORKDAY") {
+      const n = s.workdays ?? 0;
+      if (s.orig == null || s.pay == null) {
+        out.push(`${label} — ${when}: 통상임금의 ${ratePercentLabel(rate)}(소정근로일 기준 · 평일 ${n}일)`);
+        continue;
+      }
+      const how =
+        s.wage != null && s.hours != null && s.dailyHours != null
+          ? `${workdayWageText(s.wage, s.hours)} × 1일 ${hoursText(s.dailyHours)}시간 × 평일 ${n}일`
+          : n > 0
+            ? `기간 중 계약이 바뀌어 날짜별 통상시급 × 1일 환산시간 × 평일 ${n}일로 계산`
+            : `평일 ${n}일`;
+      out.push(`${label} — ${when}: 통상임금 ${won(s.orig)}(${how}) × ${ratePercentLabel(rate)} = ${won(s.pay)}`);
       continue;
     }
     if (s.orig == null || s.pay == null) {
@@ -744,6 +981,8 @@ export interface LeaveInput {
   payRate?: unknown;
   /** 그 건 기간 전체의 지급액(원) */
   payAmount?: unknown;
+  /** 비율 지급의 산정 기준 — CALENDAR(역일수) | WORKDAY(소정근로일). 없으면 역일수 기준 */
+  payBasis?: unknown;
 }
 
 const blank = (v: unknown) => v == null || v === "";
@@ -754,17 +993,31 @@ const blank = (v: unknown) => v == null || v === "";
  * 무급휴직이면 비율·금액을 지운다(유급휴직을 무급으로 바꿨는데 옛 비율이 남으면, 다시 유급으로 돌릴 때
  * 보이지 않던 값이 되살아난다). 금액 지정이면 비율을, 비율 지급이면 금액을 지운다 — 둘 다 남으면
  * 어느 쪽으로 지급했는지 기록만 보고 알 수 없다.
+ * **산정 기준은 비율 지급에만 뜻이 있다** — 무급휴직·금액 지정이면 지운다. 역일수 기준은 null 로 둔다
+ * (v1.64 의 행과 같은 모양 — 기준이 없으면 역일수 기준이다).
  */
-export function normalizeLeaveTerms(input: { kind?: unknown; payRate?: unknown; payAmount?: unknown }): {
+export function normalizeLeaveTerms(input: {
+  kind?: unknown;
+  payRate?: unknown;
+  payAmount?: unknown;
+  payBasis?: unknown;
+}): {
   kind: LeaveKind;
   payRate: number | null;
   payAmount: number | null;
+  payBasis: "WORKDAY" | null;
 } {
   const kind = leaveKindOf(input.kind);
-  const terms = leavePayTermsOf({ kind, payRate: input.payRate, payAmount: input.payAmount });
-  if (terms.mode === "AMOUNT") return { kind, payRate: null, payAmount: terms.amount };
-  if (terms.mode === "RATE") return { kind, payRate: terms.rate, payAmount: null };
-  return { kind, payRate: null, payAmount: null };
+  const terms = leavePayTermsOf({
+    kind,
+    payRate: input.payRate,
+    payAmount: input.payAmount,
+    payBasis: input.payBasis,
+  });
+  if (terms.mode === "AMOUNT") return { kind, payRate: null, payAmount: terms.amount, payBasis: null };
+  if (terms.mode === "RATE")
+    return { kind, payRate: terms.rate, payAmount: null, payBasis: terms.basis === "WORKDAY" ? "WORKDAY" : null };
+  return { kind, payRate: null, payAmount: null, payBasis: null };
 }
 
 /**
@@ -782,6 +1035,8 @@ export function unpaidLeaveError(
     contractor: boolean;
     /** 완전비율제(근로계약) — 원급여가 매출에 달려 비율 지급을 쓸 수 없다 */
     ratio?: boolean;
+    /** 근로시간표가 비어 있다(주 소정근로시간 0) — 소정근로일 기준의 1일 환산시간·통상시급을 낼 수 없다 */
+    noSchedule?: boolean;
     /** 같은 직원의 다른 휴직·휴업(수정이면 자기 자신은 뺀다) */
     others: UnpaidLeaveSpan[];
   }
@@ -793,6 +1048,8 @@ export function unpaidLeaveError(
     );
   if (!blank(input.kind) && !(LEAVE_KINDS as readonly unknown[]).includes(input.kind))
     return "구분은 무급휴직·유급휴직·휴업 중에서 골라 주세요.";
+  if (!blank(input.payBasis) && !(LEAVE_PAY_BASES as readonly unknown[]).includes(input.payBasis))
+    return "산정 기준은 역일수 기준·소정근로일 기준 중에서 골라 주세요.";
   const kind = leaveKindOf(input.kind);
   const start = parseYmd(input.startDate);
   const end = parseYmd(input.endDate);
@@ -845,6 +1102,13 @@ export function unpaidLeaveError(
           "완전비율제는 급여가 매출에 달려 있어 원급여가 정해져 있지 않습니다 — " +
           "비율 대신 지급할 금액을 직접 넣어 주세요."
         );
+      // 소정근로일 기준은 근로시간표가 있어야 한다 — 없는 채로 받으면 조용히 0원이 산정된다.
+      // 0% 휴업은 어느 기준이든 0원이라 묻지 않는다
+      if (leavePayBasisOf(input.payBasis) === "WORKDAY" && ctx.noSchedule && Math.round(r * 10000) > 0)
+        return (
+          "소정근로일 기준은 근로시간표(주 소정근로시간)로 통상시급과 1일 환산시간을 계산합니다 — " +
+          "직원 정보에 근로시간표를 채우거나, 역일수 기준 또는 금액 직접 입력을 써 주세요."
+        );
     }
   }
 
@@ -876,16 +1140,34 @@ export function monthsOfSpan(
   return out;
 }
 
-/** 한 건의 지급 조건만 — `원급여의 70%` / `800,000원(금액 지정)` / `무급(0%)`. 무급휴직은 "" */
-export function leavePayTermsLabel(l: { kind?: unknown; payRate?: unknown; payAmount?: unknown }): string {
+/**
+ * 한 건의 지급 조건만 — `원급여의 70%` / `통상임금의 70%(소정근로일 기준)` / `800,000원(금액 지정)` / `무급(0%)`.
+ * 무급휴직은 ""
+ */
+export function leavePayTermsLabel(l: {
+  kind?: unknown;
+  payRate?: unknown;
+  payAmount?: unknown;
+  payBasis?: unknown;
+}): string {
   const terms = leavePayTermsOf(l);
   if (terms.mode === "AMOUNT") return `${won(terms.amount)}(금액 지정)`;
-  if (terms.mode === "RATE") return rateBp(terms.rate) === 0 ? "무급(0%)" : `원급여의 ${ratePercentLabel(terms.rate)}`;
+  if (terms.mode === "RATE") {
+    if (rateBp(terms.rate) === 0) return "무급(0%)";
+    return terms.basis === "WORKDAY"
+      ? `통상임금의 ${ratePercentLabel(terms.rate)}(소정근로일 기준)`
+      : `원급여의 ${ratePercentLabel(terms.rate)}`;
+  }
   return "";
 }
 
 /** 한 건의 한 줄 요약 — 작업 이력·목록. `휴업 · 원급여의 70%` / `유급휴직 · 800,000원(금액 지정)` / `무급휴직` */
-export function leaveTermsLabel(l: { kind?: unknown; payRate?: unknown; payAmount?: unknown }): string {
+export function leaveTermsLabel(l: {
+  kind?: unknown;
+  payRate?: unknown;
+  payAmount?: unknown;
+  payBasis?: unknown;
+}): string {
   const kind = LEAVE_KIND_LABEL[leaveKindOf(l.kind)];
   const pay = leavePayTermsLabel(l);
   return pay ? `${kind} · ${pay}` : kind;
@@ -916,6 +1198,41 @@ export const LEAVE_WAGE_BASIS_NOTE =
   "비과세는 따로 떼지 않습니다). 다른 기준으로 주려면 금액을 직접 넣으세요.";
 
 /**
+ * 산정 기준 둘의 차이 — 비율을 고르는 자리에서 함께 적는다.
+ * 같은 70% 라도 금액이 다르므로(주휴일·토요일 몫) 고르는 자리에서 무엇이 다른지 읽혀야 한다.
+ */
+export const LEAVE_PAY_BASIS_HINT: Record<LeavePayBasis, string> = {
+  CALENDAR:
+    "원급여 = 월 급여 × 그 기간 역일수 ÷ 그 달 역일수. 주휴일·휴일의 몫이 들어 있어 100% 면 평소 급여와 같습니다.",
+  WORKDAY:
+    "원급여 = 그 기간 평일분의 통상임금 — 통상시급 × 1일 환산시간(주 소정근로시간 ÷ 5) × 평일(월~금) 수. " +
+    "주휴일·토요일의 몫은 들어가지 않습니다(평일에 든 공휴일은 셉니다).",
+};
+
+/**
+ * 소정근로일 기준이 무엇인지 — 그 기준을 고르면 보인다.
+ *
+ * ⚠ **주휴일 몫이 빠진다는 것을 감추지 않는다.** 월급에는 주휴일의 몫이 들어 있어(월 유급시간 = (주 소정 + 주휴) × 4.345)
+ * 이 기준으로는 100% 를 줘도 평소 한 달 급여의 5/6 쯤이다. 고용노동부 행정해석은 휴업기간에 든 **유급휴일(주휴일)을
+ * 휴업수당 산정에 포함**하고 무급휴무일(토요일)은 뺀다고 검색된다(파일 머리말 — 원문은 직접 대조하지 못했다).
+ * 그 해석대로면 사용자 귀책 휴업에서 이 기준은 주휴일분만큼 모자라다. 앱은 단정하지 않고 확인하라고 적는다 —
+ * 휴업의 성격과 노무 자문의 몫이다. 주휴일 몫이 들어가는 쪽은 역일수 기준이고, 다른 금액이면 직접 넣는다.
+ */
+export const LEAVE_WORKDAY_BASIS_NOTE =
+  "소정근로일 기준은 통상임금으로 셉니다 — 통상시급(월 급여 ÷ 월 유급시간. 명세서의 통상시급과 같은 값이고 " +
+  "경업금지 보상금·직책수당은 들지 않습니다) × 1일 환산시간(주 소정근로시간 ÷ 5) × 그 기간의 평일(월~금) 수 × 지급 비율. " +
+  "평일에 든 공휴일은 세고, 주휴일·토요일의 몫은 넣지 않습니다 — 그래서 비율이 100% 여도 평소 한 달 급여보다 적습니다. " +
+  "⚠ 사용자 귀책 휴업(근로기준법 §46)이면 휴업기간에 든 주휴일(유급휴일)도 휴업수당 산정에 포함해야 한다는 고용노동부 " +
+  "행정해석이 있는 것으로 확인됩니다(무급휴무일인 토요일은 제외) — 그 경우 이 기준은 주휴일분만큼 적으니 노무 자문으로 " +
+  "확인해 주세요. 주휴일 몫이 들어가는 쪽은 역일수 기준이고, 다른 금액으로 주려면 금액을 직접 넣습니다.";
+
+/** 소정근로일 기준을 고른 자리에 바로 붙는 짧은 주의 — 위 안내의 요점만 */
+export const LEAVE_WORKDAY_BASIS_CAUTION =
+  "주휴일·토요일의 몫은 들어가지 않습니다 — 비율이 100% 여도 평소 한 달 급여보다 적습니다. 사용자 귀책 휴업이면 " +
+  "휴업기간에 든 주휴일도 휴업수당에 포함해야 한다는 행정해석이 있으니(토요일은 제외) 확인해 주세요 — " +
+  "주휴일 몫이 들어가는 쪽은 역일수 기준입니다.";
+
+/**
  * 휴업수당의 법정 기준 — 휴업을 고르면 늘 보인다.
  *
  * 근로기준법 §46: ① 사용자의 귀책사유로 휴업하는 경우 휴업기간 동안 **평균임금의 100분의 70 이상**을 지급해야
@@ -928,9 +1245,9 @@ export const LEAVE_WAGE_BASIS_NOTE =
  */
 export const SHUTDOWN_BASIS_NOTE =
   "사용자 귀책으로 휴업하면 휴업기간 동안 평균임금의 70% 이상을 휴업수당으로 줘야 합니다(근로기준법 §46① — " +
-  "평균임금의 70%가 통상임금보다 많으면 통상임금). 여기의 비율은 평균임금이 아니라 원급여(계약 월 급여) 대비라, " +
-  "직전 3개월에 연장·휴일수당이나 상여를 받은 사람은 같은 70% 라도 법정 기준보다 적을 수 있습니다 — " +
-  "평균임금으로 계산한 금액이 있으면 금액을 직접 넣으세요.";
+  "평균임금의 70%가 통상임금보다 많으면 통상임금). 여기의 비율은 평균임금이 아니라 계약 급여(역일수 기준은 월 급여, " +
+  "소정근로일 기준은 통상임금) 대비라, 직전 3개월에 연장·휴일수당이나 상여를 받은 사람은 같은 70% 라도 법정 기준보다 " +
+  "적을 수 있습니다 — 평균임금으로 계산한 금액이 있으면 금액을 직접 넣으세요.";
 
 /**
  * 휴업수당 비율이 70% 에 못 미칠 때의 주의 — **막지 않는다**.

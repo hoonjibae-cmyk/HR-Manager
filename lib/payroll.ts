@@ -437,6 +437,8 @@ export interface InclusiveWageBreakdown {
   exactHourly: number; // 반올림 전 — 분해에 사용
   /** 통상시급의 분자 = 기준급여 − 경업금지 보상금(월, 일할 전). 보상금이 없으면 기준급여 그대로 */
   hourlyBase: number;
+  /** 통상시급의 분모(시간) = 기본급 산정시간 + 1.5×약정 시간외 + 0.5×약정 야간. `hourlyBase ÷ hourlyHours` = 통상시급 */
+  hourlyHours: number;
   baseHours: number;
   otHours: number;
   nightHours: number;
@@ -518,6 +520,7 @@ export function inclusiveWageBreakdown(t: InclusiveWageTerms): InclusiveWageBrea
     hourlyWage: round0(exactHourly),
     exactHourly,
     hourlyBase,
+    hourlyHours: divisor,
     baseHours: t.baseHours,
     otHours,
     nightHours,
@@ -545,6 +548,17 @@ export interface LeaveWageBasis {
   nonCompeteExcluded: number;
   /** 낼 수 없는 까닭 — 있으면 비율 지급을 쓸 수 없다(금액을 직접 넣는다) */
   gap: LeaveWageBasisGap | null;
+  /**
+   * ── 소정근로일 기준(v1.65)의 재료 — 통상시급 = `hourlyBase` ÷ `hourlyHours` ──
+   * 통상시급의 분자(원). 월급제·인센티브: 월 지급 총액 − 경업금지 보상금. 시급제: 시급. 낼 수 없으면 0
+   */
+  hourlyBase: number;
+  /** 통상시급의 분모(시간) — 월급제·인센티브: 기본급 산정시간 + 1.5×약정 시간외 + 0.5×약정 야간. 시급제: 1 */
+  hourlyHours: number;
+  /** 1일 환산 소정근로시간 = 주 소정근로시간 ÷ 5 (상한 8) */
+  dailyHours: number;
+  /** 소정근로일 기준을 쓸 수 없는 까닭 — **월급제도 근로시간표가 비면 낼 수 없다**(1일 환산시간이 없다) */
+  dailyGap: LeaveWageBasisGap | null;
 }
 
 /**
@@ -565,6 +579,21 @@ export interface LeaveWageBasis {
  *
  * 퇴직급여의 계약 추산(`estimateContractBase`, lib/severance.ts)과 **같은 금액**이다 — 둘 다 '계약서에 합의된
  * 월 급여총액' 이라 갈리면 안 된다(테스트로 묶어 둔다).
+ *
+ * ## 소정근로일 기준의 재료 (v1.65)
+ *
+ *   유급휴직 급여·휴업수당 = 통상시급 × 1일 환산시간 × 그 기간의 평일 수 × 지급 비율
+ *
+ * 통상임금으로 세는 방식이다(1일 통상임금 × 날 수). **통상시급은 급여 엔진과 같은 값**이어야 한다 — 명세서의
+ * 통상시급·연차수당·연장수당과 다른 숫자로 휴업수당을 내면 같은 사람의 문서끼리 어긋난다(테스트로 묶어 둔다).
+ *  · 월급제·인센티브: (월 지급 총액 − 경업금지 보상금) ÷ (기본급 산정시간 + 1.5×약정 시간외 + 0.5×약정 야간)
+ *    — `inclusiveWageBreakdown` 의 분자·분모 그대로. 직책수당은 엔진의 통상시급에 들지 않으므로 여기도 넣지 않는다.
+ *  · 시급제: 시급(나눌 것이 없어 분모 1). 월 정액 수당은 통상시급에 들지 않는다.
+ *  · 1일 환산시간 = 주 소정근로시간 ÷ 5 (상한 8) — 주휴시간과 같은 식이다. 근무 요일이 어떻게 짜여 있든 평일을
+ *    세면 한 주에 주 소정근로시간만큼이 된다(단시간근로자의 1일 소정근로시간 환산과 같은 방식).
+ *  · **근로시간표가 비면 낼 수 없다**(`dailyGap: "NO_SCHEDULE"`) — 엔진은 통상시급을 209시간으로 어림하지만,
+ *    1일 환산시간까지 8시간으로 지어내면 단시간근로자에게 과지급이 된다. 등록 검사가 먼저 막는다.
+ * 분자·분모를 **따로** 돌려준다 — 명세서가 「월 3,200,000원 ÷ 93.852시간」을 그대로 적어야 손으로 다시 계산된다.
  */
 export function leaveWageBasis(
   emp: Pick<
@@ -578,15 +607,23 @@ export function leaveWageBasis(
     | "carAllow"
     | "nonCompetePay"
     | "schedule"
+    | "fixedBaseHours"
+    | "fixedOtHours"
+    | "fixedNightHours"
   >
 ): LeaveWageBasis {
-  if (isContractorContract(emp)) return { monthly: 0, nonCompeteExcluded: 0, gap: "CONTRACTOR" };
-  if (emp.payScheme === "RATIO") return { monthly: 0, nonCompeteExcluded: 0, gap: "RATIO" };
+  const none = { hourlyBase: 0, hourlyHours: 0, dailyHours: 0 };
+  if (isContractorContract(emp))
+    return { monthly: 0, nonCompeteExcluded: 0, gap: "CONTRACTOR", ...none, dailyGap: "CONTRACTOR" };
+  if (emp.payScheme === "RATIO")
+    return { monthly: 0, nonCompeteExcluded: 0, gap: "RATIO", ...none, dailyGap: "RATIO" };
   const position = Math.max(round0(emp.positionAllow || 0), 0);
+  const { weeklyContractual, weeklyHoliday } = computeWeeklyHours(emp.schedule);
+  const dailyHours = weeklyContractual > 0 ? Math.min(weeklyContractual / 5, 8) : 0;
   if (emp.payScheme === "HOURLY") {
-    const { weeklyContractual, weeklyHoliday } = computeWeeklyHours(emp.schedule);
     // 근로시간표가 비면 월 급여를 어림할 길이 없다 — 수당만으로 원급여를 지어내지 않는다
-    if (weeklyContractual <= 0) return { monthly: 0, nonCompeteExcluded: 0, gap: "NO_SCHEDULE" };
+    if (weeklyContractual <= 0)
+      return { monthly: 0, nonCompeteExcluded: 0, gap: "NO_SCHEDULE", ...none, dailyGap: "NO_SCHEDULE" };
     return {
       monthly:
         round0((emp.baseWage || 0) * (weeklyContractual + weeklyHoliday) * WEEKS_PER_MONTH) +
@@ -595,12 +632,33 @@ export function leaveWageBasis(
         position,
       nonCompeteExcluded: 0,
       gap: null,
+      hourlyBase: Math.max(emp.baseWage || 0, 0),
+      hourlyHours: 1,
+      dailyHours,
+      dailyGap: null,
     };
   }
   const total = Math.max(round0(emp.baseWage || 0), 0);
   // 보상금은 총액 안의 몫이라 총액보다 클 수 없다(입력 검사가 먼저 막는다 — lib/non-compete.ts)
   const nc = Math.min(Math.max(round0(emp.nonCompetePay || 0), 0), total);
-  return { monthly: total - nc + position, nonCompeteExcluded: nc, gap: null };
+  const monthly = { monthly: total - nc + position, nonCompeteExcluded: nc, gap: null };
+  if (weeklyContractual <= 0) return { ...monthly, ...none, dailyGap: "NO_SCHEDULE" };
+  // 통상시급의 분자·분모 — computePayroll 이 넘기는 것과 같은 값으로 inclusiveWageBreakdown 을 부른다
+  const stdHours = Math.max(weeklyContractual + weeklyHoliday, 0) * WEEKS_PER_MONTH;
+  const bd = inclusiveWageBreakdown({
+    baseWage: emp.baseWage || 0,
+    baseHours: emp.fixedBaseHours ? emp.fixedBaseHours : stdHours,
+    otHours: emp.fixedOtHours ?? 0,
+    nightHours: emp.fixedNightHours ?? 0,
+    nonCompetePay: emp.nonCompetePay,
+  });
+  return {
+    ...monthly,
+    hourlyBase: bd.hourlyBase,
+    hourlyHours: bd.hourlyHours,
+    dailyHours,
+    dailyGap: bd.hourlyBase > 0 && bd.hourlyHours > 0 ? null : "NO_SCHEDULE",
+  };
 }
 
 /* ───────────── 포괄임금 약정분 ↔ 그 달 변동분 가르기 ───────────── */

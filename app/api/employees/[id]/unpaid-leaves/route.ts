@@ -3,6 +3,8 @@
 //
 // 등록한 기간만큼 그 달 정상 급여가 **역일수**로 일할되고, 유급휴직·휴업은 그 기간의 급여를 원급여 대비 비율이나
 // 직접 넣은 금액으로 따로 지급한다(lib/unpaid-leave.ts). 연차가 아니라 연차 원장과 무관하다.
+// 비율 지급은 **산정 기준**(`payBasis`)을 고른다 — 역일수 기준(기본) / 소정근로일 기준(통상시급 × 1일 환산시간 ×
+// 평일 수). 소정근로일 기준은 근로시간표가 있어야 한다(없으면 여기서 막는다 — 지나가면 0원이 산정된다).
 //
 // ⚠ **여기서 급여를 다시 산정하지 않는다.** 이미 만든 급여 기록은 그대로 두고, 어느 달을 다시 산정해야
 // 하는지를 돌려준다(계약을 고쳤을 때와 같다 — 급여 화면의 「급여 일괄 산정」이 반영한다). 다른 화면에서
@@ -13,13 +15,15 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { isAuthed, currentHrUser } from "@/lib/auth";
 import { logActivity } from "@/lib/activity";
-import { isContractorContract } from "@/lib/constants";
+import { isContractorContract, parseSchedule } from "@/lib/constants";
+import { computeWeeklyHours } from "@/lib/payroll";
 import {
   unpaidLeaveError,
   normalizeLeaveTerms,
   leavePayTermsLabel,
   shutdownRateWarning,
   leaveKindOf,
+  leavePayBasisOf,
   parseYmd,
   spanDays,
   LEAVE_KIND_LABEL,
@@ -43,6 +47,7 @@ function rowOf(l: {
   kind: string;
   payRate: number | null;
   payAmount: number | null;
+  payBasis: string | null;
   reason: string | null;
   createdBy: string | null;
   createdAt: Date;
@@ -55,6 +60,8 @@ function rowOf(l: {
     kind: leaveKindOf(l.kind),
     payRate: l.payRate,
     payAmount: l.payAmount,
+    // 비율 지급일 때만 뜻이 있다 — 없으면 역일수 기준
+    payBasis: l.payRate != null ? leavePayBasisOf(l.payBasis) : null,
     reason: l.reason ?? "",
     createdBy: l.createdBy ?? "",
     createdAt: l.createdAt.toISOString(),
@@ -101,6 +108,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     kind: body.kind,
     payRate: body.payRate,
     payAmount: body.payAmount,
+    payBasis: body.payBasis,
   };
   const err = unpaidLeaveError(input, {
     hireDate: emp.hireDate,
@@ -108,6 +116,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     contractor: isContractorContract(emp),
     // 완전비율제(근로계약)는 원급여가 매출에 달려 비율 지급을 쓸 수 없다 — 금액만 받는다
     ratio: emp.payScheme === "RATIO",
+    // 소정근로일 기준은 근로시간표로 통상시급·1일 환산시간을 낸다
+    noSchedule: computeWeeklyHours(parseSchedule(emp.schedule)).weeklyContractual <= 0,
     others,
   });
   if (err) return NextResponse.json({ error: err }, { status: 400 });
@@ -115,7 +125,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const startDate = parseYmd(body.startDate)!;
   const endDate = parseYmd(body.endDate)!;
   const reason = typeof body.reason === "string" ? body.reason.trim() || null : null;
-  // 쓰지 않는 조건은 지워서 저장한다 — 무급이면 둘 다, 금액 지정이면 비율, 비율 지급이면 금액
+  // 쓰지 않는 조건은 지워서 저장한다 — 무급이면 전부, 금액 지정이면 비율·산정 기준, 비율 지급이면 금액
   const terms = normalizeLeaveTerms(input);
   const leave = await prisma.unpaidLeave.create({
     data: { employeeId: id, startDate, endDate, ...terms, reason, createdBy: me.name },

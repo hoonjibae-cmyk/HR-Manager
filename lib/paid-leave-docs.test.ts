@@ -7,7 +7,13 @@ import type { DocCompany, DocEmployee } from "./documents";
 import { buildExportRow, reconcileRow, type ExportPayrollRecord } from "./payroll-export";
 import { buildPayrollTrend, grossOf, TREND_ITEM_LABEL, type TrendRecord } from "./payroll-trend";
 import { severanceBase, type SeverancePayItems } from "./severance";
-import { monthPayDays, settleLeavePay, unpaidLeaveMetaOf, type UnpaidLeaveSpan } from "./unpaid-leave";
+import {
+  monthPayDays,
+  settleLeavePay,
+  unpaidLeaveMetaOf,
+  LEAVE_WORKDAY_PAYSLIP_NOTE,
+  type UnpaidLeaveSpan,
+} from "./unpaid-leave";
 
 const d = (s: string) => new Date(`${s}T00:00:00.000Z`);
 const HIRE = d("2025-03-04");
@@ -383,5 +389,101 @@ describe("퇴직급여 산정기준 — 유급휴직 급여·휴업수당은 임
     const b = severanceBase(items());
     expect(b.base).toBe(1_500_000);
     expect(b.included.some(([label]) => label.includes("휴업수당"))).toBe(false);
+  });
+});
+
+/* ───────────── 소정근로일 기준 (v1.65) ───────────── */
+
+describe("소정근로일 기준 — 명세서와 세무 자료가 기준·평일 수·식을 그대로 적는다", () => {
+  // 2026-11 협의 건 — 월 3,200,000원 · 월 유급 93.852시간 · 1일 3.6시간 · 11/7~11/30 휴업 70%
+  const terms = { monthly: 3_200_000, hourlyBase: 3_200_000, hourlyHours: 93.852, dailyHours: 3.6 };
+  const workday = leave("2026-11-07", "2026-11-30", { kind: "SHUTDOWN", payRate: 0.7, payBasis: "WORKDAY" });
+  const pd = settleLeavePay(monthPayDays(2026, 11, HIRE, null, [workday]), [], terms);
+  const json = JSON.stringify({ notes: [], baseApplied: 3_200_000, blend: null, unpaidLeave: unpaidLeaveMetaOf(pd) });
+
+  it("★ 명세서 — 「휴업수당」 줄, 손으로 다시 계산되는 식, 통상임금 풀이", () => {
+    expect(pd.leavePay).toBe(1_374_760);
+    const html = text(
+      payslipHtml({
+        employee: employee(),
+        payroll: payroll({
+          baseP: 640_000,
+          mealP: 0,
+          leavePayP: pd.leavePay,
+          gross: 2_014_760,
+          net: 2_014_760,
+          hourlyWage: 34_096,
+          prorationRatio: pd.ratio,
+          breakdown: json,
+        }),
+        company,
+      })
+    );
+    expect(html).toContain("기본급640,000 휴업수당1,374,760 지급액 계2,014,760");
+    // 정상 급여의 일할은 기준과 무관하게 역일수다
+    expect(html).toContain("휴업 일할계산 — 휴업 11월 7일 ~ 11월 30일(24일)을 뺀 지급 대상 (6일/30일)");
+    expect(html).toContain("기본급 3,200,000원 × 6/30 = 640,000원");
+    expect(html).toContain(
+      "휴업수당 — 11월 7일 ~ 11월 30일(24일): 통상임금 1,963,943원" +
+        "(월 3,200,000원 ÷ 93.852시간 × 1일 3.6시간 × 평일 16일) × 70% = 1,374,760원"
+    );
+    expect(html).toContain(LEAVE_WORKDAY_PAYSLIP_NOTE);
+  });
+
+  it("역일수 기준 명세서에는 통상임금 풀이가 붙지 않는다 — v1.64 문구 그대로", () => {
+    const b = breakdownOf([shutdown("2026-11-16", "2026-11-30", 0.7)]);
+    const html = text(
+      payslipHtml({
+        employee: employee(),
+        payroll: payroll({ leavePayP: b.leavePay, gross: 2_550_000, net: 2_550_000, prorationRatio: b.ratio, breakdown: b.json }),
+        company,
+      })
+    );
+    expect(html).not.toContain(LEAVE_WORKDAY_PAYSLIP_NOTE);
+    expect(html).not.toContain("통상임금");
+  });
+
+  it("★ 세무 자료 비고 — 금액과 함께 기준(통상임금의 70%)·평일 수를 적는다", () => {
+    const row = buildExportRow(
+      {
+        incomeType: "EMPLOYEE",
+        baseP: 640_000,
+        extraP: 0,
+        overtimeP: 0,
+        nightP: 0,
+        holidayP: 0,
+        extraHours: 0,
+        overtimeHours: 0,
+        nightHours: 0,
+        holidayHours: 0,
+        holidayOverHours: 0,
+        hourlyWage: 34_096,
+        weeklyHolidayP: 0,
+        positionP: 0,
+        mealP: 0,
+        carP: 0,
+        incentiveP: 0,
+        bonusP: 0,
+        unusedLeaveP: 0,
+        gross: 2_014_760,
+        pensionD: 0,
+        employmentD: 0,
+        healthD: 0,
+        longTermD: 0,
+        incomeTaxD: 0,
+        localTaxD: 0,
+        retentionD: 0,
+        parkingD: 0,
+        expenseD: 0,
+        otherD: 0,
+        net: 2_014_760,
+        employee: { name: "가상직원", empNo: "VT-1", rrn: "000000-0000000" },
+        breakdown: json,
+      } as ExportPayrollRecord,
+      "12월 07일"
+    );
+    expect(row.basePay).toBe(2_014_760);
+    expect(row.note).toBe("4대보험(근로소득) · 휴업 11/7~11/30(24일) 휴업수당 1,374,760원(통상임금의 70% · 평일 16일)");
+    expect(reconcileRow(row)).toBe(0);
   });
 });

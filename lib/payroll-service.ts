@@ -31,6 +31,7 @@ import {
   readUnpaidLeaveMeta,
   type UnpaidLeaveSpan,
   type WageBasisPiece,
+  type LeaveWageTerms,
 } from "./unpaid-leave";
 import { unpaidLeavesInMonth, spansFromMeta } from "./unpaid-leave-service";
 
@@ -201,10 +202,23 @@ export async function wageSegmentsFor(
 }
 
 /**
- * 유급휴직·휴업의 원급여를 세는 **계약 구간별 월 기준액** — 그 달 안에서 계약이 바뀌면 둘 이상이다.
+ * 유급휴직·휴업의 원급여 재료만 추린다 — 역일수 기준의 월 기준액과 소정근로일 기준의 통상시급·1일 환산시간.
+ * `settleLeavePay` 에 넘기는 모양(`LeaveWageTerms`)이다.
+ */
+export function leaveWageTermsOf(
+  emp: Parameters<typeof leaveWageBasis>[0]
+): LeaveWageTerms {
+  const b = leaveWageBasis(emp);
+  return { monthly: b.monthly, hourlyBase: b.hourlyBase, hourlyHours: b.hourlyHours, dailyHours: b.dailyHours };
+}
+
+/**
+ * 유급휴직·휴업의 원급여를 세는 **계약 구간별 재료** — 그 달 안에서 계약이 바뀌면 둘 이상이다.
+ * 월 기준액(역일수 기준)과 통상시급·1일 환산시간(소정근로일 기준)을 함께 싣는다.
  *
  * 구간의 조건(월 지급 총액·수당·보상금)을 `payInput` 위에 얹어 `leaveWageBasis()` 를 부른다 — 급여형태·
- * 근로시간표처럼 구간이 싣지 않는 값은 그 달 조건을 그대로 쓴다(월중 가중 `blendWageTerms` 와 같은 전제).
+ * 근로시간표·포괄임금 약정시간처럼 구간이 싣지 않는 값은 그 달 조건을 그대로 쓴다(월중 가중 `blendWageTerms`
+ * 와 같은 전제).
  * 날짜가 없는 구간(옛 호출부)은 넘어간다 — 그 날은 `settleLeavePay` 가 fallback 으로 센다.
  */
 export function leaveBasisPieces(
@@ -217,14 +231,14 @@ export function leaveBasisPieces(
     out.push({
       from: s.from,
       to: s.to,
-      monthly: leaveWageBasis({
+      ...leaveWageTermsOf({
         ...payInput,
         baseWage: s.baseWage,
         positionAllow: s.positionAllow,
         mealAllow: s.mealAllow,
         carAllow: s.carAllow,
         nonCompetePay: s.nonCompetePay ?? null,
-      }).monthly,
+      }),
     });
   }
   return out;
@@ -609,7 +623,7 @@ export async function runPayrollMonth(
     // 가중 평균은 '정상 급여가 나간 날' 로 낸 값이라 쉰 날의 조건이 아니다). 계약 구간에 덮이지 않은 날은
     // 그 달 조건(카드·말일 계약)으로 센다.
     const basisPieces = leaveBasisPieces(payInput, segMap.get(emp.id));
-    const basisFallback = leaveWageBasis(payInput).monthly;
+    const basisFallback = leaveWageTermsOf(payInput);
     const blend = applyMidMonthBlend(payInput, segMap.get(emp.id));
 
     // 휴직·휴업 — 정상 급여의 지급 비율과, 유급 구간의 지급액(유급휴직 급여·휴업수당)

@@ -16,6 +16,9 @@
  *    잇는다 — 다른 화면에서 급여 기록이 조용히 바뀌면 무엇이 왜 달라졌는지 따라갈 수 없다.
  *    등록 직후에만 알리면 잊으므로 **카드가 늘** 다시 산정할 달을 띄운다(서버가 페이지를 그릴 때 함께 내려준다).
  *  · 휴업수당이 70% 에 못 미치면 알리되 **막지 않는다**(노동위원회 승인·불가항력 휴업이면 정당하다).
+ *  · 비율 지급은 **산정 기준**을 고른다(v1.65) — 역일수 기준(월 급여 × 기간 역일수 ÷ 그 달 역일수) /
+ *    소정근로일 기준(통상시급 × 1일 환산시간 × 평일 수). 같은 70% 라도 금액이 다르므로 고르는 자리에서 무엇이
+ *    다른지 적고, 미리보기가 **식을 그대로** 보여 준다(월 3,200,000원 ÷ 93.852시간 × 1일 3.6시간 × 평일 16일).
  */
 
 import React, { useMemo, useState } from "react";
@@ -32,17 +35,25 @@ import {
   leavePayTermsLabel,
   isPaidLeaveKind,
   ratePercentLabel,
+  workdayWageText,
   LEAVE_KINDS,
   LEAVE_KIND_LABEL,
   LEAVE_PAY_LABEL,
+  LEAVE_PAY_BASES,
+  LEAVE_PAY_BASIS_LABEL,
+  LEAVE_PAY_BASIS_HINT,
   DEFAULT_SHUTDOWN_RATE,
   DEFAULT_PAID_LEAVE_RATE,
   UNPAID_LEAVE_EFFECT_NOTE,
   LEAVE_WAGE_BASIS_NOTE,
+  LEAVE_WORKDAY_BASIS_NOTE,
+  LEAVE_WORKDAY_BASIS_CAUTION,
   SHUTDOWN_BASIS_NOTE,
   UNPAID_SEVERANCE_NOTE,
   UNPAID_REASON_MAX,
   type LeaveKind,
+  type LeavePayBasis,
+  type LeaveWageTerms,
   type UnpaidLeaveSpan,
 } from "@/lib/unpaid-leave";
 
@@ -58,6 +69,8 @@ export interface UnpaidLeaveRow {
   payRate: number | null;
   /** 직접 넣은 금액(원, 기간 전체) — 금액 지정일 때 */
   payAmount: number | null;
+  /** 비율 지급의 산정 기준 — WORKDAY(소정근로일) | CALENDAR(역일수). 없으면 역일수 기준 */
+  payBasis?: LeavePayBasis | null;
   reason: string;
   createdBy: string;
 }
@@ -78,6 +91,13 @@ export interface LeaveBasisProp {
   nonCompeteExcluded: number;
   /** 낼 수 없는 까닭 — RATIO(완전비율제) · NO_SCHEDULE(시급제인데 근로시간표 없음) · CONTRACTOR */
   gap: "CONTRACTOR" | "RATIO" | "NO_SCHEDULE" | null;
+  /** ── 소정근로일 기준의 재료 — 통상시급 = hourlyBase ÷ hourlyHours ── */
+  hourlyBase: number;
+  hourlyHours: number;
+  /** 1일 환산시간 = 주 소정근로시간 ÷ 5 */
+  dailyHours: number;
+  /** 소정근로일 기준을 쓸 수 없는 까닭 — 월급제도 근로시간표가 비면 NO_SCHEDULE */
+  dailyGap: "CONTRACTOR" | "RATIO" | "NO_SCHEDULE" | null;
 }
 
 interface Props {
@@ -100,6 +120,8 @@ type PayMode = "RATE" | "AMOUNT";
 const md = (ymd: string) => `${Number(ymd.slice(5, 7))}/${Number(ymd.slice(8, 10))}`;
 const dot = (ymd: string) => ymd.replace(/-/g, ".");
 const won = (n: number) => `${Math.round(n).toLocaleString("ko-KR")}원`;
+/** 시간 — 소수 셋째 자리까지, 끝의 0 은 뗀다(3.6 · 7.5 · 93.852) */
+const hoursText = (h: number) => String(Number(h.toFixed(3)));
 /** 고르기 쉬운 비율 — 70% 는 근로기준법 §46 의 숫자다 */
 const RATE_PRESETS = [100, 90, 80, 70, 60, 50];
 
@@ -137,6 +159,8 @@ export default function UnpaidLeaveCard(props: Props) {
   const [rateText, setRateText] = useState("");
   // 비율 칸을 사람이 직접 고쳤는가 — 안 고쳤으면 구분을 바꿀 때 그 구분의 기본값(휴업 70 · 유급휴직 100)으로 따라간다
   const [rateTouched, setRateTouched] = useState(false);
+  // 비율 지급의 산정 기준 — 새로 등록할 때는 역일수 기준(지금까지의 계산)에서 시작한다
+  const [payBasis, setPayBasis] = useState<LeavePayBasis>("CALENDAR");
   const [amountText, setAmountText] = useState("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -163,25 +187,41 @@ export default function UnpaidLeaveCard(props: Props) {
           kind: l.kind,
           payRate: l.payRate,
           payAmount: l.payAmount,
+          payBasis: l.payBasis ?? null,
         })),
     [leaves, editing]
   );
 
-  /** 폼에 적힌 지급 조건 — 서버에 보내는 모양 그대로(비율은 0.7, 금액은 원) */
+  // 근로시간표가 비어 있다 — 소정근로일 기준의 통상시급·1일 환산시간을 낼 수 없다
+  const noSchedule = basis.dailyGap === "NO_SCHEDULE";
+
+  /** 폼에 적힌 지급 조건 — 서버에 보내는 모양 그대로(비율은 0.7, 금액은 원. 산정 기준은 비율 지급일 때만) */
   const terms = useMemo(() => {
-    if (!paidKind) return { kind, payRate: null as number | null, payAmount: null as number | null };
+    const none = { payRate: null as number | null, payAmount: null as number | null, payBasis: null as LeavePayBasis | null };
+    if (!paidKind) return { kind, ...none };
     return mode === "RATE"
-      ? { kind, payRate: rateOfPercentText(rateText), payAmount: null }
-      : { kind, payRate: null, payAmount: amountOfText(amountText) };
-  }, [kind, paidKind, mode, rateText, amountText]);
+      ? { kind, ...none, payRate: rateOfPercentText(rateText), payBasis }
+      : { kind, ...none, payAmount: amountOfText(amountText) };
+  }, [kind, paidKind, mode, rateText, amountText, payBasis]);
 
   const formError = useMemo(() => {
     if (editing == null || (!startDate && !endDate)) return null;
     return unpaidLeaveError(
       { startDate, endDate, reason, ...terms },
-      { hireDate: hire, resignDate: resign, contractor, ratio, others }
+      { hireDate: hire, resignDate: resign, contractor, ratio, noSchedule, others }
     );
-  }, [editing, startDate, endDate, reason, terms, hire, resign, contractor, ratio, others]);
+  }, [editing, startDate, endDate, reason, terms, hire, resign, contractor, ratio, noSchedule, others]);
+
+  /** 지금 계약의 원급여 재료 — 미리보기가 서버와 같은 식으로 센다 */
+  const wageTerms = useMemo<LeaveWageTerms>(
+    () => ({
+      monthly: basis.monthly,
+      hourlyBase: basis.hourlyBase,
+      hourlyHours: basis.hourlyHours,
+      dailyHours: basis.dailyHours,
+    }),
+    [basis.monthly, basis.hourlyBase, basis.hourlyHours, basis.dailyHours]
+  );
 
   /** 넣으려는 기간이 달마다 급여를 어떻게 바꾸는지 — 서버 산정과 같은 함수 */
   const preview = useMemo(() => {
@@ -192,10 +232,10 @@ export default function UnpaidLeaveCard(props: Props) {
     return monthsOfSpan(s, e, 12).map(({ year, month }) => {
       // 정상 급여의 지급일수는 다른 건까지 합쳐서, 이 건의 지급액은 이 건만으로 센다
       const all = monthPayDays(year, month, hire, resign, [...others, mine]);
-      const own = settleLeavePay(monthPayDays(year, month, hire, resign, [mine]), [], basis.monthly);
+      const own = settleLeavePay(monthPayDays(year, month, hire, resign, [mine]), [], wageTerms);
       return { year, month, ...all, own };
     });
-  }, [startDate, endDate, formError, others, hire, resign, terms, basis.monthly]);
+  }, [startDate, endDate, formError, others, hire, resign, terms, wageTerms]);
 
   function open(target: number | "new") {
     setErr(null);
@@ -207,6 +247,7 @@ export default function UnpaidLeaveCard(props: Props) {
       setPayMode("RATE");
       setRateText("");
       setRateTouched(false);
+      setPayBasis("CALENDAR");
       setAmountText("");
       setReason("");
     } else {
@@ -218,6 +259,7 @@ export default function UnpaidLeaveCard(props: Props) {
       setRateText(l.payRate != null ? String(Math.round(l.payRate * 10000) / 100) : "");
       // 저장돼 있던 비율은 사람이 정한 값이다 — 구분을 바꿔도 덮어쓰지 않는다
       setRateTouched(l.payRate != null);
+      setPayBasis(l.payBasis === "WORKDAY" ? "WORKDAY" : "CALENDAR");
       setAmountText(l.payAmount != null ? l.payAmount.toLocaleString("ko-KR") : "");
       setReason(l.reason);
     }
@@ -295,7 +337,9 @@ export default function UnpaidLeaveCard(props: Props) {
 
   const rateWarn = paidKind && !formError ? shutdownRateWarning(terms) : null;
   // 비율 지급인데 원급여를 낼 수 없는 경우 — 그대로 두면 0원으로 산정된다
-  const noBasis = paidKind && mode === "RATE" && !ratio && basis.gap != null;
+  const byWorkday = payBasis === "WORKDAY";
+  const noBasis =
+    paidKind && mode === "RATE" && !ratio && (byWorkday ? basis.dailyGap != null : basis.gap != null);
   const editingName = LEAVE_KIND_LABEL[kind];
 
   return (
@@ -491,32 +535,83 @@ export default function UnpaidLeaveCard(props: Props) {
                       ))}
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-500 break-keep leading-relaxed">
-                    {basis.gap == null ? (
-                      <>
-                        원급여 기준 <b className="tnum">월 {won(basis.monthly)}</b>
-                        {basis.nonCompeteExcluded > 0 && <> (경업금지 보상금 {won(basis.nonCompeteExcluded)} 제외)</>} —
-                        지금 계약 기준입니다. 실제 산정은 그 달의 계약 조건으로 하고, 그 기간의 역일수만큼 나눈
-                        금액에 비율을 곱합니다.
-                        {/* 보상금이 있는 직원 — 100% 로 넣어도 평소 급여와 같지 않다는 것을 넣는 자리에서 알린다 */}
-                        {basis.nonCompeteExcluded > 0 && (
-                          <span className="block mt-1 text-amber-700">
-                            경업금지 보상금은 근로의 대가가 아니라 원급여에 넣지 않고, 근로계약서 제8조에 따라 근무하지
-                            않은 기간만큼 일할로 빠집니다 — 비율이 100% 여도 그 몫만큼 평소보다 적게 나갑니다.
-                          </span>
-                        )}
-                      </>
-                    ) : basis.gap === "NO_SCHEDULE" ? (
-                      <span className="text-rose-600">
-                        근로시간표가 비어 있어 원급여(시급 × 월 소정·주휴시간)를 계산할 수 없습니다 — 직원 정보에
-                        근로시간표를 채우거나 금액을 직접 넣으세요. 이대로 두면 0원으로 산정됩니다.
-                      </span>
-                    ) : (
-                      <span className="text-rose-600">
-                        원급여를 계산할 수 없는 계약입니다 — 금액을 직접 넣으세요.
-                      </span>
-                    )}
-                  </p>
+                  {/* 산정 기준 — 같은 70% 라도 무엇의 70% 인가가 다르다(주휴일·토요일 몫). 고르는 자리에서 적는다 */}
+                  <div className="rounded border border-slate-100 bg-slate-50/60 p-2 space-y-1">
+                    <div className="text-[11px] font-semibold text-slate-600">산정 기준</div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-700">
+                      {LEAVE_PAY_BASES.map((b) => {
+                        const off = b === "WORKDAY" && basis.dailyGap != null;
+                        return (
+                          <label key={b} className={`flex items-center gap-1.5 ${off ? "text-slate-300" : ""}`}>
+                            <input
+                              type="radio"
+                              name="leave-pay-basis"
+                              checked={payBasis === b}
+                              disabled={off && payBasis !== b}
+                              onChange={() => setPayBasis(b)}
+                            />
+                            {LEAVE_PAY_BASIS_LABEL[b]}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[11px] text-slate-500 break-keep leading-relaxed">
+                      {LEAVE_PAY_BASIS_HINT[payBasis]}
+                    </p>
+                  </div>
+                  {byWorkday ? (
+                    <p className="text-[11px] text-slate-500 break-keep leading-relaxed">
+                      {basis.dailyGap == null ? (
+                        <>
+                          통상시급{" "}
+                          <b className="tnum">
+                            {workdayWageText(basis.hourlyBase, basis.hourlyHours)}
+                            {basis.hourlyHours !== 1 && <> ≈ {won(basis.hourlyBase / basis.hourlyHours)}</>}
+                          </b>{" "}
+                          · 1일 환산시간 <b className="tnum">{hoursText(basis.dailyHours)}시간</b>
+                          {basis.nonCompeteExcluded > 0 && <> (경업금지 보상금 {won(basis.nonCompeteExcluded)} 제외)</>} —
+                          지금 계약·근로시간표 기준입니다. 통상시급은 반올림하지 않고 곱해 원급여에서 한 번 반올림합니다.
+                          <span className="block mt-1 text-amber-700">{LEAVE_WORKDAY_BASIS_CAUTION}</span>
+                        </>
+                      ) : basis.dailyGap === "NO_SCHEDULE" ? (
+                        <span className="text-rose-600">
+                          근로시간표가 비어 있어 통상시급과 1일 환산시간(주 소정근로시간 ÷ 5)을 계산할 수 없습니다 —
+                          직원 정보에 근로시간표를 채우거나, 역일수 기준 또는 금액 직접 입력을 쓰세요.
+                        </span>
+                      ) : (
+                        <span className="text-rose-600">
+                          통상시급을 계산할 수 없는 계약입니다 — 금액을 직접 넣으세요.
+                        </span>
+                      )}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-slate-500 break-keep leading-relaxed">
+                      {basis.gap == null ? (
+                        <>
+                          원급여 기준 <b className="tnum">월 {won(basis.monthly)}</b>
+                          {basis.nonCompeteExcluded > 0 && <> (경업금지 보상금 {won(basis.nonCompeteExcluded)} 제외)</>} —
+                          지금 계약 기준입니다. 실제 산정은 그 달의 계약 조건으로 하고, 그 기간의 역일수만큼 나눈
+                          금액에 비율을 곱합니다.
+                          {/* 보상금이 있는 직원 — 100% 로 넣어도 평소 급여와 같지 않다는 것을 넣는 자리에서 알린다 */}
+                          {basis.nonCompeteExcluded > 0 && (
+                            <span className="block mt-1 text-amber-700">
+                              경업금지 보상금은 근로의 대가가 아니라 원급여에 넣지 않고, 근로계약서 제8조에 따라 근무하지
+                              않은 기간만큼 일할로 빠집니다 — 비율이 100% 여도 그 몫만큼 평소보다 적게 나갑니다.
+                            </span>
+                          )}
+                        </>
+                      ) : basis.gap === "NO_SCHEDULE" ? (
+                        <span className="text-rose-600">
+                          근로시간표가 비어 있어 원급여(시급 × 월 소정·주휴시간)를 계산할 수 없습니다 — 직원 정보에
+                          근로시간표를 채우거나 금액을 직접 넣으세요. 이대로 두면 0원으로 산정됩니다.
+                        </span>
+                      ) : (
+                        <span className="text-rose-600">
+                          원급여를 계산할 수 없는 계약입니다 — 금액을 직접 넣으세요.
+                        </span>
+                      )}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -597,7 +692,9 @@ export default function UnpaidLeaveCard(props: Props) {
                               ? mine.amountTotal != null && mine.amountTotal !== mine.amount
                                 ? `(기간 전체 ${won(mine.amountTotal)} 중 이 달 몫)`
                                 : "(지정한 금액)"
-                              : `(원급여 ${won(mine.orig ?? 0)} × ${ratePercentLabel(mine.rate ?? 0)})`}
+                              : mine.basis === "WORKDAY"
+                                ? `(통상임금 ${won(mine.orig ?? 0)} × ${ratePercentLabel(mine.rate ?? 0)})`
+                                : `(원급여 ${won(mine.orig ?? 0)} × ${ratePercentLabel(mine.rate ?? 0)})`}
                           </span>
                         </span>
                         <span className="tnum font-semibold text-slate-700 whitespace-nowrap">
@@ -605,12 +702,22 @@ export default function UnpaidLeaveCard(props: Props) {
                         </span>
                       </div>
                     )}
+                    {/* 소정근로일 기준 — 식을 그대로 적는다. 평일 수가 달마다 달라 금액만으로는 맞는지 볼 수 없다 */}
+                    {paidKind && mine?.basis === "WORKDAY" && mine.amount == null && (
+                      <div className="text-[11px] text-slate-400 tnum break-keep">
+                        {mine.wage != null && mine.hours != null && mine.dailyHours != null
+                          ? `${workdayWageText(mine.wage, mine.hours)} × 1일 ${hoursText(mine.dailyHours)}시간 × 평일 ${mine.workdays ?? 0}일`
+                          : `평일 ${mine.workdays ?? 0}일`}
+                      </div>
+                    )}
                   </div>
                 );
               })}
               {paidKind && mode === "RATE" && !noBasis && (
                 <div className="text-slate-400 break-keep">
-                  금액은 지금 계약의 월 급여로 어림한 값입니다 — 그 달에 계약이 바뀌면 실제 산정이 달라질 수 있습니다.
+                  금액은 지금 계약의 월 급여{byWorkday ? "·근로시간표" : ""}로 어림한 값입니다 — 그 달에 계약이 바뀌면
+                  실제 산정이 달라질 수 있습니다.
+                  {byWorkday && " 정상 급여의 일할은 기준과 무관하게 역일수로 합니다."}
                 </div>
               )}
               {ratio && (
@@ -651,6 +758,7 @@ export default function UnpaidLeaveCard(props: Props) {
           <summary className="cursor-pointer hover:text-slate-600">무엇이 바뀌나요?</summary>
           <p className="mt-1.5 break-keep">{UNPAID_LEAVE_EFFECT_NOTE}</p>
           <p className="mt-1.5 break-keep">{LEAVE_WAGE_BASIS_NOTE}</p>
+          <p className="mt-1.5 break-keep">{LEAVE_WORKDAY_BASIS_NOTE}</p>
           <p className="mt-1.5 break-keep">{SHUTDOWN_BASIS_NOTE}</p>
           <p className="mt-1.5 break-keep">{UNPAID_SEVERANCE_NOTE}</p>
         </details>
