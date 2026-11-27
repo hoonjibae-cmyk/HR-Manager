@@ -215,6 +215,10 @@ export async function GET(req: Request) {
         used: summary.period.used,
         remaining: summary.remaining,
         scheduled: summary.period.scheduled,
+        // 지난 기간 초과사용이 이번 기간 발생분에서 먼저 빠진 일수 — 발생 − 이 값 − 사용 = 잔여
+        priorOverdraft: summary.period.priorOverdraft,
+        // 발생분으로 아직 갚지 못한 초과사용 (잔여가 마이너스인 만큼)
+        overdrawn: summary.overdrawn,
       },
       comp: {
         granted: comp.granted,

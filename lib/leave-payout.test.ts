@@ -571,3 +571,48 @@ describe("퇴사월 초과사용 공제 — 동의 기록", () => {
     expect(msg).toContain("동의 기록 없음 1명");
   });
 });
+
+describe("초과사용이 있던 기간을 넘긴 뒤 — 정산 잔여가 두 번 깎이지 않는다", () => {
+  // lib/leave.test.ts 와 같은 사례(가상 직원). 입사 2025-11-26 — 1년 미만 발생 11일 · 사용 11.5일이라 기념일
+  // 전날 잔여가 −0.5 다. 기념일에 15일이 생기면 14.5 인데, 예전엔 초과사용 1.5일이 새 발생분으로 통째로
+  // 옮겨 붙어 13.5 로 나왔다 — 그 달에 퇴사하면 연차수당이 하루치 덜 제안됐다.
+  const hire = d("2025-11-26");
+  const txns: LeaveTxn[] = [
+    { date: d("2025-12-24"), days: -1, type: "USE" }, // 첫 발생(12/26) 전
+    { date: d("2026-04-22"), days: -3, type: "USE" },
+    { date: d("2026-05-22"), days: -1, type: "USE" },
+    { date: d("2026-06-25"), days: -1.5, type: "USE" },
+    { date: d("2026-07-29"), days: -3, type: "USE" },
+    { date: d("2026-10-13"), days: -2, type: "USE" },
+  ];
+  const pick = (r: { periodEnd: Date; remaining: number }, over: Partial<PayoutInput> = {}) =>
+    row({ periodEnd: r.periodEnd, remaining: r.remaining, ...over });
+
+  it("기간 만료(11/25) 줄은 없다 — 남은 것이 없고 재직자의 마이너스는 제안하지 않는다", () => {
+    const r = payoutRemaining(hire, 2026, 11, txns, { eligible: true });
+    expect(ymd(r.asOf)).toBe("2026-11-25");
+    expect(r.remaining).toBe(-0.5);
+    expect(payoutSuggestions([pick(r)], 2026, 11)).toHaveLength(0);
+  });
+
+  it("**기념일 뒤 같은 달에 퇴사 — 새 15일에서 0.5일만 빠진 14.5일을 정산한다** (13.5 가 아니다)", () => {
+    const r = payoutRemaining(hire, 2026, 11, txns, { eligible: true, resignDate: d("2026-11-27") });
+    expect(ymd(r.asOf)).toBe("2026-11-27");
+    expect(r.remaining).toBe(14.5);
+    const [s] = payoutSuggestions([pick(r, { resignDate: d("2026-11-27") })], 2026, 11);
+    expect(s).toMatchObject({ kind: "RESIGN", suggestDays: 14.5, overdraft: false });
+  });
+
+  it("다음 달에 퇴사해도 같다 — 지난 기간의 초과분은 한 번만 빠진다", () => {
+    const r = payoutRemaining(hire, 2026, 12, txns, { eligible: true, resignDate: d("2026-12-10") });
+    expect(r.remaining).toBe(14.5);
+  });
+
+  it("기념일 전에 퇴사하면 초과 0.5일이 공제 줄로 오른다", () => {
+    const r = payoutRemaining(hire, 2026, 11, txns, { eligible: true, resignDate: d("2026-11-20") });
+    expect(r.remaining).toBe(-0.5);
+    const [s] = payoutSuggestions([pick(r, { resignDate: d("2026-11-20") })], 2026, 11);
+    expect(s).toMatchObject({ kind: "RESIGN", suggestDays: -0.5, overdraft: true });
+  });
+});
+

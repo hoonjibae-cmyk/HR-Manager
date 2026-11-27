@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
+import { addYears } from "date-fns";
 import {
   annualLeaveDays,
   completedServiceYears,
+  currentLeavePeriod,
   generateGrants,
   summarizeLeave,
   summarizeComp,
@@ -364,7 +366,7 @@ describe("지난 연차기간 날짜의 사용 — 이번 기간 잔여에 닿�
     expect(withPast.expired).toBe(base.expired - 1.5);
   });
 
-  it("지난 기간 발생분을 다 썼으면 초과분이 최신 발생분에서 깎인다 (진짜 '초과 사용')", () => {
+  it("지난 기간 발생분을 다 썼으면 초과분은 그 뒤에 발생한 연차(여기서는 이번 기간)에서 깎인다 (진짜 '초과 사용')", () => {
     // 지난 기간 15일을 이미 다 쓴 상태에서 4/30 에 1.5일을 더 쓰면 이번 기간에서 나간다
     const txns = [
       { date: d("2025-06-02"), days: -15, type: "USE" as const },
@@ -491,5 +493,298 @@ describe("조정(ADJUST +) 의 발생일이 기준일 뒤면 아직 없는 것�
     const future: LeaveTxn[] = [{ date: d("2026-09-01"), days: 3, type: "ADJUST" }];
     expect(summarizeLeave(hire, d("2026-07-26"), future).period.remaining).toBe(17);
     expect(summarizeLeave(hire, d("2026-09-01"), future).period.remaining).toBe(20);
+  });
+});
+
+describe("초과사용(미리 쓴 연차)은 그 뒤에 발생하는 연차가 갚는다 — 기념일을 넘기며 두 번 깎이지 않는다", () => {
+  // 2026-11 실제로 겪은 것(날짜·일수만 옮긴 가상 직원). 입사 2025-11-26 — 1년 미만 발생 11일에 사용 11.5일이라
+  // 기념일 전날 잔여는 −0.5 다. 기념일(11/26)에 15일이 생기면 14.5 여야 하는데 **13.5** 로 나왔다.
+  //  · 첫 발생(12/26) 전에 쓴 12/24 의 1일과 7/31 의 0.5일은 쓴 날 유효한 발생분이 없어 '초과사용' 이 된다.
+  //  · 예전엔 그 초과분을 **계산 시점의 마지막 lot** 에 얹었다. 기념일 전에는 마지막 lot 이 10/26 발생분이라
+  //    −0.5 로 맞았지만, 기념일에 새 15일이 생기자 초과분 1.5일이 통째로 그쪽으로 옮겨 붙고, 그것을 메우던
+  //    10/26 발생분 1일은 '미사용 → 소멸' 이 됐다 — 하루가 두 번 빠졌다. 해가 바뀔 때마다 또 옮겨 붙으므로
+  //    한 번 생긴 초과사용이 **해마다 다시** 깎였다.
+  const hire = d("2025-11-26");
+  const txns: LeaveTxn[] = [
+    { date: d("2025-12-24"), days: -1, type: "USE" }, // 첫 발생(12/26) 전
+    { date: d("2026-04-22"), days: -1, type: "USE" },
+    { date: d("2026-04-27"), days: -1, type: "USE" },
+    { date: d("2026-04-28"), days: -1, type: "USE" },
+    { date: d("2026-05-22"), days: -1, type: "USE" },
+    { date: d("2026-06-25"), days: -0.5, type: "USE" },
+    { date: d("2026-06-29"), days: -1, type: "USE" },
+    { date: d("2026-07-29"), days: -1, type: "USE" },
+    { date: d("2026-07-30"), days: -1, type: "USE" },
+    { date: d("2026-07-31"), days: -1, type: "USE" },
+    { date: d("2026-10-13"), days: -2, type: "USE" },
+  ];
+  const lotOn = (s: ReturnType<typeof summarizeLeave>, day: string) =>
+    s.lots.find((l) => l.grantDate.getTime() === d(day).getTime())!;
+
+  it("기념일 전날 — 발생 11 − 사용 11.5 = −0.5 (아직 갚지 못한 초과사용 0.5)", () => {
+    const s = summarizeLeave(hire, new Date("2026-11-25T23:59:59Z"), txns);
+    expect(s.period.granted).toBe(11);
+    expect(s.period.used).toBe(11.5);
+    expect(s.period.remaining).toBe(-0.5);
+    expect(s.overdrawn).toBe(0.5);
+    expect(s.expired).toBe(0);
+  });
+
+  it("**기념일 뒤 — 15 − 0.5 = 14.5** (13.5 가 아니다). 소멸된 것도 없다", () => {
+    for (const at of ["2026-11-26", "2026-11-27", "2027-03-02"]) {
+      const s = summarizeLeave(hire, d(at), txns);
+      expect(s.period.label).toBe("2년차");
+      expect(s.period.granted).toBe(15);
+      expect(s.period.used).toBe(0);
+      expect(s.period.remaining).toBe(14.5);
+      expect(s.remaining).toBe(14.5);
+      expect(s.expired).toBe(0);
+      expect(s.overdrawn).toBe(0);
+    }
+  });
+
+  it("화면의 셈이 맞아떨어진다 — 발생 15 − 지난 기간 초과사용 0.5 − 사용 0 = 잔여 14.5", () => {
+    const p = summarizeLeave(hire, d("2026-11-27"), txns).period;
+    expect(p.priorOverdraft).toBe(0.5);
+    expect(p.granted + p.carriedOver - p.priorOverdraft - p.used).toBe(p.remaining);
+  });
+
+  it("미리 쓴 몫은 그 뒤 발생분이 **발생 순서대로** 갚는다 — lot 이 마이너스가 되지 않는다", () => {
+    const s = summarizeLeave(hire, d("2026-11-27"), txns);
+    expect(s.lots.every((l) => l.remaining >= 0)).toBe(true);
+    // 12/24 에 미리 쓴 1일은 이틀 뒤 생긴 12/26 발생분이 갚는다
+    expect(lotOn(s, "2025-12-26")).toMatchObject({ used: 1, advanceUsed: 1, remaining: 0 });
+    // 마지막 월 개근분(10/26)은 10/13 사용분이 가져간다 — 예전엔 '미사용 → 소멸 1' 로 남았다
+    expect(lotOn(s, "2026-10-26")).toMatchObject({ used: 1, advanceUsed: 1, expiredLost: 0 });
+    // 그래도 남은 0.5일만 새 15일에서 빠진다
+    expect(lotOn(s, "2026-11-26")).toMatchObject({ days: 15, used: 0.5, advanceUsed: 0.5, remaining: 14.5 });
+    // 발생 = 사용 + 잔여 + 소멸 + 이월 이 lot 마다 맞는다
+    for (const l of s.lots) expect(l.used + l.remaining + l.expiredLost + l.carriedOut).toBe(l.days);
+  });
+
+  it("기념일을 넘겨도 지난 배분이 바뀌지 않는다 — 기념일 전에 쓴 것으로 잡힌 lot 은 그대로다", () => {
+    const before = summarizeLeave(hire, new Date("2026-11-25T23:59:59Z"), txns);
+    const after = summarizeLeave(hire, d("2026-11-27"), txns);
+    before.lots.forEach((l, i) => {
+      expect(after.lots[i].grantDate.getTime()).toBe(l.grantDate.getTime());
+      expect(after.lots[i].used).toBe(l.used);
+    });
+    // 기념일 전의 '아직 못 갚은 0.5' 가 새 발생분으로 넘어갔을 뿐이다
+    expect(after.remaining).toBe(15 + before.remaining);
+  });
+
+  it("**다음 해에 또 깎이지 않는다** — 2년차를 한 번도 안 써도 3년차는 15일 그대로", () => {
+    const s = summarizeLeave(hire, d("2027-11-27"), txns);
+    expect(s.period.label).toBe("3년차");
+    expect(s.period.granted).toBe(15);
+    expect(s.period.priorOverdraft).toBe(0);
+    expect(s.period.remaining).toBe(15);
+    // 2년차 15일 중 0.5일은 1년차 초과분이 가져갔고 나머지 14.5일이 소멸했다
+    expect(lotOn(s, "2026-11-26")).toMatchObject({ used: 0.5, expiredLost: 14.5 });
+    expect(s.expired).toBe(14.5);
+  });
+
+  it("기간 안에서도 같다 — 1년 미만은 달마다 발생분이 초과사용을 갚아 나간다", () => {
+    expect(summarizeLeave(hire, d("2026-10-20"), txns).remaining).toBe(-1.5); // 발생 10 − 사용 11.5
+    expect(summarizeLeave(hire, d("2026-10-27"), txns).remaining).toBe(-0.5); // 10/26 발생분이 1일을 갚았다
+  });
+});
+
+describe("초과사용은 한 번만 갚는다 — 연 단위 발생분도 같다", () => {
+  // 입사 2021-01-01. 5년차(2025) 16일인데 18일을 써 2일 초과 → 6년차(2026) 17일에서 2일이 먼저 빠진다.
+  const hire = d("2021-01-01");
+  const txns: LeaveTxn[] = [
+    { date: d("2025-03-03"), days: -16, type: "USE" },
+    { date: d("2025-09-01"), days: -2, type: "USE" }, // 초과 2일
+    { date: d("2026-05-04"), days: -10, type: "USE" },
+  ];
+
+  it("초과한 다음 해 — 17 − 2(지난 기간 초과) − 10 = 5", () => {
+    const s = summarizeLeave(hire, d("2026-12-01"), txns);
+    expect(s.period.granted).toBe(17);
+    expect(s.period.priorOverdraft).toBe(2);
+    expect(s.period.used).toBe(10);
+    expect(s.period.remaining).toBe(5);
+  });
+
+  it("**그 다음 해에는 흔적이 없다** — 예전엔 2일이 최신 발생분으로 또 옮겨 붙어 15일로 나왔다", () => {
+    const s = summarizeLeave(hire, d("2027-03-01"), txns);
+    expect(s.period.granted).toBe(17);
+    expect(s.period.priorOverdraft).toBe(0);
+    expect(s.period.remaining).toBe(17);
+    const y2026 = s.lots.find((l) => l.grantDate.getTime() === d("2026-01-01").getTime())!;
+    expect(y2026).toMatchObject({ used: 12, advanceUsed: 2, expiredLost: 5 });
+  });
+
+  it("초과분을 메우려고 관리자가 부여(ADJUST +)하면 그 부여분이 먼저 갚는다", () => {
+    const s = summarizeLeave(hire, d("2025-12-01"), [
+      ...txns.slice(0, 2),
+      { date: d("2025-10-01"), days: 2, type: "ADJUST", note: "초과분 보전" },
+    ]);
+    expect(s.overdrawn).toBe(0);
+    expect(s.period.remaining).toBe(0);
+    // 다음 해 발생분은 온전하다
+    const next = summarizeLeave(hire, d("2026-02-01"), [
+      ...txns.slice(0, 2),
+      { date: d("2025-10-01"), days: 2, type: "ADJUST", note: "초과분 보전" },
+    ]);
+    expect(next.period.priorOverdraft).toBe(0);
+    expect(next.period.remaining).toBe(17);
+  });
+
+  it("갚을 발생분이 없으면 숨지 않고 마이너스로 남는다 — 미적용 직원의 지난 부여분이 이미 소멸한 경우", () => {
+    // 예전엔 초과분을 '마지막 lot' 에 얹었는데 그 lot 이 이미 소멸한 것이면 잔여 계산에서 통째로 빠졌다(0 으로 보였다)
+    const s = summarizeLeave(
+      d("2023-03-01"),
+      d("2026-07-27"),
+      [
+        { date: d("2024-01-10"), days: 3, type: "ADJUST", note: "약정휴가" }, // 2025-01-10 소멸
+        { date: d("2025-06-02"), days: -1, type: "USE" },
+      ],
+      { eligible: false }
+    );
+    expect(s.remaining).toBe(-1);
+    expect(s.overdrawn).toBe(1);
+    expect(s.expired).toBe(3);
+  });
+});
+
+describe("summarizeLeave — 시간순으로 한 줄씩 밟은 결과와 같다 (독립 구현과 대조)", () => {
+  // 발생·사용을 날짜순으로 늘어놓고 '빚' 을 들고 다니는 단순한 구현. 발생분이 생기는 순간 빚부터 갚는다.
+  function simulate(hire: Date, asOf: Date, txns: LeaveTxn[], eligible: boolean) {
+    const period = currentLeavePeriod(hire, asOf);
+    const lots = [
+      ...(eligible ? generateGrants(hire, asOf) : []).map((l) => ({
+        grant: l.grantDate.getTime(),
+        expiry: l.expiryDate.getTime(),
+        left: l.days,
+      })),
+      ...txns
+        .filter((t) => t.type === "ADJUST" && t.days > 0 && t.date.getTime() <= asOf.getTime())
+        .map((t) => ({ grant: t.date.getTime(), expiry: addYears(t.date, 1).getTime(), left: t.days })),
+    ].sort((a, b) => a.grant - b.grant);
+    let debt = 0;
+    let used = 0;
+    const events: { at: number; order: number; run: () => void }[] = [];
+    for (const l of lots)
+      events.push({
+        at: l.grant,
+        order: 0, // 같은 날이면 발생이 먼저
+        run: () => {
+          const pay = Math.min(debt, l.left);
+          l.left -= pay;
+          debt -= pay;
+        },
+      });
+    for (const t of txns) {
+      if (t.type !== "USE") continue;
+      if (t.date.getTime() >= period.endExclusive.getTime()) continue; // 다음 기간 날짜의 사용은 아직 세지 않는다
+      const at = t.date.getTime();
+      events.push({
+        at,
+        order: 1,
+        run: () => {
+          let need = Math.abs(t.days);
+          used += need;
+          for (const l of lots) {
+            if (need <= 0) break;
+            if (l.grant > at || l.expiry <= at || l.left <= 0) continue;
+            const take = Math.min(l.left, need);
+            l.left -= take;
+            need -= take;
+          }
+          debt += need;
+        },
+      });
+    }
+    events.sort((a, b) => a.at - b.at || a.order - b.order);
+    for (const e of events) e.run();
+    const alive = lots.filter((l) => l.expiry > asOf.getTime());
+    return {
+      remaining: alive.reduce((a, l) => a + l.left, 0) - debt,
+      expired: lots.filter((l) => l.expiry <= asOf.getTime()).reduce((a, l) => a + l.left, 0),
+      used,
+      debt,
+    };
+  }
+
+  // 결정적 난수 (mulberry32) — 실패하면 같은 사례가 다시 나와야 한다
+  function rng(seed: number) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const DAY = 86400000;
+  const pick = <T,>(r: () => number, xs: T[]) => xs[Math.floor(r() * xs.length)];
+
+  function scenario(r: () => number, opts: { adjust: boolean; future: boolean }) {
+    const hire = new Date(d("2019-01-01").getTime() + Math.floor(r() * 2500) * DAY);
+    const span = Math.floor(r() * 1500);
+    const asOf = new Date(hire.getTime() + span * DAY);
+    const txns: LeaveTxn[] = [];
+    const uses = Math.floor(r() * 15);
+    for (let i = 0; i < uses; i++) {
+      const off = Math.floor(r() * (span + (opts.future ? 90 : 1)));
+      txns.push({ date: new Date(hire.getTime() + off * DAY), days: -pick(r, [0.5, 1, 1, 1, 2, 3]), type: "USE" });
+    }
+    if (opts.adjust) {
+      const adj = Math.floor(r() * 3);
+      for (let i = 0; i < adj; i++) {
+        const off = Math.floor(r() * (span + (opts.future ? 60 : 1)));
+        txns.push({ date: new Date(hire.getTime() + off * DAY), days: pick(r, [0.5, 1, 2, 3]), type: "ADJUST" });
+      }
+    }
+    return { hire, asOf, txns, eligible: r() < 0.85 };
+  }
+
+  it("잔여·소멸·사용 누계·못 갚은 초과사용이 500가지 무작위 사례에서 모두 같다", () => {
+    const r = rng(20261127);
+    for (let n = 0; n < 500; n++) {
+      const c = scenario(r, { adjust: true, future: true });
+      const s = summarizeLeave(c.hire, c.asOf, c.txns, { eligible: c.eligible });
+      const ref = simulate(c.hire, c.asOf, c.txns, c.eligible);
+      const at = `#${n} 입사 ${c.hire.toISOString().slice(0, 10)} 기준 ${c.asOf.toISOString().slice(0, 10)}`;
+      expect(s.remaining, at).toBe(ref.remaining);
+      expect(s.expired, at).toBe(ref.expired);
+      expect(s.used, at).toBe(ref.used);
+      expect(s.overdrawn, at).toBe(ref.debt);
+      // lot 은 마이너스가 되지 않고, 발생 = 사용 + 잔여 + 소멸(+이월) 이 lot 마다 맞는다
+      for (const l of s.lots) {
+        expect(l.remaining, at).toBeGreaterThanOrEqual(0);
+        expect(l.used + l.remaining + l.expiredLost + l.carriedOut, at).toBe(l.days);
+        expect(l.advanceUsed, at).toBeLessThanOrEqual(l.used);
+      }
+    }
+  });
+
+  it("법정 발생분만 있을 때는 이번 기간의 셈이 늘 맞는다 — 발생 − 지난 기간 초과사용 − 사용 = 잔여", () => {
+    const r = rng(7);
+    for (let n = 0; n < 300; n++) {
+      const c = scenario(r, { adjust: false, future: true });
+      const p = summarizeLeave(c.hire, c.asOf, c.txns).period;
+      expect(p.carriedOver).toBe(0);
+      expect(p.granted - p.priorOverdraft - p.used, `#${n}`).toBe(p.remaining);
+    }
+  });
+
+  it("시간이 흘러 새 발생분이 생겨도 이미 배분된 사용은 움직이지 않는다", () => {
+    const r = rng(42);
+    for (let n = 0; n < 300; n++) {
+      const c = scenario(r, { adjust: true, future: false });
+      const later = new Date(c.asOf.getTime() + (1 + Math.floor(r() * 800)) * DAY);
+      const a = summarizeLeave(c.hire, c.asOf, c.txns, { eligible: c.eligible });
+      const b = summarizeLeave(c.hire, later, c.txns, { eligible: c.eligible });
+      a.lots.forEach((l, i) => {
+        expect(b.lots[i].grantDate.getTime(), `#${n}`).toBe(l.grantDate.getTime());
+        expect(b.lots[i].used, `#${n} lot ${i}`).toBe(l.used);
+      });
+      // 못 갚고 있던 초과사용은 늘지 않는다 (새 발생분이 갚을 뿐이다)
+      expect(b.overdrawn, `#${n}`).toBeLessThanOrEqual(a.overdrawn);
+    }
   });
 });

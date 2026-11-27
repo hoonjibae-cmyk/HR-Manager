@@ -5,6 +5,7 @@ import {
   summarizeLeave,
   summarizeComp,
   isLeaveEligible,
+  priorOverdraftPart,
   type LeaveTxn,
   type LeaveSummary,
   type CompSummary,
@@ -179,8 +180,15 @@ export function leaveBalanceText(
     `*${name}님의 연차 현황* (근속 ${summary.serviceLabel})`,
     ``,
     `*이번 연차기간* ${ymd(p.start)} ~ ${ymd(p.end)} · ${p.label}`,
-    `• 발생 ${p.granted}${p.carriedOver ? ` (+이월 ${p.carriedOver})` : ""} · 사용 ${p.used} · *잔여 ${p.remaining}일*`,
+    `• 발생 ${p.granted}${p.carriedOver ? ` (+이월 ${p.carriedOver})` : ""}${priorOverdraftPart(p)} · 사용 ${p.used} · *잔여 ${p.remaining}일*`,
   ];
+  // 발생·사용만으로는 잔여가 안 맞아 보이는 까닭을 적는다 — 숫자만 보면 하루가 사라진 것처럼 읽힌다
+  if (p.priorOverdraft > 0)
+    lines.push(
+      `• 지난 연차기간에 발생분보다 ${p.priorOverdraft}일을 더 사용해, 이번 기간 발생분에서 먼저 차감했습니다.`
+    );
+  if (summary.overdrawn > 0)
+    lines.push(`• 발생분보다 ${summary.overdrawn}일을 더 사용한 상태입니다 — 다음에 발생하는 연차에서 먼저 차감됩니다.`);
   if (p.scheduled > 0) lines.push(`• 앞으로 ${p.scheduled}일 더 발생 예정 (매월 개근 시 1일씩)`);
   lines.push(`• 사용기한 ${ymd(p.end)} — 이 날짜까지 쓰지 않은 연차는 소멸됩니다.`);
   if (summary.nextGrantDate)
@@ -232,6 +240,7 @@ export function modalPeriod(summary: LeaveSummary) {
     end: ymd(summary.period.end),
     granted: summary.period.granted + summary.period.carriedOver,
     used: summary.period.used,
+    priorOverdraft: summary.period.priorOverdraft,
   };
 }
 

@@ -39,6 +39,8 @@ export interface LeaveRow {
   granted: number;
   used: number;
   remaining: number;
+  /** 지난 기간 초과사용이 이번 기간 발생분에서 먼저 빠진 일수 — 발생 − 이 값 − 사용 = 잔여 */
+  priorOverdraft: number;
   compGranted: number;
   compUsed: number;
   compRemaining: number;
@@ -281,7 +283,18 @@ export default function LeaveTable({
                   </td>
                   <td className="td text-right tnum border-l border-slate-100">{r.granted}</td>
                   <td className="td text-right tnum text-slate-500">{r.used}</td>
-                  <td className="td text-right tnum font-bold text-brand-600">{r.remaining}</td>
+                  <td className="td text-right tnum font-bold text-brand-600">
+                    {r.remaining}
+                    {/* 발생 − 사용 과 잔여가 다른 까닭을 그 자리에 적는다 — 숫자만 두면 하루가 사라진 것처럼 읽힌다 */}
+                    {r.priorOverdraft > 0 && (
+                      <div
+                        className="text-[10px] font-normal text-amber-700 whitespace-nowrap"
+                        title="지난 연차기간에 발생분보다 더 쓴 만큼이 이번 기간 발생분에서 먼저 빠졌습니다"
+                      >
+                        지난 기간 초과 −{r.priorOverdraft}
+                      </div>
+                    )}
+                  </td>
                   <td className="td text-right tnum border-l border-slate-100">{r.compGranted}</td>
                   <td className="td text-right tnum text-slate-500">{r.compUsed}</td>
                   <td className="td text-right tnum font-bold text-emerald-600">

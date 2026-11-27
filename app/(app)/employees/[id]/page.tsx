@@ -399,6 +399,20 @@ export default async function EmployeeDetail({ params }: { params: { id: string 
             <div className="text-xs text-slate-400 mt-3 space-y-0.5">
               <div>근속: {summary.serviceLabel}</div>
               {summary.period.carriedOver > 0 && <div>이월: {summary.period.carriedOver}일</div>}
+              {/* 발생 − 사용 이 잔여와 안 맞아 보이는 까닭 — 지난 기간에 더 쓴 만큼이 이번 발생분에서 먼저 빠졌다 */}
+              {summary.period.priorOverdraft > 0 && (
+                <div className="text-amber-700">
+                  지난 기간 초과사용 차감: {summary.period.priorOverdraft}일
+                </div>
+              )}
+              {summary.overdrawn > 0 && (
+                <div className="text-amber-700">
+                  초과사용 {summary.overdrawn}일 —{" "}
+                  {emp.resignDate && emp.resignDate < now
+                    ? "퇴사 정산 대상 (급여 화면의 연차수당 상세)"
+                    : "다음 발생분에서 먼저 차감"}
+                </div>
+              )}
               {summary.period.scheduled > 0 && (
                 <div>추가 발생 예정: {summary.period.scheduled}일 (매월 개근 1일)</div>
               )}

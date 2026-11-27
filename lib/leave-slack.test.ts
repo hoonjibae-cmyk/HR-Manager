@@ -66,6 +66,43 @@ describe("leaveBalanceText — 직원에게 보여줄 연차 현황", () => {
   });
 });
 
+describe("지난 기간 초과사용 — 발생·사용만으로는 잔여가 안 맞아 보일 때 그 까닭을 함께 적는다", () => {
+  // 가상 직원: 입사 2025-11-26, 1년 미만 발생 11일에 11.5일을 써서 기념일 전날 −0.5.
+  // 기념일에 15일이 생기면 잔여 14.5 — '발생 15 · 사용 0 · 잔여 14.5' 만 적으면 반나절이 사라진 것처럼 읽힌다.
+  const hire = d("2025-11-26");
+  const txns: LeaveTxn[] = [
+    { date: d("2025-12-24"), days: -1, type: "USE" },
+    { date: d("2026-04-22"), days: -3, type: "USE" },
+    { date: d("2026-06-25"), days: -2.5, type: "USE" },
+    { date: d("2026-07-29"), days: -3, type: "USE" },
+    { date: d("2026-10-13"), days: -2, type: "USE" },
+  ];
+
+  it("새 기간 — 발생과 사용 사이에 「지난 기간 초과사용 −0.5」 가 들어가고 한 줄로 풀어 적는다", () => {
+    const asOf = d("2026-11-27");
+    const s = summarizeLeave(hire, asOf, txns);
+    const t = leaveBalanceText("가상직원", s, summarizeComp(txns, asOf), undefined, txns);
+    expect(t).toContain("발생 15 · 지난 기간 초과사용 −0.5 · 사용 0 · *잔여 14.5일*");
+    expect(t).toContain("지난 연차기간에 발생분보다 0.5일을 더 사용해, 이번 기간 발생분에서 먼저 차감했습니다.");
+    expect(modalPeriod(s)).toMatchObject({ granted: 15, used: 0, priorOverdraft: 0.5 });
+  });
+
+  it("아직 갚지 못한 초과사용(잔여 마이너스)도 무엇인지 적는다", () => {
+    const asOf = d("2026-11-20");
+    const t = leaveBalanceText("가상직원", summarizeLeave(hire, asOf, txns), summarizeComp(txns, asOf));
+    expect(t).toContain("발생 11 · 사용 11.5 · *잔여 -0.5일*");
+    expect(t).toContain("발생분보다 0.5일을 더 사용한 상태입니다 — 다음에 발생하는 연차에서 먼저 차감됩니다.");
+  });
+
+  it("초과사용이 없으면 예전 문구 그대로다", () => {
+    const asOf = d("2026-07-26");
+    const t = leaveBalanceText("가상직원", summarizeLeave(d("2021-01-01"), asOf, []), summarizeComp([], asOf));
+    expect(t).toContain("발생 17 · 사용 0 · *잔여 17일*");
+    expect(t).not.toContain("초과사용");
+    expect(t).not.toContain("더 사용");
+  });
+});
+
 describe("사용 내역 — 잔여 숫자만으로는 확인이 안 돼 함께 보여준다", () => {
   const hire = d("2021-01-01");
   const asOf = d("2026-07-26");
@@ -152,7 +189,7 @@ describe("modalPeriod — 모달 헤더용 요약", () => {
   it("이월분은 발생에 합산해 보여준다", () => {
     const txns: LeaveTxn[] = [{ date: d("2025-07-01"), days: 3, type: "ADJUST" }];
     const p = modalPeriod(summarizeLeave(d("2021-01-01"), d("2026-03-01"), txns));
-    expect(p).toEqual({ start: "2026.01.01", end: "2026.12.31", granted: 20, used: 0 });
+    expect(p).toEqual({ start: "2026.01.01", end: "2026.12.31", granted: 20, used: 0, priorOverdraft: 0 });
   });
 });
 

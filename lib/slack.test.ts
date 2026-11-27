@@ -102,6 +102,17 @@ describe("leaveModalView — 휴가신청서 모달 구조", () => {
     expect(v.blocks[0].text.text).toContain("잔여 *12일*");
   });
 
+  it("지난 기간 초과사용이 이번 발생분에서 빠졌으면 발생과 사용 사이에 적는다 — 셈이 맞아 보이게", () => {
+    const v: any = leaveModalView({
+      empName: "홍길동",
+      remaining: 14.5,
+      compRemaining: 0,
+      serviceLabel: "1년 0개월",
+      period: { start: "2026-11-26", end: "2027-11-25", granted: 15, used: 0, priorOverdraft: 0.5 },
+    });
+    expect(v.blocks[0].text.text).toContain("발생 15 · 지난 기간 초과사용 −0.5 · 사용 0 · 잔여 *14.5일*");
+  });
+
   it("상단에 이름·잔여 연차가 표시된다", () => {
     expect(view.blocks[0].text.text).toContain("홍길동");
     expect(view.blocks[0].text.text).toContain("12일");

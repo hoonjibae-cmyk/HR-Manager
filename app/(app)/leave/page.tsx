@@ -115,6 +115,7 @@ export default async function LeavePage({
     granted: s.period.granted + s.period.carriedOver,
     used: s.period.used,
     remaining: s.period.remaining,
+    priorOverdraft: s.period.priorOverdraft,
     compGranted: c.granted,
     compUsed: c.used,
     compRemaining: c.remaining,

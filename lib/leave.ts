@@ -8,6 +8,11 @@
 //  - 발생 연차는 발생일로부터 1년간 사용, 미사용분은 소멸(수당 정산 대상).
 //  - 소멸 대신 **이월**할 수 있다(근로자 동의) — `CARRYOVER` 줄을 다음 기간 첫날(기념일) 날짜로
 //    적으면 그 날부터 1년짜리 lot 으로 살고, 같은 날 만료된 lot 의 '소멸' 이 그만큼 '이월' 로 바뀐다.
+//  - **쓴 날 유효한 발생분이 모자라면 '미리 쓴 것(초과사용)' 이고, 그 뒤에 발생하는 연차가 발생 순서대로
+//    갚는다.** 기념일 전날 잔여가 −0.5 면 새 15일은 14.5 로 시작한다. 갚을 발생분이 아직 없으면 마이너스
+//    잔여로 남았다가 다음 발생분에서 먼저 빠진다. ⚠ '계산 시점의 마지막 lot' 에 얹지 않는다 — 그러면 해가
+//    바뀔 때마다 초과분이 최신 발생분으로 옮겨 붙어 **해마다 다시 깎이고**, 그것을 메우던 지난 발생분은
+//    '미사용 → 소멸' 로 뒤집힌다(2026-11 실제로 겪었다 — 14.5 여야 할 잔여가 13.5 로 나왔다).
 
 import {
   addDays,
@@ -40,8 +45,13 @@ export interface Lot {
   /** CARRYOVER = 관리자가 지난 기간 미사용분을 이월한 lot (발생이 아니라 이월로 센다) */
   source: "MONTHLY" | "ANNUAL" | "ADJUST" | "CARRYOVER";
   serviceYear: number; // 0 = 1년 미만
-  remaining: number; // FIFO 차감 후 잔여
+  remaining: number; // FIFO 차감 후 잔여 — 마이너스가 되지 않는다(못 갚은 초과사용은 LeaveSummary.overdrawn)
   used: number;
+  /**
+   * `used` 가운데 **이 lot 이 생기기 전에 미리 쓴 몫**(초과사용)을 갚은 일수.
+   * 12/24 에 쓴 1일을 12/26 발생분이 갚으면 그 lot 의 used 1 · advanceUsed 1 이다.
+   */
+  advanceUsed: number;
   expiredLost: number; // 소멸된 미사용분
   /** 만료 때 소멸하지 않고 다음 기간으로 이월된 일수 (같은 날짜의 CARRYOVER lot 으로 이어진다) */
   carriedOut: number;
@@ -58,6 +68,12 @@ export interface LeavePeriod {
   label: string; // "6년차"
   granted: number; // 이 기간에 발생한 일수
   carriedOver: number; // 이전 기간에서 넘어와 아직 유효한 잔여 — 관리자 이월 처리분(CARRYOVER) 포함 (보통 0)
+  /**
+   * **지난 기간의 초과사용이 이 기간 몫을 깎은 일수** — 이 기간 발생분이 갚은 몫 + 아직 못 갚은 몫.
+   * 발생 15 · 사용 0 인데 잔여가 14.5 인 까닭이 여기 있다: `발생 + 이월 − priorOverdraft − 사용 = 잔여`.
+   * 화면·슬랙이 이 값을 함께 적는다(없으면 셈이 안 맞아 보인다).
+   */
+  priorOverdraft: number;
   used: number; // 이 기간에 사용한 일수 (승인된 미래 휴가 포함)
   remaining: number; // 지금 쓸 수 있는 잔여
   scheduled: number; // 이 기간에 앞으로 더 발생할 예정 일수 (1년 미만 월 개근분)
@@ -74,6 +90,11 @@ export interface LeaveSummary {
   used: number; // 사용 누계
   expired: number; // 소멸 누계
   remaining: number; // 현재 사용가능 잔여
+  /**
+   * 발생분으로 **아직 갚지 못한 초과사용** — 잔여를 그만큼 마이너스로 끌어내리고, 다음에 발생하는
+   * 연차에서 먼저 빠진다. 어느 lot 에도 얹지 않는다(lot 의 remaining 은 0 밑으로 내려가지 않는다).
+   */
+  overdrawn: number;
   /** 이번 연차기간 기준 현황 — 화면·슬랙은 이쪽을 우선 표시한다 */
   period: LeavePeriod;
   lots: Lot[];
@@ -163,6 +184,7 @@ export function generateGrants(hireDate: Date, asOf: Date): Lot[] {
       serviceYear: 0,
       remaining: 1,
       used: 0,
+      advanceUsed: 0,
       expiredLost: 0,
       carriedOut: 0,
     });
@@ -181,6 +203,7 @@ export function generateGrants(hireDate: Date, asOf: Date): Lot[] {
       serviceYear: y,
       remaining: days,
       used: 0,
+      advanceUsed: 0,
       expiredLost: 0,
       carriedOut: 0,
     });
@@ -208,6 +231,7 @@ function adjustLots(txns: LeaveTxn[], asOf: Date): Lot[] {
       serviceYear: -1,
       remaining: t.days,
       used: 0,
+      advanceUsed: 0,
       expiredLost: 0,
       carriedOut: 0,
     }));
@@ -251,43 +275,59 @@ export function summarizeLeave(
     !isBefore(d, period.start) && isBefore(d, period.endExclusive);
   const usedInThisPeriod: number[] = lots.map(() => 0); // lots 와 같은 인덱스
 
-  // 부여분이 하나도 없을 때의 사용분 (lot 에 실을 수 없어 따로 센다)
+  // 발생분으로 아직 갚지 못한 초과사용 — lot 에 얹지 않고 따로 센다
   let overdraft = 0;
   let overdraftInPeriod = 0;
+  // 지난 기간의 초과사용이 이번 기간 몫을 깎은 일수 (이번 기간 발생분이 갚은 몫 + 아직 못 갚은 몫)
+  let priorOverdraft = 0;
 
-  // FIFO: 각 사용을 '사용시점에 유효한 가장 오래된 lot'에서 차감
   for (const use of uses) {
     // **asOf 가 속한 기간 뒤의 사용은 아직 생기지 않은 발생분의 몫이다.** 다음 기간 날짜로 미리
-    // 승인해 둔 휴가(10월에 승인한 11/5 연차)는 그 날짜에 유효한 lot 이 아직 없어 아래 초과사용
-    // 처리로 흘러 **이번 기간의 마지막 lot 에서 빠져나갔다** — 이번 기간 잔여가 그만큼 줄어 보이고,
-    // 기간 만료 정산(연차수당 상세)이 그 잔여를 읽으므로 미사용 일수가 조용히 사라졌다.
-    // 그 기간이 시작되면(asOf 가 넘어가면) 새 lot 에서 정상 차감된다. 지난 기간 날짜의 사용이
-    // 지난 lot 에서 빠지는 것(lib/leave.test.ts)과 대칭이다.
+    // 승인해 둔 휴가(10월에 승인한 11/5 연차)를 지금 세면 이번 기간 발생분이 그것을 떠안아
+    // 이번 기간 잔여가 그만큼 줄어 보이고, 기간 만료 정산(연차수당 상세)이 그 잔여를 읽으므로
+    // 미사용 일수가 조용히 사라졌다. 그 기간이 시작되면(asOf 가 넘어가면) 새 lot 에서 정상 차감된다.
+    // 지난 기간 날짜의 사용이 지난 lot 에서 빠지는 것(lib/leave.test.ts)과 대칭이다.
     if (!isBefore(use.date, period.endExclusive)) continue;
+    const inP = inPeriod(use.date);
     let need = use.days;
-    for (let i = 0; i < lots.length; i++) {
+
+    // ① 쓴 날 유효한 lot 에서 — 오래된 것부터(FIFO)
+    for (let i = 0; i < lots.length && need > 0; i++) {
       const lot = lots[i];
-      if (need <= 0) break;
-      // lot 발생 이전이거나 이미 소멸된 lot 은 사용 불가
-      if (isAfter(lot.grantDate, use.date)) continue;
-      if (!isAfter(lot.expiryDate, use.date)) continue; // 소멸됨
+      if (lot.remaining <= 0) continue;
+      if (isAfter(lot.grantDate, use.date)) continue; // 아직 발생 전
+      if (!isAfter(lot.expiryDate, use.date)) continue; // 이미 소멸
       const take = Math.min(lot.remaining, need);
       lot.remaining -= take;
       lot.used += take;
-      if (inPeriod(use.date)) usedInThisPeriod[i] += take;
+      if (inP) usedInThisPeriod[i] += take;
       need -= take;
     }
-    // need>0 이면 초과사용(마이너스 잔여) — 마지막 lot 에서 차감 처리
-    if (need > 0 && lots.length > 0) {
-      const last = lots.length - 1;
-      lots[last].remaining -= need;
-      lots[last].used += need;
-      if (inPeriod(use.date)) usedInThisPeriod[last] += need;
-    } else if (need > 0) {
-      // 발생분(lot)이 하나도 없는데 사용한 경우 — 입사 직후 선사용 등.
-      // 여기서 버리면 사용 내역이 통째로 사라지므로 따로 모아 둔다.
+
+    // ② 모자란 만큼은 **미리 쓴 것(초과사용)** — 그 뒤에 발생하는 lot 이 발생 순서대로 갚는다.
+    //    ⚠ '마지막 lot' 에 얹지 않는다. 마지막 lot 은 계산 시점마다 달라져서, 기념일에 새 발생분이
+    //    생기면 초과분이 통째로 그쪽으로 옮겨 붙고(해마다 다시 깎인다) 그동안 그것을 메우던 지난
+    //    발생분은 '미사용 → 소멸' 로 뒤집혔다. 발생 순서대로 갚으면 한 번 정해진 배분이 시간이 흘러도
+    //    그대로다(테스트로 못박음) — 기념일 전날 잔여 −0.5 가 새 15일을 14.5 로 만들 뿐이다.
+    for (let i = 0; i < lots.length && need > 0; i++) {
+      const lot = lots[i];
+      if (lot.remaining <= 0) continue;
+      if (!isAfter(lot.grantDate, use.date)) continue; // 쓴 날 뒤에 발생한 것만
+      const take = Math.min(lot.remaining, need);
+      lot.remaining -= take;
+      lot.used += take;
+      lot.advanceUsed += take;
+      if (inP) usedInThisPeriod[i] += take;
+      else if (inPeriod(lot.grantDate)) priorOverdraft += take; // 지난 기간의 초과분을 이번 기간 발생분이 갚았다
+      need -= take;
+    }
+
+    // ③ 갚을 발생분이 아직 없다 — 마이너스 잔여로 남기고, 다음 발생분이 생기면 ② 가 거기서 먼저 뺀다.
+    //    (입사 직후 선사용·미적용 직원의 사용 등. 여기서 버리면 사용 내역이 통째로 사라진다)
+    if (need > 0) {
       overdraft += need;
-      if (inPeriod(use.date)) overdraftInPeriod += need;
+      if (inP) overdraftInPeriod += need;
+      else priorOverdraft += need;
     }
   }
 
@@ -381,6 +421,7 @@ export function summarizeLeave(
     used,
     expired,
     remaining,
+    overdrawn: overdraft,
     period: {
       start: period.start,
       end: addDays(period.endExclusive, -1),
@@ -388,6 +429,7 @@ export function summarizeLeave(
       label: `${period.serviceYear}년차`,
       granted: periodGranted,
       carriedOver: periodCarried,
+      priorOverdraft,
       used: periodUsed,
       remaining,
       scheduled,
@@ -396,6 +438,18 @@ export function summarizeLeave(
     nextGrantDate,
     nextGrantDays,
   };
+}
+
+/**
+ * 「 · 지난 기간 초과사용 −0.5」 — 발생과 사용 사이에 끼워 넣는 조각(없으면 빈 문자열).
+ *
+ * 지난 기간에 발생분보다 더 쓴 만큼은 이번 기간 발생분에서 먼저 빠지므로, 발생·사용만 적으면
+ * **잔여와 셈이 안 맞아 보인다**(발생 15 · 사용 0 인데 잔여 14.5). 화면·슬랙·신청서가 같은 말을 쓰도록
+ * 한곳에서 만든다. 없을 때는 아무것도 붙지 않아 예전 문구와 한 글자도 다르지 않다.
+ */
+export function priorOverdraftPart(p: { priorOverdraft?: number | null }): string {
+  const n = p.priorOverdraft ?? 0;
+  return n > 0 ? ` · 지난 기간 초과사용 −${n}` : "";
 }
 
 /** 대체휴일 보상연차(대휴) 요약 — 운영자 수동 부여(GRANT/ADJUST±), 사용(USE) */

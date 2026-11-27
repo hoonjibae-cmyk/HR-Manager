@@ -87,6 +87,8 @@ export default async function EmployeeLeavePage({
     .reduce((a: number, t: any) => a + Math.abs(t.days), 0);
 
   const p = summary.period;
+  // 퇴직자는 퇴사일에 멈춘 값이라 '다음 발생분' 이 없다 — 못 갚은 초과사용은 퇴사 정산의 몫이다
+  const resigned = !!emp.resignDate && emp.resignDate < now;
   const tab = (y: number | null, label: string) => (
     <Link
       key={label}
@@ -161,6 +163,25 @@ export default async function EmployeeLeavePage({
           <div className="text-[11px] text-slate-400 mt-1">
             사용기한 {ymd(p.end)} — 미사용분 소멸
           </div>
+          {/* 발생·사용만으로는 잔여가 안 맞아 보이는 까닭을 적는다 — 지난 기간에 발생분보다 더 쓴 만큼은
+              이번 기간 발생분에서 먼저 빠진다(발생 15 · 사용 0 인데 잔여 14.5). 숫자만 두면 하루가 사라진 것처럼 읽힌다 */}
+          {p.priorOverdraft > 0 && (
+            <div className="text-[11px] text-amber-700 mt-1 break-keep">
+              지난 기간 초과사용 {p.priorOverdraft}일 차감 반영
+              <span className="text-slate-400 tnum">
+                {" "}
+                · 발생 {p.granted + p.carriedOver} − {p.priorOverdraft} − 사용 {p.used}
+              </span>
+            </div>
+          )}
+          {summary.overdrawn > 0 && (
+            <div className="text-[11px] text-amber-700 mt-1 break-keep">
+              발생분보다 {summary.overdrawn}일 더 사용 —{" "}
+              {resigned
+                ? "퇴사 정산 대상입니다 (급여 화면의 연차수당 상세)"
+                : "다음 발생분에서 먼저 차감됩니다"}
+            </div>
+          )}
         </div>
         <div className="card p-4">
           <div className="flex items-center justify-between">
@@ -416,7 +437,18 @@ export default async function EmployeeLeavePage({
                             : "관리자 부여"}
                         </td>
                         <td className="td text-right tnum">{l.days}</td>
-                        <td className="td text-right tnum">{l.used || "-"}</td>
+                        <td className="td text-right tnum whitespace-nowrap">
+                          {/* 이 발생분이 생기기 전에 쓴 연차를 갚은 몫 — 이번 기간에 쓴 것이 없는데 '사용' 이 찍힌 까닭 */}
+                          {l.advanceUsed > 0 && (
+                            <span
+                              className="mr-1 text-[11px] text-amber-700"
+                              title="이 발생분이 생기기 전에 미리 쓴 연차(초과사용)를 갚은 일수입니다"
+                            >
+                              미리 쓴 {l.advanceUsed}
+                            </span>
+                          )}
+                          {l.used || "-"}
+                        </td>
                         <td className="td text-right tnum font-semibold">
                           {expired ? "-" : l.remaining}
                         </td>
@@ -431,6 +463,16 @@ export default async function EmployeeLeavePage({
               </tbody>
             </table>
           </div>
+        )}
+        {(summary.overdrawn > 0 || summary.lots.some((l: any) => l.advanceUsed > 0)) && (
+          <p className="text-xs text-slate-500 px-5 pt-3 break-keep border-t border-slate-100">
+            <b className="text-amber-700">미리 쓴</b> 연차 — 쓴 날에 유효한 발생분이 모자랐던 사용(초과사용)입니다.
+            그 뒤에 발생하는 연차가 <b>발생 순서대로</b> 갚고, 연차기간이 바뀌어도 한 번만 차감됩니다.
+            {summary.overdrawn > 0 &&
+              (resigned
+                ? ` 갚지 못한 ${summary.overdrawn}일은 퇴사 정산(급여 화면의 연차수당 상세)에서 공제 대상으로 올라옵니다.`
+                : ` 아직 갚지 못한 ${summary.overdrawn}일은 다음에 발생하는 연차에서 먼저 빠집니다.`)}
+          </p>
         )}
         <p className="text-xs text-slate-400 px-5 py-3 border-t border-slate-100">
           입사 후 누계: 발생 {summary.granted} · 사용 {summary.used}

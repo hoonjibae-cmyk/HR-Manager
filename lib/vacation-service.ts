@@ -6,6 +6,7 @@
 import { prisma } from "./db";
 import { isContractorContract, LEAVE_STATUS_LABEL, LEAVE_TYPE_LABEL, parseSchedule } from "./constants";
 import { leaveBalanceOf, pendingAnnualDays, ineligibleReason } from "./leave-slack";
+import { priorOverdraftPart } from "./leave";
 import { withEmployeeLeaveLock } from "./leave-lock";
 import { preApproverFor } from "./leave-approval";
 import { approveLeaveRequest, rejectLeaveRequest } from "./leave-service";
@@ -579,7 +580,7 @@ export async function employeeView(assignmentId: number, slackUserId: string, cl
   }
   const p = summary.period;
   const basis =
-    `입사일 기준 연차기간 ${ymd(p.start)} ~ ${ymd(p.end)} · 발생 ${p.granted}${p.carriedOver ? `(+이월 ${p.carriedOver})` : ""} · 사용 ${p.used}` +
+    `입사일 기준 연차기간 ${ymd(p.start)} ~ ${ymd(p.end)} · 발생 ${p.granted}${p.carriedOver ? `(+이월 ${p.carriedOver})` : ""}${priorOverdraftPart(p)} · 사용 ${p.used}` +
     ` · ${kstLabel(new Date())} 산정`;
   return {
     assignment: a,

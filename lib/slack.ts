@@ -8,6 +8,7 @@ import {
   type OverdraftCheck,
 } from "./leave-overdraft";
 import { matchEmployee } from "./timesheet";
+import { priorOverdraftPart } from "./leave";
 
 const API = "https://slack.com/api";
 
@@ -665,7 +666,14 @@ export interface LeaveModalContext {
   serviceLabel: string;
   channel?: string;
   /** 이번 연차기간 (있으면 누계 대신 이 기간 기준으로 안내) */
-  period?: { start: string; end: string; granted: number; used: number };
+  period?: {
+    start: string;
+    end: string;
+    granted: number;
+    used: number;
+    /** 지난 기간 초과사용이 이번 기간 발생분에서 먼저 빠진 일수 — 있으면 발생·사용 사이에 적는다 */
+    priorOverdraft?: number;
+  };
   /**
    * 잔여 초과 안내 + 동의 체크란. `upfront` 는 양식을 열 때부터(잔여가 이미 0 이하),
    * 아니면 제출 때 초과가 드러나 양식을 다시 그린 경우다(입력값은 `prefill` 로 되살린다).
@@ -733,7 +741,7 @@ export function leaveModalView(ctx: LeaveModalContext) {
   const compLine =
     ctx.compRemaining > 0 ? ` · 대휴보상연차 *${ctx.compRemaining}일*` : "";
   const periodLine = ctx.period
-    ? `이번 연차기간 ${ctx.period.start} ~ ${ctx.period.end}\n발생 ${ctx.period.granted} · 사용 ${ctx.period.used} · 잔여 *${ctx.remaining}일*${compLine}`
+    ? `이번 연차기간 ${ctx.period.start} ~ ${ctx.period.end}\n발생 ${ctx.period.granted}${priorOverdraftPart(ctx.period)} · 사용 ${ctx.period.used} · 잔여 *${ctx.remaining}일*${compLine}`
     : `잔여 연차 *${ctx.remaining}일*${compLine}`;
   const pf = ctx.prefill ?? {};
   const kindOpt = KIND_OPTIONS.find((o) => o.value === pf.kind);
