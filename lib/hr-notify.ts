@@ -301,6 +301,23 @@ export interface BirthdayAlert extends BirthdayRow {
   shifted: boolean;
 }
 
+/**
+ * **생일 알림에서 빼는 부서** — 조교팀(2026-11 결정: 「조교팀 소속 인원의 생일 알림은 보낼 필요 없음」).
+ *
+ * 생일 알림은 받는 부서(경영지원)가 챙길 사람을 알려 주는 것이라, 챙기지 않는 부서 사람이 섞이면 알림이
+ * 소음이 된다 — 그런 알림이 몇 번 오면 정작 챙길 사람의 알림도 안 읽게 된다.
+ * 재계약 알림의 `RENEWAL_EXEMPT_DEPTS`·`SALARY_REVIEW_EXEMPT_DEPTS`(lib/renewal.ts)와 같은 방식이다 —
+ * 부서 **이름**으로 가르므로(온전히 같을 때만) **부서 이름을 바꾸면 여기도 고쳐야 한다.**
+ * 설정 화면이 이 목록을 그대로 적고, 뺀 사람이 있으면 누구를 뺐는지도 보여 준다(조용히 빠지면 왜 안 왔는지 모른다).
+ * ⚠ 슬랙 **알림만** 뺀다 — 대시보드의 「1주일 내 생일」(`upcomingBirthdays`)은 그대로 전 직원을 보여 준다.
+ */
+export const BIRTHDAY_EXEMPT_DEPTS: readonly string[] = ["조교팀"];
+
+/** 생일 알림에서 빼는 부서 소속인가 */
+export function birthdayExempt(department: string | null | undefined): boolean {
+  return BIRTHDAY_EXEMPT_DEPTS.includes((department ?? "").trim());
+}
+
 /** `1990-03-15` · `900315` · `1990.03.15` 을 모두 `MM-DD` 로 */
 export function birthMonthDay(birth: string | null | undefined): string | null {
   const s = String(birth ?? "").trim();
@@ -342,21 +359,6 @@ function monthDaysFor(date: string): string[] {
 }
 
 /**
- * **오늘 알려야 할 생일** — 오늘이 생일인 사람 + 생일이 토·일·공휴일이라 앞당겨 알릴 사람.
- *
- * 생일이 주말·공휴일이면 **그 전 마지막 평일**에 알린다. 지나고 나서 하는 축하는 안 하느니만
- * 못하고, 쉬는 날 슬랙으로 축하해 봐야 아무도 안 읽는다. 그래서 늦추지 않고 **앞당긴다**.
- *
- * 구현은 뒤로 걷지 않고 `announceWindow()` 로 **앞으로** 본다 — "오늘이 마지막 평일인 날들"
- * 을 모아 그 날짜의 생일을 함께 낸다. 뒤로 걸으면 토요일 크론이 금요일 몫을 다시 보낸다.
- *
- * `leadDays` 는 창 전체를 그만큼 뒤로 민다 — 알리는 날이 앞당겨지는 것이지 '며칠 전에
- * 알린다' 는 설정이 무시되는 것이 아니다.
- *
- * ⚠ **공휴일 표를 반드시 넘긴다**(기본값을 두지 않은 이유). 안 넘기면 공휴일 생일이
- * 평일로 잡혀 쉬는 날 알림이 나가고, 그 사실이 조용히 묻힌다.
- */
-/**
  * **1주일 내 생일** — 오늘부터 `days`일 안(오늘 포함)에 생일인 재직자. 대시보드 카드용.
  *
  * 슬랙 생일 알림(`birthdaysOn`)과 달리 **평일 앞당김을 하지 않는다** — 알림은 쉬는 날
@@ -383,7 +385,49 @@ export function upcomingBirthdays(
   return out;
 }
 
+/**
+ * **오늘 알려야 할 생일** — 오늘이 생일인 사람 + 생일이 토·일·공휴일이라 앞당겨 알릴 사람.
+ *
+ * 생일이 주말·공휴일이면 **그 전 마지막 평일**에 알린다. 지나고 나서 하는 축하는 안 하느니만
+ * 못하고, 쉬는 날 슬랙으로 축하해 봐야 아무도 안 읽는다. 그래서 늦추지 않고 **앞당긴다**.
+ *
+ * 구현은 뒤로 걷지 않고 `announceWindow()` 로 **앞으로** 본다 — "오늘이 마지막 평일인 날들"
+ * 을 모아 그 날짜의 생일을 함께 낸다. 뒤로 걸으면 토요일 크론이 금요일 몫을 다시 보낸다.
+ *
+ * `leadDays` 는 창 전체를 그만큼 뒤로 민다 — 알리는 날이 앞당겨지는 것이지 '며칠 전에
+ * 알린다' 는 설정이 무시되는 것이 아니다.
+ *
+ * ⚠ **공휴일 표를 반드시 넘긴다**(기본값을 두지 않은 이유). 안 넘기면 공휴일 생일이
+ * 평일로 잡혀 쉬는 날 알림이 나가고, 그 사실이 조용히 묻힌다.
+ *
+ * **`BIRTHDAY_EXEMPT_DEPTS`(조교팀) 소속은 내지 않는다** — 뺀 사람은 `exemptBirthdaysOn` 이 따로 돌려준다.
+ */
 export function birthdaysOn(
+  rows: BirthdayRow[],
+  now: Date,
+  leadDays: number,
+  holidays: string[]
+): BirthdayAlert[] {
+  // 생일 알림에서 빼는 부서(조교팀)는 여기서 거른다 — 알림·설정 화면의 미리보기가 같은 답을 낸다
+  return matchBirthdays(rows, now, leadDays, holidays).filter((a) => !birthdayExempt(a.department));
+}
+
+/**
+ * **오늘 생일(또는 앞당겨 알릴 생일)인데 부서 때문에 알림에서 뺀 사람** — `BIRTHDAY_EXEMPT_DEPTS`.
+ * 알리지는 않지만 설정 화면·실행 결과가 「조교팀 1명 제외」라고 적는 데 쓴다 — 조용히 빠지면
+ * '생일인데 왜 알림이 안 왔나' 를 따라갈 수 없다.
+ */
+export function exemptBirthdaysOn(
+  rows: BirthdayRow[],
+  now: Date,
+  leadDays: number,
+  holidays: string[]
+): BirthdayAlert[] {
+  return matchBirthdays(rows, now, leadDays, holidays).filter((a) => birthdayExempt(a.department));
+}
+
+/** 부서를 가리지 않고 — 오늘 알릴 날짜 창에 생일이 든 사람 전부 */
+function matchBirthdays(
   rows: BirthdayRow[],
   now: Date,
   leadDays: number,

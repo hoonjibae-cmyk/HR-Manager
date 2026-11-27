@@ -3,6 +3,9 @@ import {
   notifyDue,
   contractsToAnnounce,
   birthdaysOn,
+  exemptBirthdaysOn,
+  birthdayExempt,
+  BIRTHDAY_EXEMPT_DEPTS,
   birthMonthDay,
   announceWindow,
   isWorkday,
@@ -200,6 +203,70 @@ describe("생일", () => {
 
   it("아무도 없으면 빈 목록", () => {
     expect(on([b({ birth: "1990-01-01" })], "2026-08-10T12:00")).toEqual([]);
+  });
+});
+
+/*
+ * 조교팀 소속은 생일 알림을 보내지 않는다(2026-11 결정). 알림에서만 뺀다 — 대시보드는 그대로다.
+ */
+describe("생일 알림에서 빼는 부서 — 조교팀", () => {
+  const b = (o: Partial<BirthdayRow> = {}): BirthdayRow => ({
+    id: 1,
+    name: "가상조교",
+    department: "조교팀",
+    position: "조교",
+    birth: "2004-11-29",
+    ...o,
+  });
+  const on = (rows: BirthdayRow[], when: string, hols: string[] = []) => birthdaysOn(rows, kst(when), 0, hols);
+  const off = (rows: BirthdayRow[], when: string, hols: string[] = []) =>
+    exemptBirthdaysOn(rows, kst(when), 0, hols);
+
+  it("빼는 부서는 조교팀 하나다 — 이름이 온전히 같을 때만", () => {
+    expect(BIRTHDAY_EXEMPT_DEPTS).toEqual(["조교팀"]);
+    expect(birthdayExempt("조교팀")).toBe(true);
+    expect(birthdayExempt(" 조교팀 ")).toBe(true);
+    expect(birthdayExempt("교수부")).toBe(false);
+    expect(birthdayExempt("조교")).toBe(false);
+    expect(birthdayExempt(null)).toBe(false);
+    expect(birthdayExempt("")).toBe(false);
+  });
+
+  it("★ 일요일 생일을 금요일에 앞당겨 알리던 조교팀 직원 — 이제 알리지 않는다", () => {
+    // 2026-11-29 는 일요일 → 그 전 마지막 평일은 11/27(금). 실제로 이 알림이 나갔다
+    expect(on([b()], "2026-11-27T10:00")).toEqual([]);
+    // 뺀 사람은 따로 돌려준다 — 화면이 「조교팀 1명 제외」를 적는다
+    const skipped = off([b()], "2026-11-27T10:00");
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0]).toMatchObject({ name: "가상조교", department: "조교팀", date: "2026-11-29", shifted: true });
+  });
+
+  it("평일 생일도 알리지 않는다", () => {
+    // 2026-11-25 는 수요일
+    expect(on([b({ birth: "2004-11-25" })], "2026-11-25T10:00")).toEqual([]);
+    expect(off([b({ birth: "2004-11-25" })], "2026-11-25T10:00")).toHaveLength(1);
+  });
+
+  it("★ 같은 날 생일인 다른 부서 직원은 그대로 알린다", () => {
+    const rows = [
+      b(),
+      b({ id: 2, name: "가상강사", department: "교수부", position: "강사" }),
+      b({ id: 3, name: "가상운영", department: "교육운영팀", position: "사원" }),
+      b({ id: 4, name: "부서없음", department: null }),
+    ];
+    expect(on(rows, "2026-11-27T10:00").map((x) => x.name).sort()).toEqual(["가상강사", "가상운영", "부서없음"]);
+    expect(off(rows, "2026-11-27T10:00").map((x) => x.name)).toEqual(["가상조교"]);
+  });
+
+  it("생일이 아닌 날에는 뺀 사람도 없다 — 조교팀이라고 늘 잡히는 것이 아니다", () => {
+    expect(off([b()], "2026-11-26T10:00")).toEqual([]);
+    // 쉬는 날에는 창이 비어 아무도 없다
+    expect(off([b()], "2026-11-29T10:00")).toEqual([]);
+  });
+
+  it("★ 대시보드의 「1주일 내 생일」은 그대로 전 직원을 보여 준다 — 알림만 뺀다", () => {
+    const list = upcomingBirthdays([{ name: "가상조교", department: "조교팀", birth: "2004-11-29" }], "2026-11-27");
+    expect(list).toEqual([{ name: "가상조교", department: "조교팀", date: "2026-11-29", isToday: false }]);
   });
 });
 

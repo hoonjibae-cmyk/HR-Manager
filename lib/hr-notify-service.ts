@@ -14,6 +14,8 @@ import {
   notifyDue,
   contractsToAnnounce,
   birthdaysOn,
+  exemptBirthdaysOn,
+  BIRTHDAY_EXEMPT_DEPTS,
   announceWindow,
   probationsToAnnounce,
   contractAlertText,
@@ -259,9 +261,29 @@ export async function runBirthdayNotice(
   const holidayYmds = holidays.map((h: any) => h.date);
   const window = announceWindow(kstToday(now), holidayYmds);
   const alerts = birthdaysOn(rows as any, now, s.birthdayLeadDays, holidayYmds);
+  // 생일이지만 부서 때문에 알리지 않는 사람(조교팀 — `BIRTHDAY_EXEMPT_DEPTS`). 보내지는 않고
+  // 미리보기·실행 결과·작업 이력에 이름만 남긴다 — 조용히 빠지면 왜 안 왔는지 따라갈 수 없다
+  const exempted = exemptBirthdaysOn(rows as any, now, s.birthdayLeadDays, holidayYmds).map((a) => ({
+    name: a.name,
+    department: a.department,
+    date: a.date,
+  }));
+  const exemptNote = exempted.length
+    ? ` (${[...new Set(exempted.map((e) => e.department))].join("·")} ${exempted.length}명 제외)`
+    : "";
 
   if (opts.dryRun)
-    return { ran: false, dryRun: true, reason, count: alerts.length, alerts, window };
+    // 빼는 부서 목록도 함께 내린다 — 설정 화면(클라이언트)은 이 모듈을 직접 못 읽는다(scheduler → prisma 를 끌어온다)
+    return {
+      ran: false,
+      dryRun: true,
+      reason,
+      count: alerts.length,
+      alerts,
+      window,
+      exempted,
+      exemptDepts: [...BIRTHDAY_EXEMPT_DEPTS],
+    };
   if (!window.length) {
     // 오늘 몫은 이미 지난 평일에 나갔다 — 새기고 조용히 끝낸다
     await prisma.hrNotifySetting.update({ where: { id: 1 }, data: { birthdayLastRunAt: now } });
@@ -269,7 +291,7 @@ export async function runBirthdayNotice(
   }
   if (!alerts.length) {
     await prisma.hrNotifySetting.update({ where: { id: 1 }, data: { birthdayLastRunAt: now } });
-    return { ran: true, count: 0, reason: "오늘 생일인 직원 없음" };
+    return { ran: true, count: 0, reason: `오늘 생일인 직원 없음${exemptNote}`, exempted };
   }
 
   const msg = birthdayAlertText(alerts, { today: s.birthdayLeadDays === 0 });
@@ -279,11 +301,11 @@ export async function runBirthdayNotice(
   await logActivity({
     action: "NOTIFY_BIRTHDAY",
     actor: opts.force ? "ADMIN" : "CRON",
-    summary: `생일 안내 ${alerts.length}명을 ${s.channel ?? `${s.targetDepartment} 부서`}에 알렸습니다.`,
-    meta: { names: alerts.map((a) => a.name), ...out },
+    summary: `생일 안내 ${alerts.length}명을 ${s.channel ?? `${s.targetDepartment} 부서`}에 알렸습니다.${exemptNote}`,
+    meta: { names: alerts.map((a) => a.name), exempted: exempted.map((e) => e.name), ...out },
   }).catch(() => {});
 
-  return { ran: true, count: alerts.length, alerts, ...out };
+  return { ran: true, count: alerts.length, alerts, exempted, ...out };
 }
 
 /* ───────────── 수습 종료 — 본채용 판단 ───────────── */

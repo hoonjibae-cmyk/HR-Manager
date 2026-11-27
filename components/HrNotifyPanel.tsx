@@ -29,8 +29,17 @@ export interface NotifyPreview {
   contract: { count?: number; alerts?: any[] };
   /** `workday` 가 false 면 오늘은 쉬는 날이라 예정 시각에도 안 나간다(다음 평일에 나간다) */
   probation?: { count?: number; alerts?: any[]; workday?: boolean; channel?: string | null };
-  /** `window` = 오늘 함께 챙기는 날들. 비어 있으면 오늘이 주말·공휴일이라 아무것도 안 나간다 */
-  birthday: { count?: number; alerts?: any[]; window?: string[] };
+  /**
+   * `window` = 오늘 함께 챙기는 날들. 비어 있으면 오늘이 주말·공휴일이라 아무것도 안 나간다.
+   * `exemptDepts` = 생일 안내를 보내지 않는 부서(조교팀), `exempted` = 생일인데 그래서 뺀 사람
+   */
+  birthday: {
+    count?: number;
+    alerts?: any[];
+    window?: string[];
+    exemptDepts?: string[];
+    exempted?: Array<{ name: string; department: string | null; date: string }>;
+  };
   recipients: { total: number; userIds: string[]; warning: string | null };
   slack: boolean;
 }
@@ -312,6 +321,14 @@ export default function HrNotifyPanel({
           생일이 <b>토·일·공휴일</b>이면 <b>그 전 마지막 평일</b>에 미리 보냅니다(연휴면 연휴분을
           한 통에 모아 보냅니다). 그래서 <b>쉬는 날에는 알림이 나가지 않습니다</b>.
           직원 정보의 <b>생년월일</b>이 비어 있으면 그 사람은 빠집니다.
+          {/* 빼는 부서는 서버가 내려준다(lib/hr-notify.ts 의 BIRTHDAY_EXEMPT_DEPTS) — 여기에 다시 적으면 갈라진다 */}
+          {(pv.birthday.exemptDepts ?? []).length > 0 && (
+            <>
+              {" "}
+              <b>{(pv.birthday.exemptDepts ?? []).join("·")}</b> 소속은 생일 안내를 보내지 않습니다(대시보드의
+              「1주일 내 생일」에는 그대로 나옵니다).
+            </>
+          )}
         </p>
         <div className="mt-2 text-xs">
           {birthdayCount > 0 ? (
@@ -331,6 +348,13 @@ export default function HrNotifyPanel({
             <span className="text-slate-400">
               {p.birthdayLeadDays === 0 ? "오늘" : `${p.birthdayLeadDays}일 뒤`} 생일인 직원이 없습니다.
             </span>
+          )}
+          {/* 생일인데 부서 때문에 뺀 사람 — 조용히 빠지면 '왜 알림이 안 왔나' 를 알 수 없다 */}
+          {(pv.birthday.exempted ?? []).length > 0 && (
+            <div className="text-slate-400 mt-0.5">
+              알림에서 뺀 사람 —{" "}
+              {(pv.birthday.exempted ?? []).map((e: any) => `${e.name}(${e.department})`).join(", ")}
+            </div>
           )}
         </div>
       </div>
