@@ -1,0 +1,2 @@
+import { timingSafeEqual } from 'crypto';
+export function expenseIntegrationAuthorized(req:Request){const expected=process.env.MANAGEMENT_EXPENSE_SECRET,header=req.headers.get('authorization')||'';if(!expected||expected.length<32||!header.startsWith('Bearer '))return false;const given=Buffer.from(header.slice(7)),wanted=Buffer.from(expected);return given.length===wanted.length&&timingSafeEqual(given,wanted);}

@@ -140,9 +140,10 @@ const ymd = (d: Date) => d.toISOString().slice(0, 10);
  * 누계까지 함께 낸다. 충당금 누계는 **DC 전환 때 소급해서 넣어야 할 금액**이라
  * 그 달 금액만 보여주면 정작 필요한 숫자가 화면에 없다.
  */
-export async function severanceMonth(year: number, month: number) {
+export async function severanceMonth(year: number, month: number, readOnly = false) {
   const asOf = monthEnd(year, month);
-  const policy = await getSeverancePolicy();
+  const policy = readOnly ? await prisma.severancePolicy.findUnique({ where: { id: 1 } }) as (SeverancePolicy & { id: number }) | null : await getSeverancePolicy();
+  if (!policy) throw new Error("퇴직급여 정책이 준비되지 않았습니다.");
 
   // 그 달에 재직한 직원만 — 입사 전이거나 이미 퇴사한 사람은 적립할 것이 없다
   const emps = await prisma.employee.findMany({
